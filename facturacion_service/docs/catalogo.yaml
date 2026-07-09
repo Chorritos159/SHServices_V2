@@ -1,0 +1,13 @@
+serviceName: facturacion-service
+domain: finanzas
+businessCapability: Generación de comprobantes y cálculo de costos
+ownerTeam: contabilidad
+technicalOwner: tech-lead-core
+status: active
+criticality: high
+apiVersion: v1
+dependencies:
+  - postgres-db
+  - rabbitmq
+eventsPublished:
+  - FacturaGenerada.v1

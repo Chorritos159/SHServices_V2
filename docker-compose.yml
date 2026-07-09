@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  # ---------------- INFRAESTRUCTURA ----------------
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: adminpassword
+      POSTGRES_DB: shservices_db
+    ports:
+      - "5432:5432"
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d shservices_db"]
+      interval: 10s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-broker
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"   # Puerto de comunicación
+      - "15672:15672" # Panel web de administración
+    restart: always
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "q"]
+      interval: 10s
+      retries: 5
+
+  # ---------------- MICROSERVICIOS ----------------
+  api-gateway:
+    build: ./api_gateway
+    container_name: api-gateway
+    ports:
+      - "8000:80"
+    restart: always
+    depends_on:
+      - auth-service
+      - ticket-service
+      - almacen-service
+
+  auth-service:
+    build: ./auth_service
+    container_name: auth-service
+    ports:
+      - "8003:80"
+    restart: always
+
+  ticket-service:
+    build: ./ticket_service
+    container_name: ticket-service
+    ports:
+      - "8001:80"
+    restart: always
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  almacen-service:
+    build: ./almacen_service
+    container_name: almacen-service
+    ports:
+      - "8002:80"
+    restart: always
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+
+  diagnostico-service:
+    build: ./diagnostico_service
+    container_name: diagnostico-service
+    ports:
+      - "8005:80"
+    restart: always
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      almacen-service:
+        condition: service_started
+
+  facturacion-service:
+    build: ./facturacion_service
+    container_name: facturacion-service
+    ports:
+      - "8006:80"
+    restart: always
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  auditoria-service:
+    build: ./auditoria_service
+    container_name: auditoria-service
+    ports:
+      - "8007:80"
+    restart: always
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy

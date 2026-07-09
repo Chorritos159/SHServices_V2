@@ -1,0 +1,10 @@
+serviceName: almacen-service
+domain: logistica
+businessCapability: Control de inventario, consumo y reserva de repuestos
+ownerTeam: logistica-inventario
+technicalOwner: tech-lead-core
+status: active
+criticality: high
+apiVersion: v1
+dependencies:
+  - postgres-db

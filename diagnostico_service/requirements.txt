@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+sqlalchemy
+alembic
+httpx
+psycopg2-binary
+aio-pika

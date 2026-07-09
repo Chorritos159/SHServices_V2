@@ -1,0 +1,9 @@
+serviceName: auth-service
+domain: seguridad
+businessCapability: Autenticación de usuarios y emisión de tokens JWT
+ownerTeam: ciberseguridad
+technicalOwner: tech-lead-core
+status: active
+criticality: critical
+apiVersion: v1
+dependencies: []
