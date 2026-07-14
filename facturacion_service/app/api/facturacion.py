@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 import uuid
-import datetime
 from app.models.schemas import FacturaCreate, FacturaResponse
 from app.models.factura import FacturaDB
 from app.core.database import get_db
@@ -65,6 +64,6 @@ async def emitir_comprobante(
         idFactura=id_factura,
         idTicket=factura.idTicket,
         montoTotal=total_calculado,
-        fechaEmision=nueva_factura.fecha_emission.isoformat() + "Z" if hasattr(nueva_factura, 'fecha_emission') else datetime.datetime.utcnow().isoformat() + "Z",
+        fechaEmision=nueva_factura.fecha_emision.isoformat() + "Z",
         estadoPago="PAGADO"
     )

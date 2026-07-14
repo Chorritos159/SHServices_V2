@@ -1,112 +1,228 @@
-version: '3.8'
+# =====================================================================
+# SHServices V2 - Orquestación completa de microservicios
+# ---------------------------------------------------------------------
+# Reglas aplicadas:
+#  - SOLO api_gateway expone puerto al host (8000 -> 80).
+#  - restart: always en TODOS los servicios (auto-healing / caos).
+#  - depends_on con condition: service_healthy para BD y RabbitMQ.
+#  - Toxiproxy intercepta el tráfico Gateway -> ticket_service.
+# (Se omite "version:" a propósito: Compose v2 lo considera obsoleto.)
+# =====================================================================
+
+networks:
+  shservices-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
 
 services:
-  # ---------------- INFRAESTRUCTURA ----------------
+
+  # ------------------------------------------------------------------
+  # INFRAESTRUCTURA
+  # ------------------------------------------------------------------
   postgres-db:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: postgres-db
+    restart: always
     environment:
       POSTGRES_USER: admin
-      POSTGRES_PASSWORD: adminpassword
+      POSTGRES_PASSWORD: password123
       POSTGRES_DB: shservices_db
-    ports:
-      - "5432:5432"
-    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - shservices-net
+    # NOTA: sin "ports". La BD NO se expone al host en producción.
+    # (Si necesitas conectarte con DBeaver en local, descomenta:)
+    # ports:
+    #   - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin -d shservices_db"]
       interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 10s
 
   rabbitmq:
-    image: rabbitmq:3-management-alpine
-    container_name: rabbitmq-broker
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    restart: always
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - shservices-net
+    # Panel de administración web (útil para la demo del docente).
+    # Si tu regla estricta lo prohíbe, comenta este bloque.
     ports:
-      - "5672:5672"   # Puerto de comunicación
-      - "15672:15672" # Panel web de administración
-    restart: always
+      - "15672:15672"
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "q"]
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 15s
 
-  # ---------------- MICROSERVICIOS ----------------
+  # ------------------------------------------------------------------
+  # INGENIERÍA DEL CAOS: Toxiproxy
+  # Intercepta el tráfico hacia ticket_service para simular fallos.
+  # ------------------------------------------------------------------
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:latest
+    container_name: toxiproxy
+    restart: always
+    ports:
+      - "8474:8474"      # API de control (para inyectar toxinas)
+    volumes:
+      - ./toxiproxy/toxiproxy.json:/config/toxiproxy.json:ro
+    command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
+    networks:
+      - shservices-net
+
+  # ------------------------------------------------------------------
+  # API GATEWAY  (ÚNICO punto de entrada público)
+  # ------------------------------------------------------------------
   api-gateway:
-    build: ./api_gateway
+    build:
+      context: ./api_gateway
+      dockerfile: ../Dockerfile
     container_name: api-gateway
-    ports:
-      - "8000:80"
     restart: always
+    # Gunicorn gestiona múltiples workers Uvicorn para aprovechar varios núcleos
+    # bajo la prueba de estrés (regla: workers = 2*núcleos + 1). Sobrescribe el CMD
+    # del Dockerfile SOLO en el Gateway (el embudo). NO usar multi-worker en auditoría.
+    command: >
+      gunicorn app.main:app
+      --workers 4
+      --worker-class uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:80
+      --timeout 30
+    environment:
+      # Debe ser idéntica en auth-service y api-gateway o los tokens no validan.
+      JWT_SECRET_KEY: super_secreto_shservices_2026
+      CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8000:80"        # <-- ÚNICO mapeo al host
+    networks:
+      - shservices-net
     depends_on:
-      - auth-service
-      - ticket-service
-      - almacen-service
-
-  auth-service:
-    build: ./auth_service
-    container_name: auth-service
-    ports:
-      - "8003:80"
-    restart: always
-
-  ticket-service:
-    build: ./ticket_service
-    container_name: ticket-service
-    ports:
-      - "8001:80"
-    restart: always
-    depends_on:
-      postgres-db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  almacen-service:
-    build: ./almacen_service
-    container_name: almacen-service
-    ports:
-      - "8002:80"
-    restart: always
-    depends_on:
-      postgres-db:
-        condition: service_healthy
-
-  diagnostico-service:
-    build: ./diagnostico_service
-    container_name: diagnostico-service
-    ports:
-      - "8005:80"
-    restart: always
-    depends_on:
-      postgres-db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      almacen-service:
+      # service_started (no _healthy) para que el Gateway arranque
+      # aunque un microservicio esté caído (así pruebas el Circuit Breaker).
+      auth-service:
+        condition: service_started
+      toxiproxy:
         condition: service_started
 
-  facturacion-service:
-    build: ./facturacion_service
-    container_name: facturacion-service
-    ports:
-      - "8006:80"
+  # ------------------------------------------------------------------
+  # AUTH SERVICE  (genera los JWT) - sin BD ni RabbitMQ
+  # ------------------------------------------------------------------
+  auth-service:
+    build:
+      context: ./auth_service
+      dockerfile: ../Dockerfile
+    container_name: auth-service
     restart: always
+    environment:
+      # MISMA llave que api-gateway (imprescindible para que los JWT validen).
+      JWT_SECRET_KEY: super_secreto_shservices_2026
+    networks:
+      - shservices-net
+    # Expuesto para generar tokens desde su Swagger local (http://localhost:8003/docs).
+    # ⚠️ Solo para sustentación/demo. En producción real esto NO debe estar abierto.
+    ports:
+      - "8003:80"
+
+  # ------------------------------------------------------------------
+  # TICKET SERVICE  (CRUD tickets) - BD + RabbitMQ
+  # ------------------------------------------------------------------
+  ticket-service:
+    build:
+      context: ./ticket_service
+      dockerfile: ../Dockerfile
+    container_name: ticket-service
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    networks:
+      - shservices-net
     depends_on:
       postgres-db:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
-  auditoria-service:
-    build: ./auditoria_service
-    container_name: auditoria-service
-    ports:
-      - "8007:80"
+  # ------------------------------------------------------------------
+  # ALMACEN SERVICE  (inventario) - BD
+  # ------------------------------------------------------------------
+  almacen-service:
+    build:
+      context: ./almacen_service
+      dockerfile: ../Dockerfile
+    container_name: almacen-service
     restart: always
+    environment:
+      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
+    networks:
+      - shservices-net
     depends_on:
       postgres-db:
         condition: service_healthy
+
+  # ------------------------------------------------------------------
+  # DIAGNOSTICO SERVICE  (orquesta tickets<->almacen) - BD + RabbitMQ
+  # ------------------------------------------------------------------
+  diagnostico-service:
+    build:
+      context: ./diagnostico_service
+      dockerfile: ../Dockerfile
+    container_name: diagnostico-service
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    networks:
+      - shservices-net
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # ------------------------------------------------------------------
+  # FACTURACION SERVICE  (boletas) - BD + RabbitMQ
+  # ------------------------------------------------------------------
+  facturacion-service:
+    build:
+      context: ./facturacion_service
+      dockerfile: ../Dockerfile
+    container_name: facturacion-service
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    networks:
+      - shservices-net
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # ------------------------------------------------------------------
+  # AUDITORIA SERVICE  (consumidor de eventos) - RabbitMQ
+  # ------------------------------------------------------------------
+  auditoria-service:
+    build:
+      context: ./auditoria_service
+      dockerfile: ../Dockerfile
+    container_name: auditoria-service
+    restart: always
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    networks:
+      - shservices-net
+    depends_on:
       rabbitmq:
         condition: service_healthy

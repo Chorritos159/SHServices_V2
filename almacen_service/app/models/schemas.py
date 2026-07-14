@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 class ProductoCreate(BaseModel):
     codigo: str = Field(..., description="Código único del producto")
@@ -8,6 +8,7 @@ class ProductoCreate(BaseModel):
     stock_inicial: int = Field(..., ge=0, description="Cantidad física real")
 
 class ProductoResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)   # permite serializar el objeto ORM
     codigo: str
     nombre: str
     stock_disponible: int

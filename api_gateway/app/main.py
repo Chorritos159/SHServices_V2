@@ -1,9 +1,10 @@
-from fastapi import Depends
-from app.core.security import validar_token
+import os
 import uuid
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from app.core.security import validar_token
 from app.core.logger import get_logger
 from app.core.exceptions import global_exception_handler
 from app.api import health
@@ -17,17 +18,34 @@ app = FastAPI(
 logger = get_logger("api-gateway")
 app.add_exception_handler(Exception, global_exception_handler)
 
+# 1.b Política CORS para el frontend Next.js.
+# Orígenes explícitos (NUNCA "*" junto con allow_credentials=True: el navegador lo rechaza
+# y sería un agujero de seguridad). Se configura por variable de entorno CORS_ORIGINS.
+origenes_permitidos = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origenes_permitidos,
+    allow_credentials=True,   # necesario para cookies HttpOnly
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # El health check se deja sin token para que Kubernetes o Docker puedan revisarlo
 app.include_router(health.router, prefix="/api/v1")
 
 # 2. Mapa de Microservicios para Docker
 MICROSERVICIOS = {
-    "tickets": "http://ticket-service:80",
+    "tickets": "http://toxiproxy:8666",          # <-- vía Toxiproxy (Chaos Engineering)
     "almacen": "http://almacen-service:80",
     "auth": "http://auth-service:80",
     "diagnosticos": "http://diagnostico-service:80",
     "facturas": "http://facturacion-service:80"
 }
+
+# 2.b Política RBAC del Gateway.
+# La verificación de rol vive en el BACKEND (nunca confíes en que el frontend oculte botones).
+# Aquí: las operaciones de borrado sobre cualquier servicio exigen rol ADMIN.
+METODOS_SOLO_ADMIN = {"DELETE"}
 
 # 3. Middleware de Observabilidad (Genera el Rastro)
 @app.middleware("http")
@@ -49,16 +67,23 @@ async def correlation_id_middleware(request: Request, call_next):
     methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     dependencies=[Depends(validar_token)] # <-- AQUÍ ESTÁ EL CANDADO REAL
 )
-async def gateway_router(service: str, path: str, request: Request):
+async def gateway_router(service: str, path: str, request: Request, payload: dict = Depends(validar_token)):
     """Redirige el tráfico y protege el sistema si un microservicio cae."""
-    
+
     # Excepción para el servicio de Auth (Nadie tiene token antes de loguearse)
     if service == "auth":
         return JSONResponse(status_code=403, content={"error": "Petición directa al auth-service bloqueada. Use Swagger local por ahora."})
 
     if service not in MICROSERVICIOS:
         return JSONResponse(status_code=404, content={"error": "Servicio no registrado en el Gateway."})
-    
+
+    # RBAC: bloqueamos operaciones sensibles si el rol del token no es ADMIN.
+    if request.method in METODOS_SOLO_ADMIN and payload.get("rol") != "ADMIN":
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Permisos insuficientes: solo un ADMIN puede realizar esta operación."},
+        )
+
     url_destino = f"{MICROSERVICIOS[service]}/api/v1/{path}"
     correlation_id = request.state.correlation_id
     
@@ -81,7 +106,7 @@ async def gateway_router(service: str, path: str, request: Request):
             # Devuelve los datos transparentemente al frontend
             try:
                 data = response.json()
-            except:
+            except Exception:
                 data = response.text
                 
             return JSONResponse(status_code=response.status_code, content=data)

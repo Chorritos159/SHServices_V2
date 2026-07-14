@@ -6,7 +6,7 @@ from app.core.logger import get_logger
 
 # Usamos el nombre del servicio para identificar los logs
 logger = get_logger("auditoria-service")
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
 
 async def iniciar_consumidor():
     """Se conecta a RabbitMQ y escucha todos los eventos de tickets permanentemente."""

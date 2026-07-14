@@ -1,14 +1,16 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 import jwt
+import os
 import datetime
 from app.core.logger import get_logger
 
 router = APIRouter()
 logger = get_logger("auth-service")
 
-# La llave maestra (En producción se lee de variables de entorno)
-SECRET_KEY = "super_secreto_shservices_2026"
+# La llave maestra se lee de variable de entorno (JWT_SECRET_KEY).
+# DEBE ser idéntica a la del api_gateway o los tokens no validarán.
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super_secreto_shservices_2026")
 ALGORITHM = "HS256"
 
 class LoginRequest(BaseModel):

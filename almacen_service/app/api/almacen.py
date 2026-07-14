@@ -56,9 +56,9 @@ async def reservar_stock(reserva: ReservaRequest, request: Request, db: Session 
 
     # Buscar el repuesto en la sede solicitada
     item = db.query(ProductoDB).filter(
-        ProductoDB.codigo == reserva.codigo_producto, 
+        ProductoDB.codigo == reserva.codigo_producto,
         ProductoDB.sede == reserva.sede.upper()
-    ).first()
+    ).with_for_update().first()   # bloqueo pesimista: serializa reservas concurrentes (evita oversell)
 
     if not item:
         logger.error(f"❌ Reserva fallida: El producto {reserva.codigo_producto} no existe en {reserva.sede}")

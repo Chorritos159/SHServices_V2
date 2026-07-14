@@ -5,8 +5,8 @@ from app.core.logger import get_logger
 
 logger = get_logger("rabbitmq-publisher")
 
-# Usamos localhost para desarrollo local fuera de Docker
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+# Default apunta al contenedor 'rabbitmq' (Compose inyecta RABBITMQ_URL).
+RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
 
 async def publicar_evento(exchange_name: str, routing_key: str, mensaje: dict):
     """Publica un evento asíncrono en RabbitMQ para no bloquear el flujo."""
