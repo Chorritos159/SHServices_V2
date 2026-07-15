@@ -28,6 +28,7 @@ export default function TicketForm() {
     const documento = String(fd.get("documento_cliente"));
     const telefono = String(fd.get("telefono_cliente"));
     const equipo = String(fd.get("equipo") ?? "");
+    const serie = String(fd.get("numero_serie") ?? "");
     const falla = String(fd.get("caracteristicas_falla") ?? "");
 
     try {
@@ -37,6 +38,7 @@ export default function TicketForm() {
         telefono_cliente: telefono,
         tipoOperacion: String(fd.get("tipoOperacion")),
         equipo: esSoporte ? equipo : null,
+        numero_serie: esSoporte ? serie || null : null,
         caracteristicas_falla: esSoporte ? falla : null,
         precio_estimado: esSoporte ? Number(fd.get("precio_estimado") || 0) : null,
         prioridad: String(fd.get("prioridad")),
@@ -51,6 +53,7 @@ export default function TicketForm() {
           documento,
           telefono,
           equipo,
+          serie,
           falla,
         });
         setEstado({ tipo: "idle" });
@@ -98,7 +101,10 @@ export default function TicketForm() {
           <fieldset className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
             <legend className="px-2 text-sm font-semibold text-amber-300">Datos del equipo</legend>
             <div className="flex flex-col gap-3">
-              <Campo name="equipo" label="Equipo" placeholder="Lenovo ThinkPad P15 Gen 1" />
+              <div className="grid grid-cols-2 gap-3">
+                <Campo name="equipo" label="Equipo" placeholder="Lenovo ThinkPad P15 Gen 1" />
+                <Campo name="numero_serie" label="N° de serie (opcional)" placeholder="SN-XXXXXX" required={false} />
+              </div>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium text-slate-300">Falla / características</span>
                 <textarea

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { api } from "@/lib/api/client";
 import { extraerError } from "@/components/ui/FormControls";
-import type { TicketPendiente, DiagnosticoResponse } from "@/lib/types/backend";
+import type { TicketPendiente } from "@/lib/types/backend";
 import type { ComprobanteData } from "@/components/print/ComprobanteModal";
 
 /**
@@ -31,8 +31,9 @@ export default function CobroModal({
     setEnviando(true);
     setError(null);
     try {
-      const { data } = await api.post<DiagnosticoResponse & {
+      const { data } = await api.post<{
         idFactura: string; montoTotal: number; estadoPago: string; fechaEmision: string;
+        garantia?: { fecha_vencimiento?: string } | null;
       }>("/facturas", {
         idTicket: ticket.id,
         montoManoObra: Number(manoObra),
@@ -51,6 +52,7 @@ export default function CobroModal({
         metodoPago,
         estadoPago: data.estadoPago ?? "PAGADO",
         fecha: data.fechaEmision ?? new Date().toISOString(),
+        garantiaVence: data.garantia?.fecha_vencimiento ?? null,
       });
     } catch (err) {
       setError(extraerError(err));

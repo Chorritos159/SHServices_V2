@@ -39,6 +39,16 @@ export default function EntregasView() {
     cargar();
   }, [cargar]);
 
+  async function rechazar(t: TicketPendiente) {
+    if (!window.confirm(`¿Rechazar el presupuesto de ${t.id}? Se liberará el stock reservado.`)) return;
+    try {
+      await api.post(`/tickets/${t.id}/rechazar`);
+      cargar();
+    } catch {
+      window.alert("No se pudo rechazar el ticket.");
+    }
+  }
+
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-900/40">
       <header className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
@@ -82,12 +92,20 @@ export default function EntregasView() {
                     {t.precio_estimado != null ? `S/. ${t.precio_estimado.toFixed(2)}` : "—"}
                   </td>
                   <td className="px-5 py-2.5 text-right">
-                    <button
-                      onClick={() => setCobrar(t)}
-                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
-                    >
-                      Cobrar y Entregar
-                    </button>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => rechazar(t)}
+                        className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-red-800 hover:text-red-300"
+                      >
+                        Rechazar
+                      </button>
+                      <button
+                        onClick={() => setCobrar(t)}
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
+                      >
+                        Cobrar y Entregar
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -20,5 +20,10 @@ class TicketDB(Base):
     documento_cliente = Column(String, nullable=True)       # DNI / RUC
     telefono_cliente = Column(String, nullable=True)
     equipo = Column(String, nullable=True)                  # Marca/modelo del equipo
+    numero_serie = Column(String, nullable=True, index=True)  # serie (opcional) para garantías fiables
     caracteristicas_falla = Column(Text, nullable=True)     # Descripción larga de la falla
     precio_estimado = Column(Float, nullable=True)          # Presupuesto estimado (opcional)
+
+    # Repuestos reservados en el diagnóstico (JSON). Los usa la máquina de estados
+    # para CONFIRMAR (al entregar) o LIBERAR (al rechazar) el stock en almacén.
+    repuestos_reservados = Column(Text, nullable=True)

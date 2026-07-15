@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
     telefono_cliente: body.telefono_cliente,
     tipoOperacion: body.tipoOperacion,
     equipo: body.equipo || null,
+    numero_serie: body.numero_serie || null,
     caracteristicas_falla: body.caracteristicas_falla || null,
     precio_estimado: body.precio_estimado ?? null,
     prioridad: body.prioridad,

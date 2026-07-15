@@ -33,14 +33,15 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Best-effort: tras cobrar, marca el ticket como ENTREGADO (sale de la bandeja).
+  // Transición gobernada → ENTREGADO: el ticket_service CONFIRMA (consume) el stock
+  // reservado y genera la GARANTÍA de 90 días. Devolvemos la garantía al comprobante.
+  let garantia: unknown = null;
   try {
-    await gateway.patch(`/tickets/tickets/${encodeURIComponent(payload.idTicket)}`, {
-      estado: "ENTREGADO",
-    });
+    const res = await gateway.post(`/tickets/tickets/${encodeURIComponent(payload.idTicket)}/entregar`, {});
+    garantia = (res.data as { garantia?: unknown })?.garantia ?? null;
   } catch {
-    // La factura ya se emitió; no bloqueamos el éxito por el cambio de estado.
+    // La factura ya se emitió; no bloqueamos el éxito por el cierre del ticket.
   }
 
-  return NextResponse.json(data, { status: 201 });
+  return NextResponse.json({ ...(data as Record<string, unknown>), garantia }, { status: 201 });
 }
