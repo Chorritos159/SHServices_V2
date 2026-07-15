@@ -103,7 +103,7 @@ async def crear_ticket(
     evento_payload = {
         "evento": "TicketCreado.v1",
         "trace_id": correlation_id,
-        "datos": {"idTicket": ticket_id, "sede": sede}
+        "datos": {"idTicket": ticket_id, "sede": sede, "estado": estado_inicial}
     }
     background_tasks.add_task(
         publicar_evento, exchange_name="tickets.eventos", routing_key="ticket.creado", mensaje=evento_payload
