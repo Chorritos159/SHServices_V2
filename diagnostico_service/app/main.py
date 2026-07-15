@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from sqlalchemy import text
 from app.api import health, diagnostico
 from app.core.exceptions import global_exception_handler
 from app.core.logger import get_logger
@@ -7,6 +8,12 @@ from app.models.diagnostico import Base
 
 # Crea la tabla automáticamente
 Base.metadata.create_all(bind=engine)
+
+# Migración no destructiva: create_all NO altera tablas existentes, así que
+# añadimos las columnas nuevas de la Fase 3 si aún no existen (idempotente).
+with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE diagnosticos ADD COLUMN IF NOT EXISTS precio_reparacion DOUBLE PRECISION NOT NULL DEFAULT 0"))
+    conn.execute(text("ALTER TABLE diagnosticos ADD COLUMN IF NOT EXISTS repuestos_json TEXT"))
 
 app = FastAPI(
     title="Servicio de Diagnóstico Técnico",
