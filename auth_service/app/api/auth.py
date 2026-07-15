@@ -27,22 +27,25 @@ async def login(credenciales: LoginRequest, request: Request):
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
     
-    # Base de datos simulada de empleados
+    # Base de datos simulada de empleados: cada uno con su ROL y su SEDE.
+    # Roles del dominio: ADMIN (gobierna), CAJA (recepción/ventas), TECNICO (diagnóstico).
     usuarios_validos = {
-        "admin": "admin123",
-        "caja01": "caja123",
-        "tecnico01": "tecnico123"
+        "admin":     {"password": "admin123",   "rol": "ADMIN",   "sede": "LIMA"},
+        "caja01":    {"password": "caja123",     "rol": "CAJA",    "sede": "PIURA"},
+        "tecnico01": {"password": "tecnico123",  "rol": "TECNICO", "sede": "PIURA"},
     }
 
-    if usuarios_validos.get(credenciales.usuario) != credenciales.password:
+    empleado = usuarios_validos.get(credenciales.usuario)
+    if empleado is None or empleado["password"] != credenciales.password:
         logger.warning(f"Intento de login fallido para usuario: {credenciales.usuario}")
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
-    # Si es correcto, fabricamos el pasaporte (Token JWT)
+    # Si es correcto, fabricamos el pasaporte (Token JWT) con rol Y sede.
     tiempo_expiracion = datetime.datetime.utcnow() + datetime.timedelta(hours=2)
     payload = {
         "sub": credenciales.usuario,
-        "rol": "ADMIN" if credenciales.usuario == "admin" else "OPERADOR",
+        "rol": empleado["rol"],
+        "sede": empleado["sede"],
         "exp": tiempo_expiracion
     }
     
