@@ -32,6 +32,13 @@ export interface TicketPendiente {
   fecha_registro: string;
 }
 
+/** Usuario/empleado gestionado por el auth-service. */
+export interface Usuario {
+  usuario: string;
+  rol: "ADMIN" | "CAJA" | "TECNICO";
+  sede: string;
+}
+
 /** POST /api/v1/diagnosticos/ → diagnostico-service. */
 export interface DiagnosticoResponse {
   idDiagnostico: string;
