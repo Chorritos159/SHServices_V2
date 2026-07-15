@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from sqlalchemy import text
 from app.api import health, almacen
 from app.core.exceptions import global_exception_handler
 from app.core.logger import get_logger
@@ -7,6 +8,10 @@ from app.models.inventario import Base
 
 # Crear la tabla 'inventario' en Postgres si no existe
 Base.metadata.create_all(bind=engine)
+
+# Migración NO destructiva: agrega el precio de venta si aún no existe (idempotente).
+with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE inventario ADD COLUMN IF NOT EXISTS precio_unitario DOUBLE PRECISION NOT NULL DEFAULT 0"))
 
 app = FastAPI(
     title="Servicio de Almacén e Inventario",

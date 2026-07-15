@@ -49,6 +49,7 @@ async def crear_producto(producto: ProductoCreate, request: Request, db: Session
         sede=producto.sede.upper(),
         stock_disponible=producto.stock_inicial,
         stock_reservado=0,
+        precio_unitario=producto.precio_unitario,
     )
     db.add(nuevo_producto)
     db.commit()
@@ -86,10 +87,80 @@ async def reservar_stock(reserva: ReservaRequest, request: Request, db: Session 
     db.commit()
     
     logger.info(f"🔒 Reserva exitosa de {reserva.cantidad} {item.nombre}. Quedan {item.stock_disponible} disponibles.")
+    return _estado_stock("RESERVA_CONFIRMADA", item)
+
+
+def _buscar_bloqueado(db: Session, codigo: str, sede: str) -> ProductoDB:
+    """Busca un producto con bloqueo pesimista (serializa movimientos concurrentes)."""
+    item = db.query(ProductoDB).filter(
+        ProductoDB.codigo == codigo,
+        ProductoDB.sede == sede.upper(),
+    ).with_for_update().first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Producto no encontrado en esta sede.")
+    return item
+
+
+def _estado_stock(status: str, item: ProductoDB) -> dict:
     return {
-        "status": "RESERVA_CONFIRMADA",
+        "status": status,
         "producto": item.nombre,
         "sede": item.sede,
-        "stock_disponible_restante": item.stock_disponible,
-        "stock_bloqueado_reserva": item.stock_reservado
+        "stock_disponible": item.stock_disponible,
+        "stock_reservado": item.stock_reservado,
     }
+
+
+@router.post("/confirmar", tags=["Operaciones de Stock"])
+async def confirmar_stock(mov: ReservaRequest, request: Request, db: Session = Depends(get_db)):
+    """
+    FASE 2 del stock: CONSUME lo reservado (el repuesto sale físicamente al entregar).
+    Resta definitivamente de `stock_reservado`. No vuelve a `disponible`.
+    """
+    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
+    item = _buscar_bloqueado(db, mov.codigo_producto, mov.sede)
+
+    if item.stock_reservado < mov.cantidad:
+        raise HTTPException(status_code=400, detail="No hay suficiente stock reservado para confirmar.")
+
+    item.stock_reservado -= mov.cantidad
+    db.commit()
+    logger.info(f"✅ Confirmadas (consumidas) {mov.cantidad}x {item.codigo}. Reservado restante: {item.stock_reservado}.")
+    return _estado_stock("STOCK_CONFIRMADO", item)
+
+
+@router.post("/liberar", tags=["Operaciones de Stock"])
+async def liberar_stock(mov: ReservaRequest, request: Request, db: Session = Depends(get_db)):
+    """
+    Devuelve lo reservado a disponible (el cliente RECHAZÓ el presupuesto).
+    Mueve `reservado → disponible`.
+    """
+    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
+    item = _buscar_bloqueado(db, mov.codigo_producto, mov.sede)
+
+    if item.stock_reservado < mov.cantidad:
+        raise HTTPException(status_code=400, detail="No hay suficiente stock reservado para liberar.")
+
+    item.stock_reservado -= mov.cantidad
+    item.stock_disponible += mov.cantidad
+    db.commit()
+    logger.info(f"↩️ Liberadas {mov.cantidad}x {item.codigo}. Disponible: {item.stock_disponible}.")
+    return _estado_stock("STOCK_LIBERADO", item)
+
+
+@router.post("/descontar", tags=["Operaciones de Stock"])
+async def descontar_stock(mov: ReservaRequest, request: Request, db: Session = Depends(get_db)):
+    """
+    VENTA DIRECTA: descuenta de golpe de `disponible` (el cliente paga y se lleva ahora).
+    No pasa por reserva.
+    """
+    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
+    item = _buscar_bloqueado(db, mov.codigo_producto, mov.sede)
+
+    if item.stock_disponible < mov.cantidad:
+        raise HTTPException(status_code=400, detail="Stock insuficiente para la venta.")
+
+    item.stock_disponible -= mov.cantidad
+    db.commit()
+    logger.info(f"🛒 Venta directa: descontadas {mov.cantidad}x {item.codigo}. Disponible: {item.stock_disponible}.")
+    return _estado_stock("STOCK_DESCONTADO", item)
