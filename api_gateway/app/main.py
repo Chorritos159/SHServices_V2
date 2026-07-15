@@ -4,6 +4,7 @@ import httpx
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 from app.core.security import validar_token
 from app.core.logger import get_logger
 from app.core.exceptions import global_exception_handler
@@ -30,8 +31,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# El health check se deja sin token para que Kubernetes o Docker puedan revisarlo
+# El health check se deja sin token para que Kubernetes o Docker puedan revisarlo.
+# Se monta en /api/v1/health (compatibilidad) y en /health (usado por el HEALTHCHECK del Dockerfile).
 app.include_router(health.router, prefix="/api/v1")
+app.include_router(health.router)
+
+# Observabilidad: expone /metrics para Prometheus (endpoint público, fuera del candado JWT
+# porque el catch-all protegido vive bajo /api/v1/, no en la raíz).
+Instrumentator().instrument(app).expose(app)
 
 # 2. Mapa de Microservicios para Docker
 MICROSERVICIOS = {
@@ -39,7 +46,8 @@ MICROSERVICIOS = {
     "almacen": "http://almacen-service:80",
     "auth": "http://auth-service:80",
     "diagnosticos": "http://diagnostico-service:80",
-    "facturas": "http://facturacion-service:80"
+    "facturas": "http://facturacion-service:80",
+    "auditoria": "http://auditoria-service:80"   # <-- lectura de la traza de eventos
 }
 
 # 2.b Política RBAC del Gateway.
@@ -92,6 +100,13 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
     headers = dict(request.headers)
     headers["x-correlation-id"] = correlation_id
     headers.pop("host", None) # Evita conflictos de enrutamiento interno
+
+    # IDENTIDAD INYECTADA POR EL GATEWAY (separación de responsabilidades):
+    # el Gateway es el único que valida el JWT; los microservicios confían en
+    # estas cabeceras y NO vuelven a decodificar el token.
+    headers["x-user-sub"] = payload.get("sub", "")
+    headers["x-user-rol"] = payload.get("rol", "")
+    headers["x-user-sede"] = payload.get("sede", "")
     
     async with httpx.AsyncClient() as client:
         try:

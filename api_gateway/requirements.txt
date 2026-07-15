@@ -7,3 +7,4 @@ sqlalchemy
 alembic
 httpx
 PyJWT
+prometheus-fastapi-instrumentator
