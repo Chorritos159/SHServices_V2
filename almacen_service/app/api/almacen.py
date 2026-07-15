@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from app.models.schemas import ProductoCreate, ProductoResponse, ReservaRequest
+from app.models.schemas import ProductoCreate, ProductoResponse, ReservaRequest, ProductoInventario
 from app.models.inventario import ProductoDB
 from app.core.database import get_db
 from app.core.logger import get_logger
@@ -8,41 +8,52 @@ from app.core.logger import get_logger
 router = APIRouter()
 logger = get_logger("almacen-service")
 
-@router.post("/productos", response_model=ProductoResponse, status_code=201, tags=["Inventario"])
-async def crear_o_actualizar_producto(producto: ProductoCreate, request: Request, db: Session = Depends(get_db)):
-    """Ingresa un nuevo lote de repuestos o productos al almacén de una sede."""
+@router.get("/productos", response_model=list[ProductoInventario], tags=["Inventario"])
+async def listar_productos(request: Request, db: Session = Depends(get_db)):
+    """Devuelve TODO el inventario (para que el Admin no esté 'a ciegas')."""
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
-    
-    logger.info(f"Registrando inventario: {producto.nombre} en la sede {producto.sede}")
 
-    # Verificar si el producto ya existe en esa sede
-    producto_existente = db.query(ProductoDB).filter(
-        ProductoDB.codigo == producto.codigo, 
-        ProductoDB.sede == producto.sede
-    ).first()
+    productos = (
+        db.query(ProductoDB)
+        .order_by(ProductoDB.sede, ProductoDB.codigo)
+        .all()
+    )
+    logger.info(f"📋 Listado de inventario solicitado: {len(productos)} productos.")
+    return productos
 
-    if producto_existente:
-        # Si existe, sumamos al stock disponible
-        producto_existente.stock_disponible += producto.stock_inicial
-        db.commit()
-        db.refresh(producto_existente)
-        logger.info(f"🔄 Stock actualizado para {producto.codigo}. Nuevo disponible: {producto_existente.stock_disponible}")
-        return producto_existente
 
-    # Si no existe, lo creamos desde cero
+def _siguiente_codigo(db: Session) -> str:
+    """Genera el siguiente código secuencial REP-NNN mirando el máximo existente."""
+    codigos = db.query(ProductoDB.codigo).filter(ProductoDB.codigo.like("REP-%")).all()
+    numeros = []
+    for (c,) in codigos:
+        sufijo = c.split("-")[-1]
+        if sufijo.isdigit():
+            numeros.append(int(sufijo))
+    siguiente = (max(numeros) + 1) if numeros else 1
+    return f"REP-{siguiente:03d}"
+
+
+@router.post("/productos", response_model=ProductoResponse, status_code=201, tags=["Inventario"])
+async def crear_producto(producto: ProductoCreate, request: Request, db: Session = Depends(get_db)):
+    """Ingresa un producto nuevo al almacén. El código se autogenera (REP-001, REP-002…)."""
+    correlation_id = request.headers.get("x-correlation-id", "N/A")
+    logger.extra["correlation_id"] = correlation_id
+
+    codigo = _siguiente_codigo(db)
     nuevo_producto = ProductoDB(
-        codigo=producto.codigo,
+        codigo=codigo,
         nombre=producto.nombre,
         categoria=producto.categoria.upper(),
         sede=producto.sede.upper(),
         stock_disponible=producto.stock_inicial,
-        stock_reservado=0
+        stock_reservado=0,
     )
     db.add(nuevo_producto)
     db.commit()
     db.refresh(nuevo_producto)
-    logger.info(f"📦 Nuevo producto {producto.codigo} guardado en el inventario de {producto.sede}.")
+    logger.info(f"📦 Producto {codigo} ({producto.nombre}) creado en {nuevo_producto.sede}.")
     return nuevo_producto
 
 
