@@ -38,6 +38,21 @@ export interface TicketPendiente {
   fecha_registro: string;
 }
 
+/** GET /api/v1/tickets/garantias → ticket-service. */
+export interface Garantia {
+  id: string;
+  id_ticket: string;
+  documento_cliente: string | null;
+  equipo: string | null;
+  numero_serie: string | null;
+  descripcion: string | null;
+  fecha_entrega: string;
+  fecha_vencimiento: string;
+  dias: number;
+  vigente: boolean;
+  dias_restantes: number;
+}
+
 /** Usuario/empleado gestionado por el auth-service. */
 export interface Usuario {
   usuario: string;
