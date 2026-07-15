@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 class TicketCreate(BaseModel):
@@ -13,6 +13,7 @@ class TicketCreate(BaseModel):
     telefono_cliente: str = Field(..., min_length=6, description="Teléfono de contacto (obligatorio)")
     tipoOperacion: str = Field(..., description="Debe ser 'SOPORTE' o 'VENTA'")
     equipo: Optional[str] = Field(None, description="Marca/modelo del equipo (obligatorio en SOPORTE)")
+    numero_serie: Optional[str] = Field(None, description="Número de serie del equipo (opcional)")
     caracteristicas_falla: Optional[str] = Field(None, description="Descripción de la falla (obligatorio en SOPORTE)")
     precio_estimado: Optional[float] = Field(None, ge=0, description="Presupuesto estimado (opcional)")
     prioridad: str = Field("NORMAL", description="Nivel de prioridad: ALTA, MEDIA, NORMAL")
@@ -41,6 +42,7 @@ class TicketPendiente(BaseModel):
     tipo_operacion: str
     datos_equipo: Optional[str] = None
     equipo: Optional[str] = None
+    numero_serie: Optional[str] = None
     caracteristicas_falla: Optional[str] = None
     precio_estimado: Optional[float] = None
     sede: str
@@ -50,5 +52,30 @@ class TicketPendiente(BaseModel):
 
 
 class EstadoUpdate(BaseModel):
-    """Cambio de estado del ticket (ej. EN_COLA → DIAGNOSTICADO)."""
+    """Cambio de estado libre (bajo nivel; la vía gobernada son las transiciones)."""
     estado: str = Field(..., description="Nuevo estado del ticket")
+
+
+class RepuestoRef(BaseModel):
+    codigo_producto: str
+    cantidad: int = Field(..., gt=0)
+
+
+class DiagnosticarRequest(BaseModel):
+    """Repuestos reservados en el diagnóstico (se registran en el ticket para
+    confirmar/liberar su stock más adelante)."""
+    repuestos: List[RepuestoRef] = Field(default_factory=list)
+
+
+class GarantiaOut(BaseModel):
+    id: str
+    id_ticket: str
+    documento_cliente: Optional[str] = None
+    equipo: Optional[str] = None
+    numero_serie: Optional[str] = None
+    descripcion: Optional[str] = None
+    fecha_entrega: datetime
+    fecha_vencimiento: datetime
+    dias: int
+    vigente: bool
+    dias_restantes: int

@@ -1,15 +1,58 @@
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
-from app.models.schemas import TicketCreate, TicketResponse, TicketPendiente, EstadoUpdate
+from app.models.schemas import (
+    TicketCreate, TicketResponse, TicketPendiente, EstadoUpdate,
+    DiagnosticarRequest, GarantiaOut,
+)
 from app.models.ticket import TicketDB
+from app.models.garantia import GarantiaDB
 from app.core.database import get_db
 from app.core.logger import get_logger
 from app.core.rabbitmq import publicar_evento
 import uuid
-from datetime import datetime
+import json
+import httpx
+from datetime import datetime, timedelta
 
 router = APIRouter()
 logger = get_logger("ticket_service")
+
+# URL interna del almacén (red Docker). El ticket_service orquesta el stock aquí.
+ALMACEN_URL = "http://almacen-service:80/api/v1/almacen"
+DIAS_GARANTIA = 90  # regla de negocio estricta: 90 días exactos
+
+# Transiciones legales de la máquina de estados (centralizada en el backend).
+TRANSICIONES = {
+    "EN_COLA": {"EN_DIAGNOSTICO", "DIAGNOSTICADO", "RECHAZADO"},
+    "EN_DIAGNOSTICO": {"DIAGNOSTICADO", "RECHAZADO"},
+    "DIAGNOSTICADO": {"ENTREGADO", "RECHAZADO"},
+    "VENTA_REGISTRADA": {"ENTREGADO"},
+}
+
+
+def _validar_transicion(actual: str, destino: str):
+    if destino not in TRANSICIONES.get(actual, set()):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Transición ilegal: {actual} → {destino}.",
+        )
+
+
+async def _mover_stock(operacion: str, repuestos: list[dict], sede: str, correlation_id: str):
+    """Llama al almacén para confirmar/liberar cada repuesto reservado del ticket."""
+    if not repuestos:
+        return
+    async with httpx.AsyncClient() as client:
+        for r in repuestos:
+            try:
+                await client.post(
+                    f"{ALMACEN_URL}/{operacion}",
+                    json={"codigo_producto": r["codigo_producto"], "cantidad": r["cantidad"], "sede": sede},
+                    headers={"x-correlation-id": correlation_id},
+                    timeout=5.0,
+                )
+            except httpx.RequestError:
+                logger.error(f"No se pudo {operacion} stock de {r['codigo_producto']} (almacén inaccesible).")
 
 @router.post("/", response_model=TicketResponse, status_code=201)
 async def crear_ticket(
@@ -43,6 +86,7 @@ async def crear_ticket(
         tipo_operacion=ticket.tipoOperacion,
         datos_equipo=ticket.equipo,            # espejo legado
         equipo=ticket.equipo,
+        numero_serie=ticket.numero_serie,
         caracteristicas_falla=ticket.caracteristicas_falla,
         precio_estimado=ticket.precio_estimado,
         sede=sede,
@@ -141,3 +185,136 @@ async def actualizar_estado(
     db.refresh(ticket)
     logger.info(f"🔄 Ticket {ticket_id} actualizado a estado '{cambio.estado}'.")
     return ticket
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# MÁQUINA DE ESTADOS (centralizada en el backend). Cada transición valida que
+# sea legal y dispara los efectos de stock/garantía correspondientes.
+# ─────────────────────────────────────────────────────────────────────────
+
+def _obtener_ticket(db: Session, ticket_id: str) -> TicketDB:
+    ticket = db.query(TicketDB).filter(TicketDB.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado.")
+    return ticket
+
+
+@router.post("/{ticket_id}/tomar", response_model=TicketPendiente, tags=["Máquina de Estados"])
+async def tomar_ticket(ticket_id: str, request: Request, db: Session = Depends(get_db)):
+    """EN_COLA → EN_DIAGNOSTICO (el técnico toma la atención)."""
+    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
+    ticket = _obtener_ticket(db, ticket_id)
+    _validar_transicion(ticket.estado, "EN_DIAGNOSTICO")
+    ticket.estado = "EN_DIAGNOSTICO"
+    db.commit(); db.refresh(ticket)
+    return ticket
+
+
+@router.post("/{ticket_id}/diagnosticar", response_model=TicketPendiente, tags=["Máquina de Estados"])
+async def diagnosticar_ticket(
+    ticket_id: str, datos: DiagnosticarRequest, request: Request, db: Session = Depends(get_db)
+):
+    """
+    → DIAGNOSTICADO. Registra en el ticket los repuestos reservados (el stock ya
+    lo reservó el diagnostico_service) para poder CONFIRMAR/LIBERAR luego.
+    """
+    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
+    ticket = _obtener_ticket(db, ticket_id)
+    _validar_transicion(ticket.estado, "DIAGNOSTICADO")
+    ticket.repuestos_reservados = json.dumps([r.model_dump() for r in datos.repuestos])
+    ticket.estado = "DIAGNOSTICADO"
+    db.commit(); db.refresh(ticket)
+    logger.info(f"🩺 Ticket {ticket_id} → DIAGNOSTICADO ({len(datos.repuestos)} repuesto(s) reservado(s)).")
+    return ticket
+
+
+@router.post("/{ticket_id}/rechazar", response_model=TicketPendiente, tags=["Máquina de Estados"])
+async def rechazar_ticket(ticket_id: str, request: Request, db: Session = Depends(get_db)):
+    """→ RECHAZADO. El cliente no aceptó: LIBERA el stock reservado (vuelve a disponible)."""
+    correlation_id = request.headers.get("x-correlation-id", "N/A")
+    logger.extra["correlation_id"] = correlation_id
+    ticket = _obtener_ticket(db, ticket_id)
+    _validar_transicion(ticket.estado, "RECHAZADO")
+
+    repuestos = json.loads(ticket.repuestos_reservados or "[]")
+    await _mover_stock("liberar", repuestos, ticket.sede, correlation_id)
+
+    ticket.estado = "RECHAZADO"
+    db.commit(); db.refresh(ticket)
+    logger.info(f"🚫 Ticket {ticket_id} → RECHAZADO. Stock liberado.")
+    return ticket
+
+
+@router.post("/{ticket_id}/entregar", tags=["Máquina de Estados"])
+async def entregar_ticket(ticket_id: str, request: Request, db: Session = Depends(get_db)):
+    """
+    → ENTREGADO. Se cobró y se entrega: CONFIRMA (consume) el stock reservado y,
+    si es SOPORTE, genera automáticamente una GARANTÍA de 90 días exactos.
+    """
+    correlation_id = request.headers.get("x-correlation-id", "N/A")
+    logger.extra["correlation_id"] = correlation_id
+    ticket = _obtener_ticket(db, ticket_id)
+    _validar_transicion(ticket.estado, "ENTREGADO")
+
+    # Confirma (consume) los repuestos reservados en el diagnóstico.
+    repuestos = json.loads(ticket.repuestos_reservados or "[]")
+    await _mover_stock("confirmar", repuestos, ticket.sede, correlation_id)
+
+    ticket.estado = "ENTREGADO"
+
+    garantia_out = None
+    if ticket.tipo_operacion == "SOPORTE":
+        ahora = datetime.utcnow()
+        garantia = GarantiaDB(
+            id=f"GAR-{ticket.sede[:3]}-{str(uuid.uuid4())[:4].upper()}",
+            id_ticket=ticket.id,
+            documento_cliente=ticket.documento_cliente,
+            equipo=ticket.equipo,
+            numero_serie=ticket.numero_serie,
+            descripcion=ticket.caracteristicas_falla,
+            fecha_entrega=ahora,
+            fecha_vencimiento=ahora + timedelta(days=DIAS_GARANTIA),
+            dias=DIAS_GARANTIA,
+        )
+        db.add(garantia)
+        garantia_out = {"id": garantia.id, "fecha_vencimiento": garantia.fecha_vencimiento.isoformat() + "Z", "dias": DIAS_GARANTIA}
+
+    db.commit()
+    logger.info(f"📦 Ticket {ticket_id} → ENTREGADO. Stock confirmado. Garantía: {garantia_out}")
+    return {"id": ticket.id, "estado": "ENTREGADO", "garantia": garantia_out}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# CONSULTA DE GARANTÍAS (Recepción / Admin)
+# ─────────────────────────────────────────────────────────────────────────
+
+def _garantia_out(g: GarantiaDB) -> dict:
+    ahora = datetime.utcnow()
+    restantes = (g.fecha_vencimiento - ahora).days
+    return {
+        "id": g.id, "id_ticket": g.id_ticket, "documento_cliente": g.documento_cliente,
+        "equipo": g.equipo, "numero_serie": g.numero_serie, "descripcion": g.descripcion,
+        "fecha_entrega": g.fecha_entrega, "fecha_vencimiento": g.fecha_vencimiento, "dias": g.dias,
+        "vigente": g.fecha_vencimiento >= ahora, "dias_restantes": max(restantes, 0),
+    }
+
+
+@router.get("/garantias", response_model=list[GarantiaOut], tags=["Garantías"])
+async def listar_garantias(request: Request, db: Session = Depends(get_db)):
+    """Lista todas las garantías con su vigencia (para Recepción y Admin)."""
+    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
+    garantias = db.query(GarantiaDB).order_by(GarantiaDB.fecha_entrega.desc()).all()
+    return [_garantia_out(g) for g in garantias]
+
+
+@router.get("/garantias/por-documento/{documento}", response_model=list[GarantiaOut], tags=["Garantías"])
+async def garantias_por_documento(documento: str, request: Request, db: Session = Depends(get_db)):
+    """Busca garantías por DNI/RUC del cliente (para verificar si un equipo vuelve en garantía)."""
+    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
+    garantias = (
+        db.query(GarantiaDB)
+        .filter(GarantiaDB.documento_cliente == documento)
+        .order_by(GarantiaDB.fecha_entrega.desc())
+        .all()
+    )
+    return [_garantia_out(g) for g in garantias]
