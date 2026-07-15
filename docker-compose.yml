@@ -263,9 +263,41 @@ services:
     volumes:
       # Persiste dashboards y datasources entre reinicios.
       - grafana_data:/var/lib/grafana
+      # Provisiona automáticamente los datasources (Loki + Prometheus).
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
     ports:
       - "3000:3000"
     networks:
       - shservices-net
     depends_on:
       - prometheus
+      - loki
+
+  # ------------------------------------------------------------------
+  # OBSERVABILIDAD DE LOGS: Grafana Loki + Promtail
+  # Loki agrega los logs; Promtail los recolecta de TODOS los contenedores.
+  # ------------------------------------------------------------------
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: loki
+    restart: always
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - shservices-net
+    # (Opcional para depurar desde el host)
+    # ports:
+    #   - "3100:3100"
+
+  promtail:
+    image: grafana/promtail:2.9.8
+    container_name: promtail
+    restart: always
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      # Acceso a los logs y al socket para descubrir contenedores.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+    networks:
+      - shservices-net
+    depends_on:
+      - loki
