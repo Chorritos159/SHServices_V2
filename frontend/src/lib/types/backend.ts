@@ -8,6 +8,7 @@ export interface ProductoInventario {
   sede: string;
   stock_disponible: number;
   stock_reservado: number;
+  precio_unitario: number;
 }
 
 /** GET /api/v1/auditoria/eventos → auditoria-service. */
@@ -53,11 +54,40 @@ export interface Garantia {
   dias_restantes: number;
 }
 
+/** GET /api/v1/notificaciones/mis-alertas → notificacion-service. */
+export interface Notificacion {
+  id: number;
+  mensaje: string;
+  referencia: string | null;
+  evento: string | null;
+  created_at: string;
+}
+
 /** Usuario/empleado gestionado por el auth-service. */
 export interface Usuario {
   usuario: string;
   rol: "ADMIN" | "CAJA" | "TECNICO";
   sede: string;
+}
+
+/** Detalle de un repuesto usado en un diagnóstico. */
+export interface RepuestoDetalle {
+  codigo_repuesto: string;
+  descripcion: string;
+  cantidad: number;
+  precio_unitario: number;
+  subtotal: number;
+}
+
+/** GET /api/v1/diagnosticos/por-ticket/{id} → desglose para Caja. */
+export interface DiagnosticoDetalle {
+  idDiagnostico: string;
+  idTicket: string;
+  fallaDetectada: string;
+  manoObra: number;
+  totalRepuestos: number;
+  precioReparacion: number;
+  repuestos: RepuestoDetalle[];
 }
 
 /** POST /api/v1/diagnosticos/ → diagnostico-service. */

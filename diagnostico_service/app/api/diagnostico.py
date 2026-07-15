@@ -4,7 +4,7 @@ import httpx
 import json
 import uuid
 import datetime
-from app.models.schemas import DiagnosticoCreate, DiagnosticoResponse
+from app.models.schemas import DiagnosticoCreate, DiagnosticoResponse, DiagnosticoDetalle, RepuestoDetalle
 from app.models.diagnostico import DiagnosticoDB
 from app.core.database import get_db
 from app.core.logger import get_logger
@@ -69,6 +69,7 @@ async def registrar_diagnostico(
         id=id_diag,
         id_ticket=diagnostico.idTicket,
         falla_detectada=diagnostico.fallaDetectada,
+        mano_obra=diagnostico.mano_obra,
         precio_reparacion=diagnostico.precio_reparacion,
         repuestos_json=json.dumps([r.model_dump() for r in diagnostico.repuestos]),
         estado="DIAGNOSTICADO",
@@ -100,7 +101,40 @@ async def registrar_diagnostico(
         idDiagnostico=id_diag,
         idTicket=diagnostico.idTicket,
         estadoReserva=estado_reserva,
+        manoObra=diagnostico.mano_obra,
         precioReparacion=diagnostico.precio_reparacion,
         repuestosDescontados=len(diagnostico.repuestos),
         fecha=datetime.datetime.utcnow().isoformat() + "Z",
+    )
+
+
+@router.get("/por-ticket/{id_ticket}", response_model=DiagnosticoDetalle, tags=["Diagnóstico Técnico"])
+async def diagnostico_por_ticket(id_ticket: str, request: Request, db: Session = Depends(get_db)):
+    """Devuelve el desglose del diagnóstico de un ticket (para que Caja vea qué cobra)."""
+    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
+    diag = db.query(DiagnosticoDB).filter(DiagnosticoDB.id_ticket == id_ticket).first()
+    if not diag:
+        raise HTTPException(status_code=404, detail="No hay diagnóstico para este ticket.")
+
+    repuestos = []
+    total_repuestos = 0.0
+    for r in json.loads(diag.repuestos_json or "[]"):
+        subtotal = round(r.get("cantidad", 0) * r.get("precio_unitario", 0.0), 2)
+        total_repuestos += subtotal
+        repuestos.append(RepuestoDetalle(
+            codigo_repuesto=r.get("codigo_repuesto", ""),
+            descripcion=r.get("descripcion", ""),
+            cantidad=r.get("cantidad", 0),
+            precio_unitario=r.get("precio_unitario", 0.0),
+            subtotal=subtotal,
+        ))
+
+    return DiagnosticoDetalle(
+        idDiagnostico=diag.id,
+        idTicket=diag.id_ticket,
+        fallaDetectada=diag.falla_detectada,
+        manoObra=diag.mano_obra or 0.0,
+        totalRepuestos=round(total_repuestos, 2),
+        precioReparacion=diag.precio_reparacion or 0.0,
+        repuestos=repuestos,
     )

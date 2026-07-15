@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import Sidebar from "@/components/Sidebar";
+import NotificationBell from "@/components/NotificationBell";
 
 /**
  * Layout del área ADMIN. Doble candado de seguridad:
@@ -14,12 +15,17 @@ export default async function AdminLayout({
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
-  if (session.rol !== "ADMIN") redirect("/operador");
+  if (session.rol !== "ADMIN") redirect("/");
 
   return (
     <div className="flex min-h-screen">
       <Sidebar usuario={session.sub} />
-      <main className="flex-1 overflow-y-auto p-8">{children}</main>
+      <div className="flex flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center justify-end border-b border-slate-800 bg-slate-950/50 px-8">
+          <NotificationBell />
+        </header>
+        <main className="flex-1 overflow-y-auto p-8">{children}</main>
+      </div>
     </div>
   );
 }

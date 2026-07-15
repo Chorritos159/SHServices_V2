@@ -47,7 +47,8 @@ MICROSERVICIOS = {
     "auth": "http://auth-service:80",
     "diagnosticos": "http://diagnostico-service:80",
     "facturas": "http://facturacion-service:80",
-    "auditoria": "http://auditoria-service:80"   # <-- lectura de la traza de eventos
+    "auditoria": "http://auditoria-service:80",   # <-- lectura de la traza de eventos
+    "notificaciones": "http://notificacion-service:80"  # <-- alertas internas por rol
 }
 
 # 2.b Política RBAC del Gateway.

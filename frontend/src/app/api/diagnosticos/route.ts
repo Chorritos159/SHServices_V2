@@ -19,10 +19,11 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  // Fase 3: precio + ARRAY de repuestos. La `sede` la inyecta el Gateway (X-User-Sede).
+  // precio + mano de obra + ARRAY de repuestos (con precio). Sede la inyecta el Gateway.
   const payload = {
     idTicket: body.idTicket,
     fallaDetectada: body.fallaDetectada,
+    mano_obra: Number(body.mano_obra ?? 0),
     precio_reparacion: Number(body.precio_reparacion ?? 0),
     repuestos: Array.isArray(body.repuestos) ? body.repuestos : [],
   };

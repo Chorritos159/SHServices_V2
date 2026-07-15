@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.models.schemas import ProductoCreate, ProductoResponse, ReservaRequest, ProductoInventario
 from app.models.inventario import ProductoDB
 from app.core.database import get_db
 from app.core.logger import get_logger
+from app.core.rabbitmq import publicar_evento
 
 router = APIRouter()
 logger = get_logger("almacen-service")
@@ -36,7 +37,12 @@ def _siguiente_codigo(db: Session) -> str:
 
 
 @router.post("/productos", response_model=ProductoResponse, status_code=201, tags=["Inventario"])
-async def crear_producto(producto: ProductoCreate, request: Request, db: Session = Depends(get_db)):
+async def crear_producto(
+    producto: ProductoCreate,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """Ingresa un producto nuevo al almacén. El código se autogenera (REP-001, REP-002…)."""
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
@@ -55,6 +61,18 @@ async def crear_producto(producto: ProductoCreate, request: Request, db: Session
     db.commit()
     db.refresh(nuevo_producto)
     logger.info(f"📦 Producto {codigo} ({producto.nombre}) creado en {nuevo_producto.sede}.")
+
+    # Emite ProductoRegistrado → el servicio de notificaciones alertará al ADMIN.
+    evento_payload = {
+        "evento": "ProductoRegistrado.v1",
+        "trace_id": correlation_id,
+        "datos": {"codigo": codigo, "nombre": nuevo_producto.nombre, "sede": nuevo_producto.sede},
+    }
+    background_tasks.add_task(
+        publicar_evento, exchange_name="tickets.eventos",
+        routing_key="producto.registrado", mensaje=evento_payload,
+    )
+
     return nuevo_producto
 
 

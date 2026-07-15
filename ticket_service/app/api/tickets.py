@@ -103,7 +103,7 @@ async def crear_ticket(
     evento_payload = {
         "evento": "TicketCreado.v1",
         "trace_id": correlation_id,
-        "datos": {"idTicket": ticket_id, "sede": sede}
+        "datos": {"idTicket": ticket_id, "sede": sede, "estado": estado_inicial}
     }
     background_tasks.add_task(
         publicar_evento, exchange_name="tickets.eventos", routing_key="ticket.creado", mensaje=evento_payload
@@ -212,19 +212,36 @@ async def tomar_ticket(ticket_id: str, request: Request, db: Session = Depends(g
 
 @router.post("/{ticket_id}/diagnosticar", response_model=TicketPendiente, tags=["Máquina de Estados"])
 async def diagnosticar_ticket(
-    ticket_id: str, datos: DiagnosticarRequest, request: Request, db: Session = Depends(get_db)
+    ticket_id: str,
+    datos: DiagnosticarRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
 ):
     """
     → DIAGNOSTICADO. Registra en el ticket los repuestos reservados (el stock ya
     lo reservó el diagnostico_service) para poder CONFIRMAR/LIBERAR luego.
+    Emite 'ticket.listo' para que Recepción (CAJA) sepa que ya se puede cobrar.
     """
-    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
+    correlation_id = request.headers.get("x-correlation-id", "N/A")
+    logger.extra["correlation_id"] = correlation_id
     ticket = _obtener_ticket(db, ticket_id)
     _validar_transicion(ticket.estado, "DIAGNOSTICADO")
     ticket.repuestos_reservados = json.dumps([r.model_dump() for r in datos.repuestos])
     ticket.estado = "DIAGNOSTICADO"
     db.commit(); db.refresh(ticket)
     logger.info(f"🩺 Ticket {ticket_id} → DIAGNOSTICADO ({len(datos.repuestos)} repuesto(s) reservado(s)).")
+
+    # Notifica a CAJA que el equipo está listo para cobro y entrega.
+    evento_payload = {
+        "evento": "TicketListo.v1",
+        "trace_id": correlation_id,
+        "datos": {"idTicket": ticket.id, "sede": ticket.sede},
+    }
+    background_tasks.add_task(
+        publicar_evento, exchange_name="tickets.eventos",
+        routing_key="ticket.listo", mensaje=evento_payload,
+    )
     return ticket
 
 

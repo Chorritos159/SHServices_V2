@@ -12,17 +12,27 @@ const PRIORIDAD_COLOR: Record<string, string> = {
   BAJA: "bg-slate-500/15 text-slate-300",
 };
 
+const money = (n: number) => `S/. ${n.toFixed(2)}`;
+
+// Orden de la cola: primero por prioridad (ALTA arriba), luego por fecha desc.
+const RANK_PRIORIDAD: Record<string, number> = { ALTA: 0, MEDIA: 1, BAJA: 2 };
+function ordenarCola(a: TicketPendiente, b: TicketPendiente): number {
+  const pr = (RANK_PRIORIDAD[a.prioridad] ?? 9) - (RANK_PRIORIDAD[b.prioridad] ?? 9);
+  if (pr !== 0) return pr;
+  return new Date(b.fecha_registro).getTime() - new Date(a.fecha_registro).getTime();
+}
+
 interface RepuestoSel {
   codigo_repuesto: string;
   nombre: string;
   cantidad: number;
+  precio_unitario: number;
+  stock: number;
 }
 
 /**
- * Bandeja del técnico (rol TECNICO). GET de tickets EN_COLA + POST de diagnóstico
- * con precio y ARRAY de repuestos. Los repuestos se buscan consumiendo el GET de
- * almacén (filtrado por la sede del ticket); si un producto tiene stock 0, se
- * deshabilita.
+ * Bandeja del técnico (rol TECNICO). Buscador/autocomplete de repuestos (soporta
+ * inventario grande) + calculadora en vivo: Precio Reparación = Repuestos + Mano de Obra.
  */
 export default function DiagnosticoView() {
   const [tickets, setTickets] = useState<TicketPendiente[]>([]);
@@ -33,10 +43,9 @@ export default function DiagnosticoView() {
   const [estado, setEstado] = useState<Estado>({ tipo: "idle" });
   const [enviando, setEnviando] = useState(false);
 
-  // Repuestos elegidos + estado del picker.
   const [repuestos, setRepuestos] = useState<RepuestoSel[]>([]);
-  const [codigoSel, setCodigoSel] = useState("");
-  const [cantSel, setCantSel] = useState(1);
+  const [busqueda, setBusqueda] = useState("");
+  const [manoObra, setManoObra] = useState<number>(0);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -46,7 +55,7 @@ export default function DiagnosticoView() {
         api.get<TicketPendiente[]>("/tickets/pendientes"),
         api.get<ProductoInventario[]>("/almacen/productos"),
       ]);
-      setTickets(tk.data);
+      setTickets([...tk.data].sort(ordenarCola));
       setProductos(pr.data);
     } catch (err) {
       setErrorLista(
@@ -63,37 +72,55 @@ export default function DiagnosticoView() {
     cargar();
   }, [cargar]);
 
-  // Productos disponibles en la sede del ticket seleccionado.
   const productosSede = useMemo(
     () => (sel ? productos.filter((p) => p.sede === sel.sede) : []),
     [productos, sel],
   );
 
+  // Autocomplete: hasta 8 coincidencias por código o nombre que aún no estén agregadas.
+  const sugerencias = useMemo(() => {
+    const s = busqueda.trim().toLowerCase();
+    if (!s) return [];
+    const yaAgregados = new Set(repuestos.map((r) => r.codigo_repuesto));
+    return productosSede
+      .filter(
+        (p) =>
+          !yaAgregados.has(p.codigo) &&
+          (p.codigo.toLowerCase().includes(s) || p.nombre.toLowerCase().includes(s)),
+      )
+      .slice(0, 8);
+  }, [busqueda, productosSede, repuestos]);
+
+  // Desglose dinámico en vivo.
+  const totalRepuestos = useMemo(
+    () => repuestos.reduce((acc, r) => acc + r.cantidad * r.precio_unitario, 0),
+    [repuestos],
+  );
+  const precioReparacion = totalRepuestos + (Number(manoObra) || 0);
+
   function seleccionarTicket(t: TicketPendiente) {
     setSel(t);
     setEstado({ tipo: "idle" });
     setRepuestos([]);
-    setCodigoSel("");
-    setCantSel(1);
+    setBusqueda("");
+    setManoObra(0);
   }
 
-  function agregarRepuesto() {
-    const prod = productosSede.find((p) => p.codigo === codigoSel);
-    if (!prod) return;
-    if (cantSel < 1 || cantSel > prod.stock_disponible) return;
-    setRepuestos((prev) => {
-      const existente = prev.find((r) => r.codigo_repuesto === prod.codigo);
-      if (existente) {
-        return prev.map((r) =>
-          r.codigo_repuesto === prod.codigo
-            ? { ...r, cantidad: Math.min(r.cantidad + cantSel, prod.stock_disponible) }
-            : r,
-        );
-      }
-      return [...prev, { codigo_repuesto: prod.codigo, nombre: prod.nombre, cantidad: cantSel }];
-    });
-    setCodigoSel("");
-    setCantSel(1);
+  function agregarProducto(p: ProductoInventario) {
+    if (p.stock_disponible === 0) return;
+    setRepuestos((prev) => [
+      ...prev,
+      { codigo_repuesto: p.codigo, nombre: p.nombre, cantidad: 1, precio_unitario: p.precio_unitario, stock: p.stock_disponible },
+    ]);
+    setBusqueda("");
+  }
+
+  function cambiarCantidad(codigo: string, cantidad: number) {
+    setRepuestos((prev) =>
+      prev.map((r) =>
+        r.codigo_repuesto === codigo ? { ...r, cantidad: Math.max(1, Math.min(cantidad, r.stock)) } : r,
+      ),
+    );
   }
 
   function quitarRepuesto(codigo: string) {
@@ -110,16 +137,22 @@ export default function DiagnosticoView() {
       const { data } = await api.post<DiagnosticoResponse>("/diagnosticos", {
         idTicket: sel.id,
         fallaDetectada: String(fd.get("fallaDetectada")),
-        precio_reparacion: Number(fd.get("precio_reparacion") ?? 0),
-        repuestos: repuestos.map((r) => ({ codigo_repuesto: r.codigo_repuesto, cantidad: r.cantidad })),
+        mano_obra: Number(manoObra) || 0,
+        precio_reparacion: precioReparacion,
+        repuestos: repuestos.map((r) => ({
+          codigo_repuesto: r.codigo_repuesto,
+          cantidad: r.cantidad,
+          precio_unitario: r.precio_unitario,
+          descripcion: r.nombre,
+        })),
       });
       setEstado({
         tipo: "ok",
-        mensaje: `✅ ${data.idDiagnostico} · S/. ${data.precioReparacion} · ${data.repuestosDescontados} repuesto(s) descontado(s) · ${data.estadoReserva}`,
+        mensaje: `✅ ${data.idDiagnostico} · total ${money(data.precioReparacion)} · ${data.repuestosDescontados} repuesto(s) · ${data.estadoReserva}`,
       });
       setSel(null);
       setRepuestos([]);
-      cargar(); // refresca bandeja (el ticket sale) y stock
+      cargar();
     } catch (err) {
       setEstado({ tipo: "error", mensaje: extraerError(err) });
     } finally {
@@ -129,7 +162,7 @@ export default function DiagnosticoView() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
-      {/* Columna izquierda: bandeja de pendientes */}
+      {/* Columna izquierda: bandeja */}
       <section className="rounded-xl border border-slate-800 bg-slate-900/40">
         <header className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
           <h3 className="text-sm font-semibold text-slate-200">En cola{!cargando && ` · ${tickets.length}`}</h3>
@@ -168,7 +201,7 @@ export default function DiagnosticoView() {
                         </span>
                       </div>
                       <p className="mt-1 truncate text-sm text-slate-200">{t.datos_cliente}</p>
-                      <p className="truncate text-xs text-slate-500">{t.datos_equipo ?? "—"} · {t.sede}</p>
+                      <p className="truncate text-xs text-slate-500">{t.equipo ?? t.datos_equipo ?? "—"} · {t.sede}</p>
                     </button>
                   </li>
                 );
@@ -178,7 +211,7 @@ export default function DiagnosticoView() {
         </div>
       </section>
 
-      {/* Columna derecha: formulario de diagnóstico */}
+      {/* Columna derecha: diagnóstico */}
       <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">
         {!sel ? (
           <div className="flex h-full min-h-[200px] items-center justify-center text-center">
@@ -191,7 +224,7 @@ export default function DiagnosticoView() {
                 Diagnosticar <span className="font-mono text-cyan-300">{sel.id}</span>
               </h3>
               <p className="mt-1 text-sm text-slate-400">
-                {sel.datos_cliente} · {sel.datos_equipo ?? "sin equipo"} · sede {sel.sede}
+                {sel.datos_cliente} · {sel.equipo ?? sel.datos_equipo ?? "sin equipo"} · sede {sel.sede}
               </p>
             </div>
 
@@ -207,57 +240,37 @@ export default function DiagnosticoView() {
                 />
               </label>
 
-              <label className="flex max-w-[200px] flex-col gap-1 text-sm">
-                <span className="font-medium text-slate-300">Precio reparación (S/.)</span>
-                <input
-                  name="precio_reparacion"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  defaultValue={0}
-                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/30"
-                />
-              </label>
-
-              {/* Buscador dinámico de repuestos */}
+              {/* Buscador / autocomplete de repuestos */}
               <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-4">
-                <p className="mb-3 text-sm font-medium text-slate-300">Repuestos (descuentan stock de {sel.sede})</p>
-
-                <div className="flex flex-wrap items-end gap-2">
-                  <label className="flex flex-1 flex-col gap-1 text-xs">
-                    <span className="text-slate-400">Producto</span>
-                    <select
-                      value={codigoSel}
-                      onChange={(e) => setCodigoSel(e.target.value)}
-                      className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-500"
-                    >
-                      <option value="">— elegir —</option>
-                      {productosSede.map((p) => (
-                        <option key={p.codigo} value={p.codigo} disabled={p.stock_disponible === 0}>
-                          {p.codigo} · {p.nombre} (stock {p.stock_disponible})
-                          {p.stock_disponible === 0 ? " — SIN STOCK" : ""}
-                        </option>
+                <p className="mb-2 text-sm font-medium text-slate-300">Repuestos (descuentan stock de {sel.sede})</p>
+                <div className="relative">
+                  <input
+                    value={busqueda}
+                    onChange={(e) => setBusqueda(e.target.value)}
+                    placeholder="🔍 Buscar repuesto por código o nombre…"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 outline-none focus:border-cyan-500"
+                  />
+                  {sugerencias.length > 0 && (
+                    <ul className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 shadow-xl">
+                      {sugerencias.map((p) => (
+                        <li key={p.codigo}>
+                          <button
+                            type="button"
+                            onClick={() => agregarProducto(p)}
+                            disabled={p.stock_disponible === 0}
+                            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-slate-800 disabled:opacity-40"
+                          >
+                            <span className="text-slate-200">
+                              <span className="font-mono text-xs text-cyan-300">{p.codigo}</span> · {p.nombre}
+                            </span>
+                            <span className="shrink-0 text-xs text-slate-400">
+                              {money(p.precio_unitario)} · stock {p.stock_disponible}
+                            </span>
+                          </button>
+                        </li>
                       ))}
-                    </select>
-                  </label>
-                  <label className="flex w-20 flex-col gap-1 text-xs">
-                    <span className="text-slate-400">Cant.</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={cantSel}
-                      onChange={(e) => setCantSel(Number(e.target.value))}
-                      className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-cyan-500"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={agregarRepuesto}
-                    disabled={!codigoSel}
-                    className="rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-300 transition hover:bg-cyan-600/10 disabled:opacity-40"
-                  >
-                    + Agregar
-                  </button>
+                    </ul>
+                  )}
                 </div>
 
                 {productosSede.length === 0 && (
@@ -267,21 +280,53 @@ export default function DiagnosticoView() {
                 {repuestos.length > 0 && (
                   <ul className="mt-3 flex flex-col gap-1.5">
                     {repuestos.map((r) => (
-                      <li key={r.codigo_repuesto} className="flex items-center justify-between rounded-md bg-slate-900 px-3 py-1.5 text-sm">
-                        <span className="text-slate-200">
-                          <span className="font-mono text-xs text-cyan-300">{r.codigo_repuesto}</span> · {r.nombre} × {r.cantidad}
+                      <li key={r.codigo_repuesto} className="flex items-center gap-2 rounded-md bg-slate-900 px-3 py-1.5 text-sm">
+                        <span className="flex-1 truncate text-slate-200">
+                          <span className="font-mono text-xs text-cyan-300">{r.codigo_repuesto}</span> · {r.nombre}
                         </span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={r.stock}
+                          value={r.cantidad}
+                          onChange={(e) => cambiarCantidad(r.codigo_repuesto, Number(e.target.value))}
+                          className="w-14 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-center text-xs text-slate-100 outline-none focus:border-cyan-500"
+                        />
+                        <span className="w-20 text-right text-xs text-slate-300">{money(r.cantidad * r.precio_unitario)}</span>
                         <button
                           type="button"
                           onClick={() => quitarRepuesto(r.codigo_repuesto)}
                           className="text-xs text-red-400 hover:text-red-300"
                         >
-                          Quitar
+                          ✕
                         </button>
                       </li>
                     ))}
                   </ul>
                 )}
+              </div>
+
+              {/* Calculadora en vivo */}
+              <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-400">Repuestos ({repuestos.length})</span>
+                  <span className="font-medium text-slate-200">{money(totalRepuestos)}</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                  <span className="text-slate-400">Mano de obra (S/.)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={manoObra}
+                    onChange={(e) => setManoObra(Number(e.target.value))}
+                    className="w-28 rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-right text-slate-100 outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div className="mt-3 flex items-center justify-between border-t border-slate-800 pt-3">
+                  <span className="text-sm font-medium text-slate-300">Precio Reparación</span>
+                  <span className="text-xl font-bold text-cyan-300">{money(precioReparacion)}</span>
+                </div>
               </div>
 
               <Boton cargando={enviando}>Registrar diagnóstico</Boton>

@@ -170,10 +170,14 @@ services:
     restart: always
     environment:
       DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
+      # Publica ProductoRegistrado para el servicio de notificaciones.
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     networks:
       - shservices-net
     depends_on:
       postgres-db:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   # ------------------------------------------------------------------
@@ -235,6 +239,27 @@ services:
       rabbitmq:
         condition: service_healthy
       postgres-db:
+        condition: service_healthy
+
+  # ------------------------------------------------------------------
+  # NOTIFICACION SERVICE  (alertas internas por rol) - BD + RabbitMQ
+  # Consume ticket.creado y producto.registrado; enruta a ADMIN/TECNICO.
+  # ------------------------------------------------------------------
+  notificacion-service:
+    build:
+      context: ./notificacion_service
+      dockerfile: ../Dockerfile
+    container_name: notificacion-service
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    networks:
+      - shservices-net
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   # ------------------------------------------------------------------

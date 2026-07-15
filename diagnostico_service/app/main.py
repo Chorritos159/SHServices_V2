@@ -13,6 +13,7 @@ Base.metadata.create_all(bind=engine)
 # añadimos las columnas nuevas de la Fase 3 si aún no existen (idempotente).
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE diagnosticos ADD COLUMN IF NOT EXISTS precio_reparacion DOUBLE PRECISION NOT NULL DEFAULT 0"))
+    conn.execute(text("ALTER TABLE diagnosticos ADD COLUMN IF NOT EXISTS mano_obra DOUBLE PRECISION NOT NULL DEFAULT 0"))
     conn.execute(text("ALTER TABLE diagnosticos ADD COLUMN IF NOT EXISTS repuestos_json TEXT"))
 
 app = FastAPI(
