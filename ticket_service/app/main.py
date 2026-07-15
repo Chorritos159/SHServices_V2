@@ -1,6 +1,7 @@
 from app.core.database import engine
 from app.models.ticket import Base
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 from app.api import health, tickets
 from app.core.exceptions import global_exception_handler
 from app.core.logger import get_logger
@@ -19,6 +20,9 @@ app.add_exception_handler(Exception, global_exception_handler)
 app.include_router(health.router)
 # IMPORTANTE: Aquí conectamos el archivo que acabas de crear
 app.include_router(tickets.router, prefix="/api/v1/tickets", tags=["Tickets"])
+
+# Observabilidad: expone /metrics para que Prometheus haga scrape.
+Instrumentator().instrument(app).expose(app)
 
 @app.on_event("startup")
 async def startup_event():
