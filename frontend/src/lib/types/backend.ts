@@ -29,6 +29,7 @@ export interface TicketPendiente {
   tipo_operacion: string;
   datos_equipo: string | null;
   equipo: string | null;
+  numero_serie: string | null;
   caracteristicas_falla: string | null;
   precio_estimado: number | null;
   sede: string;

@@ -13,6 +13,7 @@ export interface ComprobanteData {
   metodoPago: string;
   estadoPago: string;
   fecha: string;
+  garantiaVence?: string | null; // fecha de vencimiento de la garantía (90 días)
 }
 
 const money = (n: number) => `S/. ${n.toFixed(2)}`;
@@ -49,6 +50,11 @@ export default function ComprobanteModal({ data, onClose }: { data: ComprobanteD
           {data.estadoPago} · ENTREGADO
         </span>
       </div>
+      {data.garantiaVence ? (
+        <p className="mt-2 text-center text-xs font-medium text-slate-600">
+          🛡️ Garantía de 90 días válida hasta el {new Date(data.garantiaVence).toLocaleDateString()}
+        </p>
+      ) : null}
       <p className="mt-2 text-center text-xs text-slate-500">¡Gracias por su preferencia!</p>
     </PrintableModal>
   );

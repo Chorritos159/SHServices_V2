@@ -9,6 +9,7 @@ export interface ReciboData {
   documento: string;
   telefono: string;
   equipo: string;
+  serie?: string;
   falla: string;
 }
 
@@ -35,6 +36,7 @@ export default function ReciboModal({ data, onClose }: { data: ReciboData; onClo
       <div className="my-2 border-t border-dashed border-slate-300 pt-2">
         <p className="mb-1 text-xs font-semibold uppercase text-slate-400">Equipo</p>
         <Fila label="Ingresado" value={data.equipo} />
+        {data.serie ? <Fila label="N° de serie" value={data.serie} /> : null}
         <div className="mt-1 text-sm">
           <span className="text-slate-500">Falla descrita:</span>
           <p className="mt-0.5 font-medium">{data.falla}</p>

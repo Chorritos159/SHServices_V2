@@ -7,10 +7,10 @@ import { gateway } from "@/lib/api/gateway";
  * Ruta DOBLADA → /diagnosticos/diagnosticos/ → diagnostico-service:80/api/v1/diagnosticos/.
  *
  * Orquesta 2 pasos (patrón BFF):
- *   1. POST del diagnóstico (si pide repuesto, el diagnostico-service reserva stock;
- *      si el almacén rechaza, devuelve 400 y NO seguimos).
- *   2. Best-effort: mueve el ticket EN_COLA → DIAGNOSTICADO para sacarlo de la bandeja.
- *      Si el PATCH falla, el diagnóstico YA se guardó, así que no rompemos el éxito.
+ *   1. POST del diagnóstico (el diagnostico-service RESERVA el stock de repuestos).
+ *   2. Transición gobernada en el backend: POST /{id}/diagnosticar, que registra los
+ *      repuestos reservados en el ticket (para confirmar/liberar luego) y lo mueve a
+ *      DIAGNOSTICADO. La máquina de estados vive en el ticket_service, no aquí.
  */
 export async function POST(request: NextRequest) {
   const session = await getSession();
@@ -38,10 +38,13 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Paso 2 (best-effort): cerrar el ticket para que salga de la bandeja de pendientes.
+  // Paso 2: transición gobernada → DIAGNOSTICADO (registra los repuestos en el ticket).
   try {
-    await gateway.patch(`/tickets/tickets/${encodeURIComponent(payload.idTicket)}`, {
-      estado: "DIAGNOSTICADO",
+    await gateway.post(`/tickets/tickets/${encodeURIComponent(payload.idTicket)}/diagnosticar`, {
+      repuestos: payload.repuestos.map((r: { codigo_repuesto: string; cantidad: number }) => ({
+        codigo_producto: r.codigo_repuesto,
+        cantidad: r.cantidad,
+      })),
     });
   } catch {
     // El diagnóstico ya se registró; no bloqueamos el éxito por el cambio de estado.
