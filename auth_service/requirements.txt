@@ -6,3 +6,4 @@ sqlalchemy
 alembic
 httpx
 PyJWT
+psycopg2-binary

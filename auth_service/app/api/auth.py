@@ -1,10 +1,13 @@
-from fastapi import APIRouter, HTTPException, Request, Security
+from fastapi import APIRouter, HTTPException, Request, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 import jwt
 import os
 import datetime
 from app.core.logger import get_logger
+from app.core.database import get_db
+from app.models.usuario import UsuarioDB
 
 router = APIRouter()
 logger = get_logger("auth-service")
@@ -17,16 +20,6 @@ ROLES_VALIDOS = {"ADMIN", "CAJA", "TECNICO"}
 
 # Esquema de seguridad Bearer (para proteger el alta de usuarios).
 security_scheme = HTTPBearer(auto_error=False)
-
-# "Base de datos" de empleados EN MEMORIA (nivel de módulo para compartirla entre
-# login y el alta de usuarios). Seed inicial + los que registre el ADMIN.
-# ⚠️ Se reinicia con el contenedor (no hay BD en auth-service). Para persistencia
-# habría que añadir DATABASE_URL + una tabla, igual que se hizo con auditoría.
-USUARIOS: dict[str, dict] = {
-    "admin":     {"password": "admin123",   "rol": "ADMIN",   "sede": "LIMA"},
-    "caja01":    {"password": "caja123",     "rol": "CAJA",    "sede": "PIURA"},
-    "tecnico01": {"password": "tecnico123",  "rol": "TECNICO", "sede": "PIURA"},
-}
 
 
 class LoginRequest(BaseModel):
@@ -73,51 +66,63 @@ def _exigir_admin(credentials: HTTPAuthorizationCredentials | None) -> dict:
 
 
 @router.post("/login", response_model=TokenResponse, tags=["Seguridad"])
-async def login(credenciales: LoginRequest, request: Request):
+async def login(credenciales: LoginRequest, request: Request, db: Session = Depends(get_db)):
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
 
-    empleado = USUARIOS.get(credenciales.usuario)
-    if empleado is None or empleado["password"] != credenciales.password:
+    empleado = db.query(UsuarioDB).filter(UsuarioDB.usuario == credenciales.usuario).first()
+    if empleado is None or empleado.password != credenciales.password:
         logger.warning(f"Intento de login fallido para usuario: {credenciales.usuario}")
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
 
     # Fabricamos el pasaporte (Token JWT) con rol Y sede.
     tiempo_expiracion = datetime.datetime.utcnow() + datetime.timedelta(hours=2)
     payload = {
-        "sub": credenciales.usuario,
-        "rol": empleado["rol"],
-        "sede": empleado["sede"],
+        "sub": empleado.usuario,
+        "rol": empleado.rol,
+        "sede": empleado.sede,
         "exp": tiempo_expiracion,
     }
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-    logger.info(f"🔑 Token JWT generado exitosamente para '{credenciales.usuario}'")
+    logger.info(f"🔑 Token JWT generado exitosamente para '{empleado.usuario}'")
 
     return TokenResponse(access_token=token, expires_in=7200)
 
 
 @router.get("/usuarios", response_model=list[UsuarioOut], tags=["Seguridad"])
-async def listar_usuarios(credentials: HTTPAuthorizationCredentials = Security(security_scheme)):
+async def listar_usuarios(
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Security(security_scheme),
+):
     """Lista los empleados (sin contraseñas). Solo ADMIN."""
     _exigir_admin(credentials)
-    return [{"usuario": u, "rol": d["rol"], "sede": d["sede"]} for u, d in USUARIOS.items()]
+    empleados = db.query(UsuarioDB).order_by(UsuarioDB.usuario).all()
+    return [{"usuario": e.usuario, "rol": e.rol, "sede": e.sede} for e in empleados]
 
 
 @router.post("/usuarios", response_model=UsuarioOut, status_code=201, tags=["Seguridad"])
 async def registrar_usuario(
     nuevo: UsuarioCreate,
+    db: Session = Depends(get_db),
     credentials: HTTPAuthorizationCredentials = Security(security_scheme),
 ):
-    """Da de alta un empleado con su rol y sede. Solo ADMIN."""
+    """Da de alta un empleado con su rol y sede en PostgreSQL. Solo ADMIN."""
     admin = _exigir_admin(credentials)
 
     rol = nuevo.rol.upper()
     if rol not in ROLES_VALIDOS:
         raise HTTPException(status_code=422, detail=f"Rol inválido. Use: {', '.join(sorted(ROLES_VALIDOS))}.")
-    if nuevo.usuario in USUARIOS:
+    if db.query(UsuarioDB).filter(UsuarioDB.usuario == nuevo.usuario).first():
         raise HTTPException(status_code=409, detail="El usuario ya existe.")
 
-    USUARIOS[nuevo.usuario] = {"password": nuevo.password, "rol": rol, "sede": nuevo.sede.upper()}
+    empleado = UsuarioDB(
+        usuario=nuevo.usuario,
+        password=nuevo.password,
+        rol=rol,
+        sede=nuevo.sede.upper(),
+    )
+    db.add(empleado)
+    db.commit()
     logger.info(f"👤 Usuario '{nuevo.usuario}' ({rol}/{nuevo.sede.upper()}) registrado por '{admin.get('sub')}'.")
 
-    return {"usuario": nuevo.usuario, "rol": rol, "sede": nuevo.sede.upper()}
+    return {"usuario": empleado.usuario, "rol": empleado.rol, "sede": empleado.sede}

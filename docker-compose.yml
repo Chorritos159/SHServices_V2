@@ -127,12 +127,17 @@ services:
     environment:
       # MISMA llave que api-gateway (imprescindible para que los JWT validen).
       JWT_SECRET_KEY: super_secreto_shservices_2026
+      # Persistencia de usuarios en PostgreSQL (seed automático si la tabla está vacía).
+      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
     networks:
       - shservices-net
     # Expuesto para generar tokens desde su Swagger local (http://localhost:8003/docs).
     # ⚠️ Solo para sustentación/demo. En producción real esto NO debe estar abierto.
     ports:
       - "8003:80"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
 
   # ------------------------------------------------------------------
   # TICKET SERVICE  (CRUD tickets) - BD + RabbitMQ
