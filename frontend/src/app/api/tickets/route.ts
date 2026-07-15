@@ -20,8 +20,12 @@ export async function POST(request: NextRequest) {
 
   const payload = {
     datosCliente: body.datosCliente,
+    documento_cliente: body.documento_cliente,
+    telefono_cliente: body.telefono_cliente,
     tipoOperacion: body.tipoOperacion,
-    datosEquipo: body.datosEquipo || null,
+    equipo: body.equipo || null,
+    caracteristicas_falla: body.caracteristicas_falla || null,
+    precio_estimado: body.precio_estimado ?? null,
     prioridad: body.prioridad,
   };
 

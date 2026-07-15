@@ -22,13 +22,25 @@ export async function POST(request: NextRequest) {
     sede: body.sede,
   };
 
+  let data: unknown;
   try {
-    const { data } = await gateway.post("/facturas/facturas/", payload);
-    return NextResponse.json(data, { status: 201 });
+    const res = await gateway.post("/facturas/facturas/", payload);
+    data = res.data;
   } catch (err) {
     const e = err as { status?: number; data?: unknown };
     return NextResponse.json(e.data ?? { error: "Fallo en el Gateway." }, {
       status: e.status ?? 500,
     });
   }
+
+  // Best-effort: tras cobrar, marca el ticket como ENTREGADO (sale de la bandeja).
+  try {
+    await gateway.patch(`/tickets/tickets/${encodeURIComponent(payload.idTicket)}`, {
+      estado: "ENTREGADO",
+    });
+  } catch {
+    // La factura ya se emitió; no bloqueamos el éxito por el cambio de estado.
+  }
+
+  return NextResponse.json(data, { status: 201 });
 }

@@ -20,12 +20,17 @@ export interface EventoAuditoria {
   datos: Record<string, unknown>;
 }
 
-/** GET /api/v1/tickets/pendientes → ticket-service (bandeja del técnico). */
+/** Ticket devuelto por el ticket-service (bandeja del técnico y de entregas). */
 export interface TicketPendiente {
   id: string;
   datos_cliente: string;
+  documento_cliente: string | null;
+  telefono_cliente: string | null;
   tipo_operacion: string;
   datos_equipo: string | null;
+  equipo: string | null;
+  caracteristicas_falla: string | null;
+  precio_estimado: number | null;
   sede: string;
   prioridad: string;
   estado: string;

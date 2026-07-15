@@ -6,7 +6,7 @@ export default async function CajaHomePage() {
 
   const tarjetas = [
     { href: "/caja/tickets", titulo: "Registro de Tickets", texto: "Crea atenciones de soporte o registra ventas." },
-    { href: "/caja/facturacion", titulo: "Facturación", texto: "Emite el comprobante de un ticket ya atendido." },
+    { href: "/caja/entregas", titulo: "Entregas y Cobros", texto: "Cobra y entrega los equipos diagnosticados; emite el comprobante." },
   ];
 
   return (

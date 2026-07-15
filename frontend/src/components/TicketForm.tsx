@@ -3,16 +3,18 @@
 import { useState } from "react";
 import { api } from "@/lib/api/client";
 import { Boton, Campo, Feedback, Select, extraerError, type Estado } from "@/components/ui/FormControls";
+import ReciboModal, { type ReciboData } from "@/components/print/ReciboModal";
 
 /**
- * Formulario de creación de tickets (rol CAJA).
- * La SEDE ya NO se pide: la pone el Gateway desde el token. Si es VENTA se
- * ocultan los campos del equipo (solo aplican a SOPORTE).
+ * Registro de tickets (rol CAJA) — estilo Help Desk.
+ * Datos del cliente y del equipo en secciones. En SOPORTE, al registrar con
+ * éxito se abre el "Ticket de Recojo" imprimible.
  */
 export default function TicketForm() {
   const [estado, setEstado] = useState<Estado>({ tipo: "idle" });
   const [cargando, setCargando] = useState(false);
   const [tipoOperacion, setTipoOperacion] = useState("SOPORTE");
+  const [recibo, setRecibo] = useState<ReciboData | null>(null);
   const esSoporte = tipoOperacion === "SOPORTE";
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -22,17 +24,39 @@ export default function TicketForm() {
     setEstado({ tipo: "idle" });
 
     const fd = new FormData(form);
+    const datosCliente = String(fd.get("datosCliente"));
+    const documento = String(fd.get("documento_cliente"));
+    const telefono = String(fd.get("telefono_cliente"));
+    const equipo = String(fd.get("equipo") ?? "");
+    const falla = String(fd.get("caracteristicas_falla") ?? "");
+
     try {
       const { data } = await api.post("/tickets", {
-        datosCliente: String(fd.get("datosCliente")),
+        datosCliente,
+        documento_cliente: documento,
+        telefono_cliente: telefono,
         tipoOperacion: String(fd.get("tipoOperacion")),
-        datosEquipo: esSoporte ? String(fd.get("datosEquipo") ?? "") : null,
+        equipo: esSoporte ? equipo : null,
+        caracteristicas_falla: esSoporte ? falla : null,
+        precio_estimado: esSoporte ? Number(fd.get("precio_estimado") || 0) : null,
         prioridad: String(fd.get("prioridad")),
       });
-      setEstado({
-        tipo: "ok",
-        mensaje: `✅ Ticket ${data.idTicket} creado · estado: ${data.estadoInicial} · ${data.tipoOperacionRegistrada}`,
-      });
+
+      if (esSoporte) {
+        // Abrimos el Ticket de Recojo imprimible con los datos capturados.
+        setRecibo({
+          idTicket: data.idTicket,
+          fecha: data.fechaRegistro ?? new Date().toISOString(),
+          cliente: datosCliente,
+          documento,
+          telefono,
+          equipo,
+          falla,
+        });
+        setEstado({ tipo: "idle" });
+      } else {
+        setEstado({ tipo: "ok", mensaje: `✅ Venta ${data.idTicket} registrada (${data.estadoInicial}).` });
+      }
       form.reset();
       setTipoOperacion("SOPORTE");
     } catch (err) {
@@ -43,32 +67,65 @@ export default function TicketForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex max-w-xl flex-col gap-4">
-      <Campo name="datosCliente" label="Datos del cliente" placeholder="DNI, RUC o nombre" />
+    <>
+      <form onSubmit={onSubmit} className="flex max-w-xl flex-col gap-5">
+        {/* Sección: datos del cliente */}
+        <fieldset className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+          <legend className="px-2 text-sm font-semibold text-amber-300">Datos del cliente</legend>
+          <div className="flex flex-col gap-3">
+            <Campo name="datosCliente" label="Nombre" placeholder="Juan Pérez / Empresa SAC" />
+            <div className="grid grid-cols-2 gap-3">
+              <Campo name="documento_cliente" label="DNI / RUC" placeholder="12345678" />
+              <Campo name="telefono_cliente" label="Teléfono" placeholder="987654321" />
+            </div>
+          </div>
+        </fieldset>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Select
-          name="tipoOperacion"
-          label="Tipo de operación"
-          options={["SOPORTE", "VENTA"]}
-          defaultValue="SOPORTE"
-          onChange={setTipoOperacion}
-        />
-        <Select
-          name="prioridad"
-          label="Prioridad"
-          options={["ALTA", "MEDIA", "BAJA"]}
-          defaultValue="MEDIA"
-        />
-      </div>
+        {/* Sección: operación */}
+        <div className="grid grid-cols-2 gap-4">
+          <Select
+            name="tipoOperacion"
+            label="Tipo de operación"
+            options={["SOPORTE", "VENTA"]}
+            defaultValue="SOPORTE"
+            onChange={setTipoOperacion}
+          />
+          <Select name="prioridad" label="Prioridad" options={["ALTA", "MEDIA", "BAJA"]} defaultValue="MEDIA" />
+        </div>
 
-      {/* Los datos del equipo solo aplican a SOPORTE. */}
-      {esSoporte && (
-        <Campo name="datosEquipo" label="Datos del equipo" placeholder="Lenovo ThinkPad P15 Gen 1" />
-      )}
+        {/* Sección: datos del equipo (solo SOPORTE) */}
+        {esSoporte && (
+          <fieldset className="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+            <legend className="px-2 text-sm font-semibold text-amber-300">Datos del equipo</legend>
+            <div className="flex flex-col gap-3">
+              <Campo name="equipo" label="Equipo" placeholder="Lenovo ThinkPad P15 Gen 1" />
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-300">Falla / características</span>
+                <textarea
+                  name="caracteristicas_falla"
+                  required
+                  rows={3}
+                  placeholder="No enciende, huele a quemado, pantalla con líneas…"
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/30"
+                />
+              </label>
+              <Campo
+                name="precio_estimado"
+                label="Precio estimado (S/.) — opcional"
+                type="number"
+                min={0}
+                required={false}
+                placeholder="0.00"
+              />
+            </div>
+          </fieldset>
+        )}
 
-      <Boton cargando={cargando}>Registrar ticket</Boton>
-      <Feedback estado={estado} />
-    </form>
+        <Boton cargando={cargando}>Registrar ticket</Boton>
+        <Feedback estado={estado} />
+      </form>
+
+      {recibo && <ReciboModal data={recibo} onClose={() => setRecibo(null)} />}
+    </>
   );
 }
