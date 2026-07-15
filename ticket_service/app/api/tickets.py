@@ -27,8 +27,8 @@ async def crear_ticket(
     if not sede:
         raise HTTPException(status_code=401, detail="Falta la sede en el token (cabecera X-User-Sede).")
 
-    if ticket.tipoOperacion == "SOPORTE" and not ticket.datosEquipo:
-        raise HTTPException(status_code=422, detail="Se requiere especificar el equipo para soporte.")
+    if ticket.tipoOperacion == "SOPORTE" and (not ticket.equipo or not ticket.caracteristicas_falla):
+        raise HTTPException(status_code=422, detail="En SOPORTE, el equipo y la falla son obligatorios.")
 
     # 1. Preparar los datos (la sede sale del token, no del cliente)
     ticket_id = f"TICK-{sede[:3]}-{str(uuid.uuid4())[:4].upper()}"
@@ -38,8 +38,13 @@ async def crear_ticket(
     nuevo_ticket_db = TicketDB(
         id=ticket_id,
         datos_cliente=ticket.datosCliente,
+        documento_cliente=ticket.documento_cliente,
+        telefono_cliente=ticket.telefono_cliente,
         tipo_operacion=ticket.tipoOperacion,
-        datos_equipo=ticket.datosEquipo,
+        datos_equipo=ticket.equipo,            # espejo legado
+        equipo=ticket.equipo,
+        caracteristicas_falla=ticket.caracteristicas_falla,
+        precio_estimado=ticket.precio_estimado,
         sede=sede,
         usuario_registro=usuario,
         prioridad=ticket.prioridad,
@@ -86,6 +91,33 @@ async def listar_pendientes(request: Request, db: Session = Depends(get_db)):
         .all()
     )
     logger.info(f"📋 Tickets pendientes (EN_COLA) solicitados: {len(tickets)}.")
+    return tickets
+
+
+@router.get("/", response_model=list[TicketPendiente], tags=["Tickets"])
+async def listar_tickets(request: Request, db: Session = Depends(get_db)):
+    """Lista TODOS los tickets (más recientes primero)."""
+    correlation_id = request.headers.get("x-correlation-id", "N/A")
+    logger.extra["correlation_id"] = correlation_id
+    tickets = db.query(TicketDB).order_by(TicketDB.fecha_registro.desc()).all()
+    return tickets
+
+
+@router.get("/por-estado/{estado}", response_model=list[TicketPendiente], tags=["Tickets"])
+async def listar_por_estado(estado: str, request: Request, db: Session = Depends(get_db)):
+    """
+    Filtra tickets por estado (ej. DIAGNOSTICADO para la bandeja de Entregas y Cobros).
+    Filtro por RUTA (no ?query) porque el Gateway descarta los query strings.
+    """
+    correlation_id = request.headers.get("x-correlation-id", "N/A")
+    logger.extra["correlation_id"] = correlation_id
+    tickets = (
+        db.query(TicketDB)
+        .filter(TicketDB.estado == estado.upper())
+        .order_by(TicketDB.fecha_registro.desc())
+        .all()
+    )
+    logger.info(f"📋 Tickets en estado '{estado.upper()}': {len(tickets)}.")
     return tickets
 
 

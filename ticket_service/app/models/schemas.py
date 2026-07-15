@@ -5,12 +5,16 @@ from datetime import datetime
 class TicketCreate(BaseModel):
     """
     Contrato de entrada para la creación de un Ticket o Venta.
-    OJO: `sede` y `usuarioRegistro` ya NO se piden aquí; el Gateway los inyecta
-    desde el JWT vía las cabeceras X-User-Sede / X-User-Sub.
+    OJO: `sede` y `usuarioRegistro` los inyecta el Gateway desde el JWT
+    (cabeceras X-User-Sede / X-User-Sub).
     """
-    datosCliente: str = Field(..., description="DNI, RUC o Nombre del cliente")
+    datosCliente: str = Field(..., description="Nombre del cliente")
+    documento_cliente: str = Field(..., min_length=6, description="DNI o RUC (obligatorio)")
+    telefono_cliente: str = Field(..., min_length=6, description="Teléfono de contacto (obligatorio)")
     tipoOperacion: str = Field(..., description="Debe ser 'SOPORTE' o 'VENTA'")
-    datosEquipo: Optional[str] = Field(None, description="Obligatorio si la operación es SOPORTE")
+    equipo: Optional[str] = Field(None, description="Marca/modelo del equipo (obligatorio en SOPORTE)")
+    caracteristicas_falla: Optional[str] = Field(None, description="Descripción de la falla (obligatorio en SOPORTE)")
+    precio_estimado: Optional[float] = Field(None, ge=0, description="Presupuesto estimado (opcional)")
     prioridad: str = Field("NORMAL", description="Nivel de prioridad: ALTA, MEDIA, NORMAL")
 
     @field_validator('tipoOperacion')
@@ -28,12 +32,17 @@ class TicketResponse(BaseModel):
 
 
 class TicketPendiente(BaseModel):
-    """Contrato de salida para el listado de tickets (ej. los EN_COLA del técnico)."""
+    """Contrato de salida para el listado/filtrado de tickets."""
     model_config = ConfigDict(from_attributes=True)   # serializa el objeto ORM directamente
     id: str
     datos_cliente: str
+    documento_cliente: Optional[str] = None
+    telefono_cliente: Optional[str] = None
     tipo_operacion: str
     datos_equipo: Optional[str] = None
+    equipo: Optional[str] = None
+    caracteristicas_falla: Optional[str] = None
+    precio_estimado: Optional[float] = None
     sede: str
     prioridad: str
     estado: str
