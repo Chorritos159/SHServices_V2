@@ -14,10 +14,15 @@ import type { LoginState, TokenResponse } from "@/lib/types/auth";
  *   1. POST directo al auth-service (8003) con { usuario, password }.
  *   2. Se verifica la firma del JWT recibido y se extrae el rol.
  *   3. Se guarda el JWT en una cookie HttpOnly (anti-XSS).
- *   4. Se redirige según el rol (ADMIN → /admin, OPERADOR → /operador).
+ *   4. Se redirige según el rol (ADMIN → /admin, CAJA → /caja, TECNICO → /tecnico).
  *
  * Compatible con `useActionState`: en error devuelve { error }.
  */
+function homeDeRol(rol: string): string {
+  if (rol === "ADMIN") return "/admin";
+  if (rol === "CAJA") return "/caja";
+  return "/tecnico";
+}
 export async function loginAction(
   _prev: LoginState,
   formData: FormData,
@@ -60,7 +65,7 @@ export async function loginAction(
   await createSession(token, expiresIn);
 
   // redirect() lanza una excepción de control: debe ir FUERA del try/catch.
-  redirect(payload.rol === "ADMIN" ? "/admin" : "/operador");
+  redirect(homeDeRol(payload.rol));
 }
 
 /** Cierra la sesión: borra la cookie y vuelve al login. */

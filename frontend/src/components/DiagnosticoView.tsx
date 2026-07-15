@@ -14,6 +14,14 @@ const PRIORIDAD_COLOR: Record<string, string> = {
 
 const money = (n: number) => `S/. ${n.toFixed(2)}`;
 
+// Orden de la cola: primero por prioridad (ALTA arriba), luego por fecha desc.
+const RANK_PRIORIDAD: Record<string, number> = { ALTA: 0, MEDIA: 1, BAJA: 2 };
+function ordenarCola(a: TicketPendiente, b: TicketPendiente): number {
+  const pr = (RANK_PRIORIDAD[a.prioridad] ?? 9) - (RANK_PRIORIDAD[b.prioridad] ?? 9);
+  if (pr !== 0) return pr;
+  return new Date(b.fecha_registro).getTime() - new Date(a.fecha_registro).getTime();
+}
+
 interface RepuestoSel {
   codigo_repuesto: string;
   nombre: string;
@@ -47,7 +55,7 @@ export default function DiagnosticoView() {
         api.get<TicketPendiente[]>("/tickets/pendientes"),
         api.get<ProductoInventario[]>("/almacen/productos"),
       ]);
-      setTickets(tk.data);
+      setTickets([...tk.data].sort(ordenarCola));
       setProductos(pr.data);
     } catch (err) {
       setErrorLista(

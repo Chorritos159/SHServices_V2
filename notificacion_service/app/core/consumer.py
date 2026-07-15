@@ -28,6 +28,7 @@ def _enrutar(routing_key: str, payload: dict):
     Reglas de enrutamiento por evento → rol:
       · ProductoRegistrado (producto.registrado) → ADMIN
       · TicketCreado en EN_COLA (ticket.creado)  → TECNICO
+      · TicketListo / DIAGNOSTICADO (ticket.listo) → CAJA
     """
     evento = payload.get("evento", "")
     datos = payload.get("datos") or {}
@@ -44,6 +45,11 @@ def _enrutar(routing_key: str, payload: dict):
             id_ticket = datos.get("idTicket", "?")
             _guardar("TECNICO", f"Nuevo equipo en cola: {id_ticket}", id_ticket, evento, trace_id)
 
+    elif routing_key == "ticket.listo":
+        # El equipo ya fue diagnosticado: Recepción puede cobrar y entregar.
+        id_ticket = datos.get("idTicket", "?")
+        _guardar("CAJA", f"Equipo listo para cobro y entrega: {id_ticket}", id_ticket, evento, trace_id)
+
 
 async def iniciar_consumidor():
     """Escucha eventos de RabbitMQ y genera notificaciones. Reintenta si se cae."""
@@ -56,8 +62,9 @@ async def iniciar_consumidor():
                     "tickets.eventos", aio_pika.ExchangeType.TOPIC, durable=True
                 )
                 queue = await channel.declare_queue("notificaciones_queue", durable=True)
-                # Escucha ambos eventos de interés.
+                # Escucha los eventos de interés.
                 await queue.bind(exchange, routing_key="ticket.creado")
+                await queue.bind(exchange, routing_key="ticket.listo")
                 await queue.bind(exchange, routing_key="producto.registrado")
 
                 logger.info("🎧 Servicio de Notificaciones conectado y escuchando eventos...")
