@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, DateTime
+from sqlalchemy import Column, String, Float, DateTime, Text
 from app.core.database import Base
 import datetime
 
@@ -12,4 +12,5 @@ class FacturaDB(Base):
     monto_repuestos = Column(Float, nullable=False)
     monto_total = Column(Float, nullable=False)
     metodo_pago = Column(String, nullable=False) # EFECTIVO, TARJETA, YAPE
+    detalle_json = Column(Text, nullable=True)  # líneas de detalle (POS): [{codigo, descripcion, cantidad, precio_unitario, subtotal}]
     fecha_emision = Column(DateTime, default=datetime.datetime.utcnow)
