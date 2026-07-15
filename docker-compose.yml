@@ -15,6 +15,7 @@ networks:
 
 volumes:
   postgres_data:
+  grafana_data:
 
 services:
 
@@ -221,8 +222,50 @@ services:
     restart: always
     environment:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      # Fase 4 (FF-DEP-07): auditoría persiste la traza de eventos en PostgreSQL.
+      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
     networks:
       - shservices-net
     depends_on:
       rabbitmq:
         condition: service_healthy
+      postgres-db:
+        condition: service_healthy
+
+  # ------------------------------------------------------------------
+  # OBSERVABILIDAD: Prometheus + Grafana
+  # ------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: always
+    volumes:
+      # Monta tu archivo de configuración dentro del contenedor (solo lectura).
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "9090:9090"
+    networks:
+      - shservices-net
+    depends_on:
+      - api-gateway
+      - ticket-service
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: always
+    environment:
+      # Credenciales del panel de Grafana para la sustentación.
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      # Persiste dashboards y datasources entre reinicios.
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - shservices-net
+    depends_on:
+      - prometheus

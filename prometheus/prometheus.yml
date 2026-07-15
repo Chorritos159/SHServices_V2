@@ -1,0 +1,26 @@
+# =====================================================================
+# Prometheus - Configuración de scraping para SHServices
+# Los targets usan el NOMBRE DE CONTENEDOR y el PUERTO INTERNO (80),
+# resueltos por el DNS interno de la red 'shservices-net'.
+# =====================================================================
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # El propio Prometheus (útil para verificar que vive)
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # API Gateway (expone /metrics gracias al Instrumentator)
+  - job_name: "api-gateway"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api-gateway:80"]
+
+  # Ticket Service
+  - job_name: "ticket-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["ticket-service:80"]

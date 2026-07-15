@@ -42,7 +42,7 @@ EXPOSE 80
 
 # ---- Health check nativo (sin curl; usamos el propio Python) --------
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 --start-period=15s \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:80/api/v1/health').status==200 else 1)"
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:80/health').status==200 else 1)"
 
 # ---- Arranque uniforme para los 7 servicios -------------------------
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]
