@@ -54,6 +54,15 @@ export interface Garantia {
   dias_restantes: number;
 }
 
+/** GET /api/v1/notificaciones/mis-alertas → notificacion-service. */
+export interface Notificacion {
+  id: number;
+  mensaje: string;
+  referencia: string | null;
+  evento: string | null;
+  created_at: string;
+}
+
 /** Usuario/empleado gestionado por el auth-service. */
 export interface Usuario {
   usuario: string;
