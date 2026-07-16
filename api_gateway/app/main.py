@@ -143,8 +143,11 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
                 
             return JSONResponse(status_code=response.status_code, content=data)
             
-        except httpx.ConnectError:
-            # ¡CIRCUIT BREAKER EN ACCIÓN! El microservicio está apagado.
+        except (httpx.ConnectError, httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError):
+            # ¡CIRCUIT BREAKER EN ACCIÓN! El microservicio está apagado o cortó la conexión.
+            # httpx.ReadError/RemoteProtocolError ocurren cuando el TCP con Toxiproxy se
+            # establece bien pero el upstream (el servicio real) cae a mitad de la respuesta
+            # (Toxiproxy resetea la conexión): sin esto, caía al handler genérico (500).
             CIRCUIT_BREAKER.labels(service=service, motivo="conexion").inc()
             logger.error(f"🚨 CIRCUIT BREAKER: El servicio '{service}' está inaccesible.")
             return JSONResponse(
