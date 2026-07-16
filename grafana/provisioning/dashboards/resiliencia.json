@@ -132,6 +132,28 @@
         }
       },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "" }, "colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "orientation": "horizontal" }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Circuit Breaker · estado por servicio (30s) — usar con pruebas/05_chaos_engineering.py",
+      "description": "CERRADO (verde) = el servicio responde con normalidad. ABIERTO (rojo) = el Gateway cortó peticiones hacia ese servicio en los últimos 30s (503/504). Es un breaker REACTIVO por-request, no una máquina de estados con half-open; este panel aproxima 'abierto' como 'tuvo cortes recientes'.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 21 },
+      "targets": [
+        { "refId": "A", "expr": "sum by (service) (increase(gateway_circuit_breaker_total[30s]))", "instant": true, "legendFormat": "{{service}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "range", "options": { "from": 0, "to": 0, "result": { "text": "CERRADO", "index": 0 } } },
+            { "type": "range", "options": { "from": 0.0001, "to": 1e9, "result": { "text": "ABIERTO", "index": 1 } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.0001 } ] },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "" }, "colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "orientation": "horizontal" }
     }
   ]
 }
