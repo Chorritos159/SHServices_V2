@@ -1,4 +1,7 @@
+import asyncio
 import os
+import random
+import time
 import uuid
 import httpx
 from fastapi import Depends, FastAPI, Request
@@ -8,6 +11,8 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app.core.security import validar_token
 from app.core.logger import get_logger
 from app.core.exceptions import global_exception_handler
+from app.core.resilience import CircuitBreaker
+from app.core import metricas
 from app.api import health
 
 # 1. Inicializar el Gateway
@@ -55,6 +60,132 @@ MICROSERVICIOS = {
 # La verificación de rol vive en el BACKEND (nunca confíes en que el frontend oculte botones).
 # Aquí: las operaciones de borrado sobre cualquier servicio exigen rol ADMIN.
 METODOS_SOLO_ADMIN = {"DELETE"}
+
+# 2.c Política de resiliencia (S34).
+# Timeout por operación (segundos): estricto para lecturas, algo más laxo para
+# escrituras que orquestan (diagnóstico llama a almacén). Un timeout corta la
+# espera para no "colgarse" ante una dependencia lenta.
+TIMEOUTS = {
+    "auth": 3.0, "tickets": 3.0, "almacen": 3.0, "diagnosticos": 5.0,
+    "facturas": 4.0, "auditoria": 3.0, "notificaciones": 3.0,
+}
+TIMEOUT_DEFAULT = 5.0
+
+# Un circuit breaker por servicio destino (aísla el estado de salud de cada uno).
+BREAKERS = {svc: CircuitBreaker(svc) for svc in MICROSERVICIOS}
+_aperturas_vistas = {svc: 0 for svc in MICROSERVICIOS}
+for _svc in MICROSERVICIOS:
+    metricas.CIRCUIT_STATE.labels(service=_svc).set(0)  # inicializa las series en CLOSED
+
+
+def _sincronizar_metricas_breaker(service: str, breaker: CircuitBreaker):
+    """Refleja el estado y las aperturas del breaker en Prometheus tras cada llamada."""
+    metricas.CIRCUIT_STATE.labels(service=service).set(breaker.estado_numerico())
+    nuevas = breaker.aperturas - _aperturas_vistas[service]
+    if nuevas > 0:
+        metricas.CIRCUIT_OPENS.labels(service=service).inc(nuevas)
+        _aperturas_vistas[service] = breaker.aperturas
+
+# Retry responsable (S34): reintentar NO es insistir ciegamente. Presupuesto de
+# 1 reintento corto, solo para errores transitorios, con backoff + JITTER
+# (el jitter evita que muchos clientes reintenten sincronizados).
+MAX_INTENTOS = 2
+
+def _backoff_jitter(intento: int) -> float:
+    return 0.2 * intento + random.uniform(0, 0.15)
+
+
+async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
+                            body: bytes, headers: dict, correlation_id: str) -> JSONResponse:
+    """Cadena de protección S34: circuit breaker -> timeout -> retry seguro -> fallback.
+
+    Devuelve siempre una respuesta HTTP semántica (nunca un 500 opaco ni un
+    cuelgue): 503 si el circuito está abierto o la dependencia cae, 504 si hay
+    timeout. Actualiza las métricas Prometheus de resiliencia.
+    """
+    breaker = BREAKERS[service]
+    timeout = TIMEOUTS.get(service, TIMEOUT_DEFAULT)
+    # Solo GET/HEAD son seguros de reintentar ante timeout/5xx (idempotentes).
+    # Un POST con timeout tiene efecto incierto: reintentarlo puede duplicar.
+    es_lectura = metodo in ("GET", "HEAD")
+
+    # Fail-fast: si el circuito está OPEN, ni siquiera golpeamos a la dependencia.
+    if not breaker.permite():
+        metricas.REQUESTS.labels(service=service, outcome="circuit_open").inc()
+        metricas.FALLBACKS.labels(service=service).inc()
+        _sincronizar_metricas_breaker(service, breaker)
+        logger.warning(
+            f"⛔ Circuito OPEN para '{service}': fail-fast (la dependencia está en recuperación).",
+        )
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Service Unavailable",
+                     "detalle": f"El servicio '{service}' está en recuperación (circuito abierto).",
+                     "circuito": "OPEN", "trace_id": correlation_id},
+            headers={"Retry-After": "5"},
+        )
+
+    intento = 0
+    async with httpx.AsyncClient() as client:
+        while True:
+            intento += 1
+            try:
+                response = await client.request(
+                    method=metodo, url=url_destino, content=body,
+                    headers=headers, timeout=timeout,
+                )
+                ok = response.status_code < 500       # 4xx = error de negocio, no de salud
+                breaker.registrar(ok)
+                _sincronizar_metricas_breaker(service, breaker)
+
+                if not ok and es_lectura and intento < MAX_INTENTOS and breaker.estado == "CLOSED":
+                    metricas.RETRIES.labels(service=service).inc()
+                    await asyncio.sleep(_backoff_jitter(intento))
+                    continue
+
+                outcome = "ok" if response.status_code < 400 else ("client_error" if ok else "server_error")
+                metricas.REQUESTS.labels(service=service, outcome=outcome).inc()
+                try:
+                    data = response.json()
+                except Exception:
+                    data = response.text
+                return JSONResponse(status_code=response.status_code, content=data)
+
+            except httpx.ConnectError:
+                breaker.registrar(False)
+                _sincronizar_metricas_breaker(service, breaker)
+                # El request nunca llegó: reintentar es seguro para cualquier método.
+                if intento < MAX_INTENTOS and breaker.estado == "CLOSED":
+                    metricas.RETRIES.labels(service=service).inc()
+                    await asyncio.sleep(_backoff_jitter(intento))
+                    continue
+                metricas.REQUESTS.labels(service=service, outcome="unreachable").inc()
+                metricas.FALLBACKS.labels(service=service).inc()
+                logger.error(
+                    f"🚨 CIRCUIT BREAKER: el servicio '{service}' está inaccesible (estado: {breaker.estado}).",                )
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "Service Unavailable",
+                             "detalle": f"El servicio '{service}' se encuentra temporalmente fuera de línea.",
+                             "circuito": breaker.estado, "trace_id": correlation_id},
+                )
+            except httpx.TimeoutException:
+                breaker.registrar(False)
+                _sincronizar_metricas_breaker(service, breaker)
+                if es_lectura and intento < MAX_INTENTOS and breaker.estado == "CLOSED":
+                    metricas.RETRIES.labels(service=service).inc()
+                    await asyncio.sleep(_backoff_jitter(intento))
+                    continue
+                metricas.TIMEOUTS.labels(service=service).inc()
+                metricas.REQUESTS.labels(service=service, outcome="timeout").inc()
+                metricas.FALLBACKS.labels(service=service).inc()
+                logger.error(
+                    f"⏱️ TIMEOUT: '{service}' superó su presupuesto de {timeout}s (circuito: {breaker.estado}).",                )
+                return JSONResponse(
+                    status_code=504,
+                    content={"error": "Gateway Timeout", "circuito": breaker.estado,
+                             "trace_id": correlation_id},
+                )
 
 # 3. Middleware de Observabilidad (Genera el Rastro)
 @app.middleware("http")
@@ -108,39 +239,6 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
     headers["x-user-sub"] = payload.get("sub", "")
     headers["x-user-rol"] = payload.get("rol", "")
     headers["x-user-sede"] = payload.get("sede", "")
-    
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.request(
-                method=request.method,
-                url=url_destino,
-                content=body,
-                headers=headers,
-                timeout=5.0 # Timeout estricto: Si tarda más de 5s, cortamos.
-            )
-            
-            # Devuelve los datos transparentemente al frontend
-            try:
-                data = response.json()
-            except Exception:
-                data = response.text
-                
-            return JSONResponse(status_code=response.status_code, content=data)
-            
-        except httpx.ConnectError:
-            # ¡CIRCUIT BREAKER EN ACCIÓN! El microservicio está apagado.
-            logger.error(f"🚨 CIRCUIT BREAKER: El servicio '{service}' está inaccesible.")
-            return JSONResponse(
-                status_code=503, 
-                content={
-                    "error": "Service Unavailable", 
-                    "detalle": f"El servicio '{service}' se encuentra temporalmente fuera de línea.",
-                    "trace_id": correlation_id
-                }
-            )
-        except httpx.TimeoutException:
-            logger.error(f"⏱️ TIMEOUT: El servicio '{service}' tardó demasiado en responder.")
-            return JSONResponse(
-                status_code=504, 
-                content={"error": "Gateway Timeout", "trace_id": correlation_id}
-            )
+
+    # Cadena de protección S34: circuit breaker + timeout + retry seguro + fallback.
+    return await _proxy_resiliente(service, url_destino, request.method, body, headers, correlation_id)

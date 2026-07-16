@@ -1,32 +1,65 @@
 # Matriz de Resiliencia — SHServices V2
 
 > Gate **G8 · FF-DEP-08** · Estrategias de tolerancia a fallos y Chaos Engineering
-> Última actualización: 2026-07-15
+> Última actualización: 2026-07-16 (Fase 1 del plan de integración S34)
 
 ## 1. Resumen de mecanismos
 
 | Mecanismo | Dónde | Qué protege |
 |---|---|---|
-| **Circuit Breaker** | API Gateway | Aísla un microservicio caído o lento |
+| **Circuit Breaker formal** (CLOSED/OPEN/HALF_OPEN) | API Gateway (`app/core/resilience.py`) | Aísla un microservicio caído o lento con fail-fast |
+| **Timeouts por operación** | API Gateway (3–5 s según servicio) | Corta la espera ante dependencias lentas |
+| **Retry + backoff + jitter** | API Gateway (máx. 1 reintento, solo lecturas) | Absorbe fallos transitorios sin duplicar escrituras |
+| **Fallback honesto** | API Gateway (503/504 + `circuito` + `Retry-After`) | Respuesta degradada semántica, nunca 500 opaco |
+| **Métricas de resiliencia** | Gateway → `/metrics` → Prometheus | Circuit state, retries, fallbacks, timeouts observables |
 | **Toxiproxy** | Tráfico Gateway → Tickets | Simula latencia/caídas (prueba del breaker) |
 | **`restart: always`** | Todos los contenedores | Auto-recuperación ante crash |
 | **Health checks** | Dockerfile + `/health` | Detección de servicios no saludables |
 | **`depends_on` + `condition`** | Compose | Orden de arranque controlado |
 | **`connect_robust` + retry loop** | Consumidor de Auditoría | Sobrevive a RabbitMQ no disponible |
 | **`pool_pre_ping` / `pool_recycle`** | Capa SQLAlchemy | Reconexión transparente a PostgreSQL |
-| **Gunicorn multi-worker** | API Gateway | Throughput y aislamiento bajo carga |
+| **Gunicorn (1 worker)** | API Gateway | Estado del circuit breaker y métricas consistentes (single-process) |
 
-## 2. Circuit Breaker (API Gateway)
+## 2. Circuit Breaker formal (API Gateway)
 
-El Gateway envuelve cada llamada saliente (`httpx`, `timeout=5s`) y traduce los fallos:
+Un breaker **por servicio destino** con estados reales (no solo traducción de excepciones):
 
-| Fallo del microservicio | Excepción | Respuesta del Gateway |
+- **CLOSED → OPEN**: ≥ 3 fallos consecutivos, o error rate ≥ 50 % en ventana de 30 s (mín. 4 muestras).
+- **OPEN**: fail-fast durante 15 s — el Gateway responde 503 con `Retry-After: 5` **sin llamar** a la dependencia enferma (le da aire para recuperarse).
+- **OPEN → HALF_OPEN**: al vencer el cooldown deja pasar **una sonda**; si sale bien → CLOSED, si falla → OPEN de nuevo.
+
+Cadena de protección por request: `circuit breaker → timeout por operación → retry (backoff+jitter, solo GET/HEAD) → fallback`.
+
+| Fallo del microservicio | Detección | Respuesta del Gateway |
 |---|---|---|
-| Servicio apagado / inaccesible | `httpx.ConnectError` | **503** Service Unavailable + `trace_id` |
-| Servicio lento (> 5 s) | `httpx.TimeoutException` | **504** Gateway Timeout + `trace_id` |
+| Circuito abierto (fail-fast) | `breaker.permite() == False` | **503** + `circuito: OPEN` + `Retry-After: 5` + `trace_id` |
+| Servicio apagado / inaccesible | `httpx.ConnectError` (reintento seguro: el request nunca salió) | **503** Service Unavailable + `circuito` + `trace_id` |
+| Servicio lento (supera su timeout) | `httpx.TimeoutException` (reintento solo lecturas) | **504** Gateway Timeout + `circuito` + `trace_id` |
+| Respuesta 5xx | `status >= 500` cuenta como fallo del breaker | Se propaga (con 1 reintento si es lectura) |
 
-Así, la caída de un servicio **no** propaga un error 500 opaco ni cuelga al cliente: se devuelve
-un código semántico y el `X-Correlation-ID` para rastrear el incidente.
+**Regla de retry responsable (S34):** un POST con timeout tiene efecto incierto — reintentarlo
+puede duplicar el ticket/la factura. Por eso solo se reintentan lecturas (GET/HEAD) ante
+timeout/5xx; un `ConnectError` sí se reintenta con cualquier método (el request nunca llegó).
+Backoff: `0.2·intento + jitter U(0, 0.15)` para desincronizar clientes.
+
+**Métricas expuestas en `/metrics`** (las scrapea el Prometheus ya configurado):
+`gateway_circuit_state` (0=CLOSED, 1=HALF_OPEN, 2=OPEN), `gateway_circuit_opens_total`,
+`gateway_proxy_requests_total{outcome}`, `gateway_retries_total`, `gateway_fallbacks_total`,
+`gateway_timeouts_total`.
+
+**Nota de diseño — por qué el Gateway corre con 1 worker:** el breaker y las
+métricas viven en memoria del proceso Python. Se probó primero con Gunicorn a
+4 workers (config original) y se detectó en vivo que el estado del circuito
+"parpadeaba" entre CLOSED/OPEN según a qué worker caía cada request/scrape,
+porque cada proceso mantiene su propio breaker y su propio registro
+Prometheus. Sin un backend de estado compartido (p. ej. Redis) entre
+procesos, un breaker por-worker no es un circuit breaker real: distintas
+fracciones del tráfico verían estados distintos de la misma dependencia. Se
+bajó a 1 worker para garantizar una fuente de verdad única y consistente;
+el Gateway es I/O-bound (reenvía llamadas async), así que el costo en
+throughput es limitado. Si la Fase 5 (carga 100k/500k/1M) revela que 1
+worker es insuficiente, la solución correcta es mover el estado del breaker
+a Redis (no volver a múltiples workers en memoria).
 
 ## 3. Chaos Engineering con Toxiproxy
 
@@ -34,13 +67,18 @@ un código semántico y el `X-Correlation-ID` para rastrear el incidente.
 - Toxiproxy reenvía a `ticket-service:80` y permite **inyectar toxinas** (latencia, corte de
   conexión, ancho de banda) a través de su API de control en `:8474`.
 - Sirve para **demostrar el Circuit Breaker en vivo**: al inyectar un corte, el Gateway responde
-  503; al inyectar latencia > 5 s, responde 504.
+  503; al inyectar latencia > 3 s (timeout de tickets), responde 504. Tras 3 fallos seguidos el
+  circuito pasa a **OPEN** (visible en `gateway_circuit_state`) y el Gateway hace fail-fast
+  durante 15 s; al quitar la toxina, la sonda de HALF_OPEN lo cierra solo.
 
 **Ejemplo (inyectar latencia de 8 s):**
 ```bash
 curl -X POST http://localhost:8474/proxies/ticket_proxy/toxics \
   -d '{"type":"latency","attributes":{"latency":8000}}'
-# → crear un ticket ahora devuelve 504 Gateway Timeout
+# → leer tickets devuelve 504; tras 3 seguidos, 503 con "circuito": "OPEN" (fail-fast)
+
+# quitar la toxina y esperar el cooldown (15 s) → la sonda HALF_OPEN recupera el circuito
+curl -X DELETE http://localhost:8474/proxies/ticket_proxy/toxics/latency_downstream
 ```
 
 ## 4. Matriz de dependencias y arranque

@@ -90,12 +90,18 @@ services:
       dockerfile: ../Dockerfile
     container_name: api-gateway
     restart: always
-    # Gunicorn gestiona múltiples workers Uvicorn para aprovechar varios núcleos
-    # bajo la prueba de estrés (regla: workers = 2*núcleos + 1). Sobrescribe el CMD
-    # del Dockerfile SOLO en el Gateway (el embudo). NO usar multi-worker en auditoría.
+    # 1 solo worker (S34, Fase 1): el circuit breaker y sus métricas viven en
+    # memoria del proceso. Con >1 worker Gunicorn, cada proceso tiene su propio
+    # breaker y su propio registro Prometheus, así que el estado observado
+    # (y el que scrapea Prometheus) depende de a qué worker cae cada request:
+    # el circuito "parpadea" entre CLOSED/OPEN sin ninguna dependencia real
+    # detrás. Sin un backend de estado compartido (Redis) entre workers, la
+    # consistencia del breaker importa más que el paralelismo de CPU del
+    # Gateway (I/O-bound: solo reenvía llamadas async). Revisar en Fase 5 si
+    # el throughput de carga lo exige (requeriría mover el estado a Redis).
     command: >
       gunicorn app.main:app
-      --workers 4
+      --workers 1
       --worker-class uvicorn.workers.UvicornWorker
       --bind 0.0.0.0:80
       --timeout 30

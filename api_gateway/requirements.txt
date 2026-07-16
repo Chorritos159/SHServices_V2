@@ -8,3 +8,4 @@ alembic
 httpx
 PyJWT
 prometheus-fastapi-instrumentator
+prometheus-client
