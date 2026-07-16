@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from sqlalchemy import text
+from prometheus_fastapi_instrumentator import Instrumentator
 from app.api import health, eventos
 from app.core.exceptions import global_exception_handler
 from app.core.logger import get_logger
@@ -36,6 +37,9 @@ logger = get_logger("auditoria-service")
 app.add_exception_handler(Exception, global_exception_handler)
 app.include_router(health.router)
 app.include_router(eventos.router, prefix="/api/v1/auditoria", tags=["Auditoría"])
+
+# Observabilidad (Fase 4, S34): expone /metrics para que Prometheus haga scrape.
+Instrumentator().instrument(app).expose(app)
 
 @app.on_event("startup")
 async def startup_event():

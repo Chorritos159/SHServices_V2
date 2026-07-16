@@ -36,3 +36,4 @@ El changelog explica qué cambió y a quién afecta. No es una bitácora extensa
 | :--- | :--- | :--- | :--- |
 | `v2.0` | Creación del servicio: notificaciones internas por rol (ADMIN/TECNICO/CAJA) dirigidas por sede | Release | Consumir `GET /api/v1/notificaciones` |
 | `v2.1` | feat(resiliencia S34, Fase 3): idempotencia del consumidor — índice único `(trace_id, evento, rol_destino)` evita duplicar una alerta ante un redelivery de RabbitMQ (ack perdido). Logs migrados al formato mínimo S34 (`service, correlationId, operation, event, result, durationMs`) | Compatible | Ninguna |
+| `v2.2` | feat(observabilidad S34, Fase 4): se conecta `prometheus-fastapi-instrumentator` (ya estaba en requirements.txt sin usar) — expone `/metrics` con throughput/latencia propios, scrapeado por Prometheus para el dashboard de resiliencia | Compatible | Ninguna |

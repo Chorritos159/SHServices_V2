@@ -1,7 +1,7 @@
 # Matriz de Resiliencia — SHServices V2
 
 > Gate **G8 · FF-DEP-08** · Estrategias de tolerancia a fallos y Chaos Engineering
-> Última actualización: 2026-07-16 (Fase 3 del plan de integración S34)
+> Última actualización: 2026-07-16 (Fase 4 del plan de integración S34)
 
 ## 1. Resumen de mecanismos
 
@@ -20,6 +20,8 @@
 | **Idempotencia de consumidores** | auditoria-service, notificacion-service (índice único) | Un redelivery de RabbitMQ no duplica la traza ni la alerta |
 | **Logs estructurados S34** | Los 9 servicios (`app/core/logger.py`) | `service, correlationId, operation, event, result, durationMs` — trazables y filtrables |
 | **Métricas de resiliencia** | Gateway → `/metrics` → Prometheus | Circuit state, retries, fallbacks, bulkhead, rate limit, timeouts observables |
+| **Dashboard de resiliencia** | Grafana (`grafana/dashboards/resiliencia_s34.json`, provisionado) | Circuit state, retry/fallback, bulkhead, rate limit, queue depth, consumer lag — todo en un solo lugar |
+| **Queue depth / consumer lag** | RabbitMQ (`rabbitmq_prometheus`, `/metrics/per-object`) | Visibilidad de cuánto trabajo pendiente/atascado hay por cola |
 | **Toxiproxy** | Tráfico Gateway → Tickets | Simula latencia/caídas (prueba del breaker) |
 | **`restart: always`** | Todos los contenedores | Auto-recuperación ante crash |
 | **Health checks** | Dockerfile + `/health` | Detección de servicios no saludables |
@@ -197,3 +199,47 @@ propaga como un error crudo ni se reintenta indefinidamente.
 - `POST /facturas` con el mismo `idTicket` dos veces → misma `idFactura`, 1 sola fila en `facturas`.
 - Insert directo duplicado en `auditoria_eventos` (simulando un redelivery) → rechazado por
   `ux_auditoria_trace_evento`, exactamente el `IntegrityError` que el consumidor ya sabe absorber.
+
+## 9. Dashboard de resiliencia en Grafana (Fase 4)
+
+Dashboard **provisionado por archivo** (`grafana/dashboards/resiliencia_s34.json`
++ `grafana/provisioning/dashboards/dashboards.yml`) — no se arma a mano en la
+UI, así que sobrevive a un `docker compose down/up` y queda versionado en git
+igual que el resto del sistema. Carpeta "SHServices" en Grafana, 6 filas / 16
+paneles:
+
+| Fila | Paneles | Qué evidencia |
+|---|---|---|
+| Throughput, latencia, error rate | req/s, p50/p95/p99, % error 5xx | Salud general del Gateway bajo cualquier condición |
+| Circuit Breaker | Estado por servicio (state-timeline CLOSED/HALF_OPEN/OPEN), aperturas acumuladas | El requisito original: "ver el estado del circuit breaker" |
+| Retry, fallback y timeouts | Tasa por servicio de cada uno | Cuánto está compensando el sistema fallos transitorios |
+| Contención (Fase 2) | Bulkhead en vuelo, rechazos por razón (saturado/shed), rate limit 429 | Si la contención está actuando o el sistema va camino a saturarse |
+| RabbitMQ: queue depth y consumer lag | `messages_ready`, `messages_unacked`, consumidores por cola | Trabajo pendiente/atascado en `auditoria_tickets_queue` y `notificaciones_queue` |
+| Desenlaces y sampling | `gateway_proxy_requests_total` por outcome, logs muestreados | Vista agregada de qué está pasando con cada request proxiado |
+
+**RabbitMQ (`rabbitmq_prometheus`):** habilitado vía
+`rabbitmq/enabled_plugins` montado en el contenedor. El endpoint por
+defecto (`/metrics`) solo trae **agregados globales sin desglose por cola**
+(decisión de diseño del plugin para no explotar cardinalidad); el
+desglose por cola que pide la S34 vive en **`/metrics/per-object`** — es
+el que se configuró en `prometheus.yml`.
+
+**Instrumentación añadida:** `auditoria-service` y `notificacion-service`
+ya tenían `prometheus-fastapi-instrumentator` en `requirements.txt` pero
+sin conectar; se activó (`Instrumentator().instrument(app).expose(app)`)
+para que aporten throughput/latencia propios, igual que `api-gateway` y
+`ticket-service`. `auth-service`, `almacen-service` y `diagnostico-service`
+quedan fuera de esta fase (no tienen la dependencia instalada) — no son
+necesarios para las evidencias de resiliencia que pide la S34 (circuit
+breaker/retry/bulkhead son conceptos exclusivos del Gateway; queue
+depth/consumer lag son de RabbitMQ).
+
+**Verificado:** los 6 targets de Prometheus (`api-gateway`, `ticket-service`,
+`auditoria-service`, `notificacion-service`, `rabbitmq`, `prometheus`) en
+estado `up`. Cada query de cada panel se probó a través del **datasource
+proxy de Grafana** (`/api/datasources/proxy/uid/prometheus/...`, el mismo
+camino que usa el frontend del dashboard) con datos reales generados en
+vivo: circuito de `tickets` en `OPEN` tras cortar el proxy con Toxiproxy,
+26 rechazos `shed_baja_prioridad` de una ráfaga concurrente a auditoría,
+16 rechazos de rate limit de una ráfaga de 60 peticiones simultáneas, y
+profundidad real de `auditoria_tickets_queue` / `notificaciones_queue`.

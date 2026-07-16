@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from sqlalchemy import text
+from prometheus_fastapi_instrumentator import Instrumentator
 from app.api import health, notificaciones
 from app.core.exceptions import global_exception_handler
 from app.core.logger import get_logger
@@ -37,6 +38,9 @@ app = FastAPI(
 app.add_exception_handler(Exception, global_exception_handler)
 app.include_router(health.router)
 app.include_router(notificaciones.router, prefix="/api/v1/notificaciones", tags=["Notificaciones"])
+
+# Observabilidad (Fase 4, S34): expone /metrics para que Prometheus haga scrape.
+Instrumentator().instrument(app).expose(app)
 
 
 @app.on_event("startup")

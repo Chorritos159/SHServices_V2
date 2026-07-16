@@ -24,3 +24,23 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["ticket-service:80"]
+
+  # Auditoría (traza de eventos) y Notificaciones (Fase 4, S34)
+  - job_name: "auditoria-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["auditoria-service:80"]
+
+  - job_name: "notificacion-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["notificacion-service:80"]
+
+  # RabbitMQ (plugin rabbitmq_prometheus): queue depth y consumer count
+  # para las evidencias de observabilidad de la S34 (pág. 16/18).
+  # /metrics/per-object (no /metrics) es el endpoint con desglose POR COLA
+  # (label "queue"); el endpoint por defecto solo trae agregados globales.
+  - job_name: "rabbitmq"
+    metrics_path: /metrics/per-object
+    static_configs:
+      - targets: ["rabbitmq:15692"]

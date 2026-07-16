@@ -28,7 +28,7 @@ deja evidencia.
 | Buffering + dropping/sampling | ✅ Fase 2 (sampling de logs; shedding de tráfico) | — |
 | Idempotencia | ✅ Fase 3 | — |
 | Logs estructurados S34 (operation/durationMs/event/result) | ✅ Fase 3 | — |
-| **Dashboard: circuit state, retry/fallback, queue depth, consumer lag** | ❌ | Fase 4 |
+| **Dashboard: circuit state, retry/fallback, queue depth, consumer lag** | ✅ Fase 4 | — |
 | Carga 100k/500k/1M + fallas controladas | ❌ | Fase 5 |
 | Ya presente: Toxiproxy, Loki+Promtail, Prometheus, Grafana, RBAC, Gunicorn | ✅ | reutilizar |
 
@@ -70,12 +70,25 @@ factura para el mismo ticket → misma `idFactura`, 1 sola fila. Insert
 directo duplicado en `auditoria_eventos` (simulando redelivery) → rechazado
 por el índice único `ux_auditoria_trace_evento`. Changelog por servicio.
 
-### FASE 4 — Dashboard de resiliencia en Grafana
-Provisionar un dashboard versionado con: throughput, latencia p50/p95/p99,
-error rate, **circuit breaker state**, retry/fallback count, bulkhead,
-**queue depth** y **consumer lag** de RabbitMQ (agregar `rabbitmq_exporter` o
-scrape del plugin Prometheus de RabbitMQ). Cierra la observabilidad que exige
-la pág. 16/18 de la S34.
+### FASE 4 — Dashboard de resiliencia en Grafana ✅ COMPLETA
+Dashboard versionado (`grafana/dashboards/resiliencia_s34.json`, provisionado
+por archivo — no se arma a mano en la UI) con 16 paneles en 6 filas:
+throughput, latencia p50/p95/p99 y error rate del Gateway; **estado del
+circuit breaker por servicio** (state-timeline CLOSED/HALF_OPEN/OPEN) y
+aperturas acumuladas; retry/fallback/timeout por servicio; bulkhead en vuelo
+y rechazos por razón (saturado vs. shed_baja_prioridad); rate limit global;
+**queue depth** (`rabbitmq_queue_messages_ready`) y **consumer lag**
+(`rabbitmq_queue_messages_unacked`) por cola vía el plugin
+`rabbitmq_prometheus` (endpoint `/metrics/per-object`, el único que trae el
+desglose por cola); desenlaces del proxy y logs muestreados. Se activó
+además `prometheus-fastapi-instrumentator` en auditoria-service y
+notificacion-service (ya tenían el paquete instalado pero sin conectar).
+**Verificado:** los 6 targets de Prometheus en estado `up`; las queries de
+cada panel devueltas por el datasource proxy de Grafana (mismo camino que
+usa el frontend) confirmadas con datos reales — circuito de `tickets` en
+OPEN tras la prueba de Toxiproxy, 26 rechazos `shed_baja_prioridad` de la
+ráfaga a auditoría, 16 rechazos de rate limit, colas `auditoria_tickets_queue`
+y `notificaciones_queue` con su profundidad real.
 
 ### FASE 5 — Carga y fallas controladas
 Scripts de carga progresiva (100k / 500k / 1M) que miden throughput, p95/p99,

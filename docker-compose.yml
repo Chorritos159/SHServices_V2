@@ -62,12 +62,17 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Falta RABBITMQ_DEFAULT_USER en .env}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Falta RABBITMQ_DEFAULT_PASS en .env}
+    volumes:
+      # Habilita el plugin rabbitmq_prometheus (S34, Fase 4): expone queue
+      # depth y consumer count en /metrics para que Prometheus los scrapee.
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     networks:
       - shservices-net
     # Panel de administración web (útil para la demo del docente).
     # Si tu regla estricta lo prohíbe, comenta este bloque.
     ports:
       - "15672:15672"
+      - "15692:15692"   # rabbitmq_prometheus (queue depth, consumer count)
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -309,8 +314,11 @@ services:
     volumes:
       # Persiste dashboards y datasources entre reinicios.
       - grafana_data:/var/lib/grafana
-      # Provisiona automáticamente los datasources (Loki + Prometheus).
+      # Provisiona automáticamente los datasources (Loki + Prometheus) y el
+      # dashboard de resiliencia (Fase 4, S34) — versionado en el repo, no
+      # se arma a mano en la UI.
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "3000:3000"
     networks:

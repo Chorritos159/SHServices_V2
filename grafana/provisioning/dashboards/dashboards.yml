@@ -1,0 +1,15 @@
+# Provisiona automáticamente el dashboard de resiliencia (S34, Fase 4)
+# desde un archivo versionado en el repo — no se arma a mano en la UI.
+apiVersion: 1
+
+providers:
+  - name: "SHServices"
+    orgId: 1
+    folder: "SHServices"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
