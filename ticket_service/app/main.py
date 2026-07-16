@@ -27,6 +27,7 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS caracteristicas_falla TEXT"))
     conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS precio_estimado DOUBLE PRECISION"))
     conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS repuestos_reservados TEXT"))
+    conn.execute(text("ALTER TABLE garantias ADD COLUMN IF NOT EXISTS monto_total DOUBLE PRECISION"))
 
 logger = get_logger("ticket-service")
 app.add_exception_handler(Exception, global_exception_handler)

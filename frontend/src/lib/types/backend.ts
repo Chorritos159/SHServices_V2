@@ -50,6 +50,7 @@ export interface Garantia {
   fecha_entrega: string;
   fecha_vencimiento: string;
   dias: number;
+  monto_total: number | null;
   vigente: boolean;
   dias_restantes: number;
 }
