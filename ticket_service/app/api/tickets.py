@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.models.schemas import (
     TicketCreate, TicketResponse, TicketPendiente, EstadoUpdate,
@@ -6,12 +8,14 @@ from app.models.schemas import (
 )
 from app.models.ticket import TicketDB
 from app.models.garantia import GarantiaDB
+from app.models.idempotencia import IdempotenciaDB
 from app.core.database import get_db
 from app.core.logger import get_logger
 from app.core.rabbitmq import publicar_evento
 import uuid
 import json
 import httpx
+import time
 from datetime import datetime, timedelta
 
 router = APIRouter()
@@ -63,6 +67,7 @@ async def crear_ticket(
 ):
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
+    inicio = time.monotonic()
 
     # IDENTIDAD desde el token (inyectada por el Gateway). Ya NO viene en el body.
     sede = request.headers.get("x-user-sede", "").upper()
@@ -72,6 +77,23 @@ async def crear_ticket(
 
     if ticket.tipoOperacion == "SOPORTE" and (not ticket.equipo or not ticket.caracteristicas_falla):
         raise HTTPException(status_code=422, detail="En SOPORTE, el equipo y la falla son obligatorios.")
+
+    # Idempotencia (S34, Idempotency-Key): a diferencia de facturas, un ticket
+    # NO tiene clave natural (el mismo cliente puede traer el mismo equipo en
+    # visitas distintas y legítimas) — se necesita un token opaco por intento
+    # de envío. Si el cliente lo manda y ya se procesó, se devuelve la MISMA
+    # respuesta sin crear un ticket nuevo. Si no lo manda, se comporta como
+    # antes (sin deduplicar) — el header es opt-in.
+    clave_idem = request.headers.get("idempotency-key")
+    if clave_idem:
+        previo = db.query(IdempotenciaDB).filter(IdempotenciaDB.clave == clave_idem).first()
+        if previo:
+            logger.info(
+                f"♻️ Idempotency-Key '{clave_idem}' ya procesada; se devuelve la respuesta original.",
+                extra={"campos": {"operation": "crear_ticket", "event": "TicketCreado.v1",
+                                   "result": "duplicado"}},
+            )
+            return JSONResponse(status_code=previo.status_code, content=json.loads(previo.respuesta_json))
 
     # 1. Preparar los datos (la sede sale del token, no del cliente)
     ticket_id = f"TICK-{sede[:3]}-{str(uuid.uuid4())[:4].upper()}"
@@ -97,7 +119,36 @@ async def crear_ticket(
     db.add(nuevo_ticket_db)
     db.commit()
     db.refresh(nuevo_ticket_db)
-    logger.info(f"💾 Ticket {ticket_id} guardado (sede {sede}, por {usuario}).")
+    duracion_ms = round((time.monotonic() - inicio) * 1000, 1)
+    logger.info(
+        f"💾 Ticket {ticket_id} guardado (sede {sede}, por {usuario}).",
+        extra={"campos": {"operation": "crear_ticket", "event": "TicketCreado.v1",
+                           "result": "ok", "durationMs": duracion_ms, "idTicket": ticket_id}},
+    )
+
+    respuesta = TicketResponse(
+        idTicket=ticket_id,
+        estadoInicial=estado_inicial,
+        fechaRegistro=nuevo_ticket_db.fecha_registro.isoformat() + "Z",
+        tipoOperacionRegistrada=ticket.tipoOperacion
+    )
+
+    # Guarda el registro de idempotencia DESPUÉS de confirmar el ticket, para
+    # no bloquear la creación si esta escritura tuviera algún problema.
+    if clave_idem:
+        db.add(IdempotenciaDB(
+            clave=clave_idem, operacion="crear_ticket",
+            status_code=201, respuesta_json=respuesta.model_dump_json(),
+        ))
+        try:
+            db.commit()
+        except IntegrityError:
+            # Carrera: la misma clave llegó dos veces en paralelo. El ticket
+            # de ESTA petición ya quedó creado (no se puede deshacer sin
+            # complicar la máquina de estados); se deja como está — el
+            # siguiente reintento con la misma clave sí encontrará un
+            # registro y no creará un tercero.
+            db.rollback()
 
     # 3. Disparar el Evento a RabbitMQ
     evento_payload = {
@@ -109,12 +160,7 @@ async def crear_ticket(
         publicar_evento, exchange_name="tickets.eventos", routing_key="ticket.creado", mensaje=evento_payload
     )
 
-    return TicketResponse(
-        idTicket=ticket_id,
-        estadoInicial=estado_inicial,
-        fechaRegistro=nuevo_ticket_db.fecha_registro.isoformat() + "Z",
-        tipoOperacionRegistrada=ticket.tipoOperacion
-    )
+    return respuesta
 
 
 @router.get("/pendientes", response_model=list[TicketPendiente], tags=["Tickets"])

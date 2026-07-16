@@ -38,3 +38,4 @@ El changelog explica qué cambió y a quién afecta. No es una bitácora extensa
 | `v1.2` | Mejora del servicio de ticket | Compatible | Opcional |
 | `v1.3` | Flujo de tickets + notas de venta ok | Compatible | Opcional |
 | `v2.0` | Adaptación a V2 (delegando facturación y diagnóstico a nuevos ms) | Breaking | Cambiar flujos a nuevos microservicios |
+| `v2.1` | feat(resiliencia S34, Fase 3): idempotencia en `POST /tickets` vía cabecera `Idempotency-Key` opt-in — un reintento con la misma clave devuelve el ticket ya creado en vez de duplicarlo (no hay clave natural: el mismo cliente puede traer el mismo equipo en visitas legítimas distintas). Logs migrados al formato mínimo S34 | Compatible | Opcional: enviar `Idempotency-Key` para que los reintentos sean seguros |

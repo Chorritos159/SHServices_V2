@@ -1,7 +1,7 @@
 # Matriz de Resiliencia — SHServices V2
 
 > Gate **G8 · FF-DEP-08** · Estrategias de tolerancia a fallos y Chaos Engineering
-> Última actualización: 2026-07-16 (Fase 2 del plan de integración S34)
+> Última actualización: 2026-07-16 (Fase 3 del plan de integración S34)
 
 ## 1. Resumen de mecanismos
 
@@ -15,6 +15,10 @@
 | **Shedding por prioridad** | API Gateway (umbral 70% de ocupación) | Protege escrituras críticas descartando lecturas de baja prioridad primero |
 | **Rate limiting global** | API Gateway (`app/core/ratelimit.py`, token bucket) | El Gateway mismo no colapsa ante una ráfaga, sin importar el destino |
 | **Sampling de logs** | API Gateway (middleware de correlación) | Evita que el logging se vuelva cuello de botella bajo carga alta |
+| **Idempotencia (Idempotency-Key)** | `POST /tickets` (ticket_service) | Un reintento del cliente/Gateway no duplica el ticket |
+| **Idempotencia (clave natural)** | `POST /facturas` (facturacion_service) | Un ticket tiene, a lo sumo, una factura |
+| **Idempotencia de consumidores** | auditoria-service, notificacion-service (índice único) | Un redelivery de RabbitMQ no duplica la traza ni la alerta |
+| **Logs estructurados S34** | Los 9 servicios (`app/core/logger.py`) | `service, correlationId, operation, event, result, durationMs` — trazables y filtrables |
 | **Métricas de resiliencia** | Gateway → `/metrics` → Prometheus | Circuit state, retries, fallbacks, bulkhead, rate limit, timeouts observables |
 | **Toxiproxy** | Tráfico Gateway → Tickets | Simula latencia/caídas (prueba del breaker) |
 | **`restart: always`** | Todos los contenedores | Auto-recuperación ante crash |
@@ -169,3 +173,27 @@ El `auditoria-service` consume de RabbitMQ dentro de un **bucle de reintento**:
 - **`pool_recycle=280`**: recicla conexiones viejas antes de que el servidor las cierre.
 - **Mensajería durable**: exchange y colas `durable=True`; los eventos no se pierden si un
   consumidor está temporalmente caído.
+
+## 8. Idempotencia (Fase 3)
+
+Un retry (del cliente o del propio Gateway) o un redelivery de RabbitMQ **no
+debe** repetir el efecto de negocio. Se usó una estrategia distinta según si
+existe o no una clave natural del dominio:
+
+| Escritura | Estrategia | Por qué |
+|---|---|---|
+| `POST /tickets` | `Idempotency-Key` (cabecera opcional, opt-in) | No hay clave natural: el mismo cliente puede traer el mismo equipo en visitas legítimas distintas — hace falta un token opaco por intento de envío |
+| `POST /facturas` | Clave natural: `id_ticket` (`UNIQUE` en BD) | Un ticket tiene, a lo sumo, una factura — es una regla de negocio durable, no solo protección ante reintentos |
+| Consumidor `auditoria-service` | Índice único `(trace_id, evento)` | RabbitMQ entrega "al menos una vez"; un ack perdido tras persistir causa un redelivery del mismo mensaje |
+| Consumidor `notificacion-service` | Índice único `(trace_id, evento, rol_destino)` | Mismo motivo; evita alertar dos veces al mismo rol por el mismo evento |
+
+En los cuatro casos, el `IntegrityError` de la base de datos ante un
+duplicado se captura y se resuelve devolviendo el registro ya existente (o,
+en los consumidores, descartando el mensaje como no-op) — nunca se
+propaga como un error crudo ni se reintenta indefinidamente.
+
+**Verificado en vivo:**
+- `POST /tickets` con la misma `Idempotency-Key` dos veces → mismo `idTicket`, 1 sola fila en `tickets`.
+- `POST /facturas` con el mismo `idTicket` dos veces → misma `idFactura`, 1 sola fila en `facturas`.
+- Insert directo duplicado en `auditoria_eventos` (simulando un redelivery) → rechazado por
+  `ux_auditoria_trace_evento`, exactamente el `IntegrityError` que el consumidor ya sabe absorber.

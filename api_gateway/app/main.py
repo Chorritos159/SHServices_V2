@@ -168,6 +168,10 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
     # Solo GET/HEAD son seguros de reintentar ante timeout/5xx (idempotentes).
     # Un POST con timeout tiene efecto incierto: reintentarlo puede duplicar.
     es_lectura = metodo in ("GET", "HEAD")
+    inicio = time.monotonic()
+
+    def _duracion_ms() -> float:
+        return round((time.monotonic() - inicio) * 1000, 1)
 
     # Fail-fast: si el circuito está OPEN, ni siquiera golpeamos a la dependencia.
     if not breaker.permite():
@@ -176,6 +180,8 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
         _sincronizar_metricas_breaker(service, breaker)
         logger.warning(
             f"⛔ Circuito OPEN para '{service}': fail-fast (la dependencia está en recuperación).",
+            extra={"campos": {"operation": "proxy_request", "event": service,
+                               "result": "circuit_open", "durationMs": _duracion_ms()}},
         )
         return JSONResponse(
             status_code=503,
@@ -205,6 +211,13 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
 
                 outcome = "ok" if response.status_code < 400 else ("client_error" if ok else "server_error")
                 metricas.REQUESTS.labels(service=service, outcome=outcome).inc()
+                duracion_ms = _duracion_ms()
+                if _debe_loggear_rutina():
+                    logger.info(
+                        f"↔️ Proxy {metodo} '{service}' → {response.status_code} ({duracion_ms}ms).",
+                        extra={"campos": {"operation": "proxy_request", "event": service,
+                                           "result": outcome, "durationMs": duracion_ms}},
+                    )
                 try:
                     data = response.json()
                 except Exception:
@@ -222,7 +235,10 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
                 metricas.REQUESTS.labels(service=service, outcome="unreachable").inc()
                 metricas.FALLBACKS.labels(service=service).inc()
                 logger.error(
-                    f"🚨 CIRCUIT BREAKER: el servicio '{service}' está inaccesible (estado: {breaker.estado}).",                )
+                    f"🚨 CIRCUIT BREAKER: el servicio '{service}' está inaccesible (estado: {breaker.estado}).",
+                    extra={"campos": {"operation": "proxy_request", "event": service,
+                                       "result": "unreachable", "durationMs": _duracion_ms()}},
+                )
                 return JSONResponse(
                     status_code=503,
                     content={"error": "Service Unavailable",
@@ -240,7 +256,10 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
                 metricas.REQUESTS.labels(service=service, outcome="timeout").inc()
                 metricas.FALLBACKS.labels(service=service).inc()
                 logger.error(
-                    f"⏱️ TIMEOUT: '{service}' superó su presupuesto de {timeout}s (circuito: {breaker.estado}).",                )
+                    f"⏱️ TIMEOUT: '{service}' superó su presupuesto de {timeout}s (circuito: {breaker.estado}).",
+                    extra={"campos": {"operation": "proxy_request", "event": service,
+                                       "result": "timeout", "durationMs": _duracion_ms()}},
+                )
                 return JSONResponse(
                     status_code=504,
                     content={"error": "Gateway Timeout", "circuito": breaker.estado,
@@ -260,7 +279,10 @@ async def correlation_id_middleware(request: Request, call_next):
     if request.url.path.startswith("/api/v1/") and not RATE_LIMITER.consumir():
         metricas.RATE_LIMIT_REJECTS.inc()
         espera = max(1, round(RATE_LIMITER.segundos_hasta_proximo_token()))
-        logger.warning("🚦 Rate limit: ráfaga por encima de la capacidad del Gateway.")
+        logger.warning(
+            "🚦 Rate limit: ráfaga por encima de la capacidad del Gateway.",
+            extra={"campos": {"operation": "rate_limit", "result": "rejected"}},
+        )
         respuesta = JSONResponse(
             status_code=429,
             content={"error": "Too Many Requests",
@@ -327,6 +349,7 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
         metricas.BULKHEAD_REJECTS.labels(service=service, razon="shed_baja_prioridad").inc()
         logger.warning(
             f"🧹 Shed: '{service}' al {bulkhead.ocupacion():.0%} de cupo, se descarta tráfico de baja prioridad.",
+            extra={"campos": {"operation": "bulkhead", "event": service, "result": "shed_baja_prioridad"}},
         )
         return JSONResponse(
             status_code=503,
@@ -341,6 +364,7 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
         metricas.BULKHEAD_REJECTS.labels(service=service, razon="saturado").inc()
         logger.warning(
             f"🧱 Bulkhead saturado para '{service}' ({bulkhead.en_vuelo}/{bulkhead.limite} en vuelo).",
+            extra={"campos": {"operation": "bulkhead", "event": service, "result": "saturado"}},
         )
         return JSONResponse(
             status_code=503,

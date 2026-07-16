@@ -34,3 +34,4 @@ El changelog explica qué cambió y a quién afecta. No es una bitácora extensa
 | Versión | Cambio | Tipo | Acción para consumidores |
 | :--- | :--- | :--- | :--- |
 | `v2.0` | Creación inicial del servicio en la arquitectura V2 | Release | Ninguna (consumidor pasivo) |
+| `v2.1` | feat(resiliencia S34, Fase 3): idempotencia del consumidor — índice único `(trace_id, evento)` evita duplicar un registro de traza ante un redelivery de RabbitMQ (ack perdido tras persistir). Logs migrados al formato mínimo S34 (`service, correlationId, operation, event, result, durationMs`) | Compatible | Ninguna |

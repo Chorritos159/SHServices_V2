@@ -35,3 +35,4 @@ El changelog explica qué cambió y a quién afecta. No es una bitácora extensa
 | :--- | :--- | :--- | :--- |
 | `v1.0` | feat: implementar autenticacion JWT, IAM y configuracion | Release | Integrar API de login |
 | `v2.0` | Integración y compatibilidad con V2 | Compatible | Ninguna |
+| `v2.1` | feat(observabilidad S34, Fase 3): logs migrados al formato mínimo S34 (`service, correlationId, operation, event, result, durationMs`), consistente con el resto de servicios | Compatible | Ninguna |

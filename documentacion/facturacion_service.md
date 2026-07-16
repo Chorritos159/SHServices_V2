@@ -34,3 +34,4 @@ El changelog explica qué cambió y a quién afecta. No es una bitácora extensa
 | Versión | Cambio | Tipo | Acción para consumidores |
 | :--- | :--- | :--- | :--- |
 | `v2.0` | Extracción y creación del servicio de facturación en V2 | Release | Consumir API de emisión de comprobantes |
+| `v2.1` | feat(resiliencia S34, Fase 3): idempotencia en `POST /facturas` por clave natural `id_ticket` (ya era `unique` en BD, pero un reintento devolvía un error 500 crudo en vez de la factura existente) — un ticket tiene, a lo sumo, una factura; un reintento del cliente o del Gateway devuelve la MISMA factura, nunca duplica el cobro. Logs migrados al formato mínimo S34 | Compatible | Ninguna (un reintento ahora es seguro) |

@@ -34,3 +34,4 @@ El changelog explica qué cambió y a quién afecta. No es una bitácora extensa
 | Versión | Cambio | Tipo | Acción para consumidores |
 | :--- | :--- | :--- | :--- |
 | `v2.0` | Creación del servicio para aislar la lógica de diagnósticos | Release | Consumir nuevo contrato de diagnósticos |
+| `v2.1` | feat(observabilidad S34, Fase 3): logs migrados al formato mínimo S34 (`service, correlationId, operation, event, result, durationMs`), consistente con el resto de servicios | Compatible | Ninguna |

@@ -26,8 +26,8 @@ deja evidencia.
 | Bulkhead | ✅ Fase 2 | — |
 | Backpressure (rate limit 429) | ✅ Fase 2 | — |
 | Buffering + dropping/sampling | ✅ Fase 2 (sampling de logs; shedding de tráfico) | — |
-| Idempotencia | ❌ | Fase 3 |
-| Logs estructurados S34 (operation/durationMs/event/result) | ⚠️ básico | Fase 3 |
+| Idempotencia | ✅ Fase 3 | — |
+| Logs estructurados S34 (operation/durationMs/event/result) | ✅ Fase 3 | — |
 | **Dashboard: circuit state, retry/fallback, queue depth, consumer lag** | ❌ | Fase 4 |
 | Carga 100k/500k/1M + fallas controladas | ❌ | Fase 5 |
 | Ya presente: Toxiproxy, Loki+Promtail, Prometheus, Grafana, RBAC, Gunicorn | ✅ | reutilizar |
@@ -52,12 +52,23 @@ prioridad, y sampling de logs bajo carga. Métricas: `gateway_bulkhead_in_flight
 `gateway_bulkhead_rejects_total`, `gateway_rate_limit_rejects_total`.
 **Verificación:** ráfaga concurrente → 429/503 controlados sin caída.
 
-### FASE 3 — Idempotencia + logs S34 + estados degradados
-Idempotencia en las escrituras (`POST /tickets`, `POST /facturas`) por
-`Idempotency-Key`/clave natural (webhook duplicado no duplica estado). Logs
-al formato mínimo S34 (`service, correlationId, operation, event, result,
-durationMs`). Estado degradado honesto ante dependencia caída.
-**Verificación:** reintento del mismo evento → un solo registro; log operable.
+### FASE 3 — Idempotencia + logs S34 + estados degradados ✅ COMPLETA
+Idempotencia en las escrituras: `POST /tickets` con `Idempotency-Key` opt-in
+(no hay clave natural — el mismo cliente puede traer el mismo equipo en
+visitas distintas y legítimas); `POST /facturas` por clave natural
+`id_ticket` (un ticket tiene, a lo sumo, una factura). Idempotencia de
+consumidores RabbitMQ (auditoria-service, notificacion-service) por índice
+único `(trace_id, evento[, rol_destino])` — un redelivery no duplica la
+traza ni la alerta. Logs de los 9 servicios migrados al formato mínimo S34
+(`service, correlationId, operation, event, result, durationMs`), con un
+`LoggerAdapter` que ahora SÍ fusiona campos por-llamada (antes los
+descartaba silenciosamente). Estado degradado honesto: ya cubierto por el
+fallback de Fase 1 (503/504 + `circuito` + `trace_id`).
+**Verificado en vivo:** POST duplicado de ticket con la misma
+`Idempotency-Key` → mismo `idTicket`, 1 sola fila en BD. POST duplicado de
+factura para el mismo ticket → misma `idFactura`, 1 sola fila. Insert
+directo duplicado en `auditoria_eventos` (simulando redelivery) → rechazado
+por el índice único `ux_auditoria_trace_evento`. Changelog por servicio.
 
 ### FASE 4 — Dashboard de resiliencia en Grafana
 Provisionar un dashboard versionado con: throughput, latencia p50/p95/p99,

@@ -1,6 +1,7 @@
 from app.core.database import engine
 from app.models.ticket import Base
 from app.models.garantia import GarantiaDB  # noqa: F401 (registra la tabla 'garantias' en Base)
+from app.models.idempotencia import IdempotenciaDB  # noqa: F401 (registra la tabla 'idempotencia')
 from fastapi import FastAPI
 from sqlalchemy import text
 from prometheus_fastapi_instrumentator import Instrumentator

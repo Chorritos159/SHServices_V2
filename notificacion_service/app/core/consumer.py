@@ -2,6 +2,8 @@ import aio_pika
 import json
 import os
 import asyncio
+import time
+from sqlalchemy.exc import IntegrityError
 from app.core.logger import get_logger
 from app.core.database import SessionLocal
 from app.models.notificacion import NotificacionDB
@@ -11,6 +13,11 @@ RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
 
 
 def _guardar(rol_destino: str, mensaje: str, referencia: str, evento: str, trace_id: str | None):
+    """Idempotencia (S34): un redelivery de RabbitMQ del mismo evento no debe
+    generar una segunda alerta duplicada para el mismo rol — el índice único
+    (trace_id, evento, rol_destino) rechaza el INSERT repetido.
+    """
+    inicio = time.monotonic()
     db = SessionLocal()
     try:
         db.add(NotificacionDB(
@@ -18,7 +25,18 @@ def _guardar(rol_destino: str, mensaje: str, referencia: str, evento: str, trace
             evento=evento, trace_id=trace_id,
         ))
         db.commit()
-        logger.info(f"🔔 Notificación para {rol_destino}: {mensaje}")
+        logger.info(
+            f"🔔 Notificación para {rol_destino}: {mensaje}",
+            extra={"campos": {"operation": "guardar_notificacion", "event": evento, "result": "ok",
+                               "durationMs": round((time.monotonic() - inicio) * 1000, 1)}},
+        )
+    except IntegrityError:
+        db.rollback()
+        logger.warning(
+            f"♻️ Notificación duplicada (redelivery de RabbitMQ) descartada: {evento} → {rol_destino}.",
+            extra={"campos": {"operation": "guardar_notificacion", "event": evento, "result": "duplicado",
+                               "durationMs": round((time.monotonic() - inicio) * 1000, 1)}},
+        )
     finally:
         db.close()
 
