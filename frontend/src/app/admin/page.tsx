@@ -42,14 +42,6 @@ export default async function AdminDashboardPage() {
         ))}
       </div>
 
-      <section className="mt-8 rounded-xl border border-slate-800 bg-slate-900/30 p-6">
-        <h3 className="text-sm font-semibold text-slate-300">Arquitectura del cliente</h3>
-        <ul className="mt-3 space-y-1.5 text-sm text-slate-400">
-          <li>• JWT en cookie <b>HttpOnly</b> (inmune a XSS), fijada por Server Action.</li>
-          <li>• Axios de servidor inyecta el <b>Bearer</b> en cada llamada al Gateway.</li>
-          <li>• Middleware RBAC en el Edge: solo ADMIN entra aquí.</li>
-        </ul>
-      </section>
     </div>
   );
 }
