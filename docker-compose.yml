@@ -9,6 +9,16 @@
 # (Se omite "version:" a propósito: Compose v2 lo considera obsoleto.)
 # =====================================================================
 
+# Nombre de proyecto EXPLÍCITO (S34, hallazgo en verificación de Fase 1):
+# esta carpeta se llama igual que la del otro proyecto en el mismo equipo
+# (SHServices_V2), y ambos docker-compose.yml fijan los mismos container_name.
+# Sin "name:", Compose deriva el project name del directorio -> los dos
+# proyectos colisionan (mismos nombres de volumen, red y detección de
+# huérfanos), lo que ya causó una recreación cruzada de contenedores y un
+# volumen de Postgres compartido entre ambos. Fijar el nombre aquí aísla
+# los volúmenes/redes/orphan-detection de este proyecto permanentemente.
+name: shservices_yassir
+
 networks:
   shservices-net:
     driver: bridge
@@ -27,9 +37,9 @@ services:
     container_name: postgres-db
     restart: always
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: password123
-      POSTGRES_DB: shservices_db
+      POSTGRES_USER: ${POSTGRES_USER:?Falta POSTGRES_USER en .env — copia .env.example a .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Falta POSTGRES_DB en .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -50,8 +60,8 @@ services:
     container_name: rabbitmq
     restart: always
     environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Falta RABBITMQ_DEFAULT_USER en .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Falta RABBITMQ_DEFAULT_PASS en .env}
     networks:
       - shservices-net
     # Panel de administración web (útil para la demo del docente).
@@ -107,8 +117,8 @@ services:
       --timeout 30
     environment:
       # Debe ser idéntica en auth-service y api-gateway o los tokens no validan.
-      JWT_SECRET_KEY: super_secreto_shservices_2026
-      CORS_ORIGINS: http://localhost:3000
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Falta CORS_ORIGINS en .env}
     ports:
       - "8000:80"        # <-- ÚNICO mapeo al host
     networks:
@@ -132,9 +142,9 @@ services:
     restart: always
     environment:
       # MISMA llave que api-gateway (imprescindible para que los JWT validen).
-      JWT_SECRET_KEY: super_secreto_shservices_2026
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env}
       # Persistencia de usuarios en PostgreSQL (seed automático si la tabla está vacía).
-      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
+      DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
     networks:
       - shservices-net
     # Expuesto para generar tokens desde su Swagger local (http://localhost:8003/docs).
@@ -155,8 +165,8 @@ services:
     container_name: ticket-service
     restart: always
     environment:
-      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
+      RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
     networks:
       - shservices-net
     depends_on:
@@ -175,9 +185,9 @@ services:
     container_name: almacen-service
     restart: always
     environment:
-      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
+      DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       # Publica ProductoRegistrado para el servicio de notificaciones.
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
     networks:
       - shservices-net
     depends_on:
@@ -196,8 +206,8 @@ services:
     container_name: diagnostico-service
     restart: always
     environment:
-      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
+      RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
     networks:
       - shservices-net
     depends_on:
@@ -216,8 +226,8 @@ services:
     container_name: facturacion-service
     restart: always
     environment:
-      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
+      RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
     networks:
       - shservices-net
     depends_on:
@@ -236,9 +246,9 @@ services:
     container_name: auditoria-service
     restart: always
     environment:
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
       # Fase 4 (FF-DEP-07): auditoría persiste la traza de eventos en PostgreSQL.
-      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
+      DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
     networks:
       - shservices-net
     depends_on:
@@ -258,8 +268,8 @@ services:
     container_name: notificacion-service
     restart: always
     environment:
-      DATABASE_URL: postgresql://admin:password123@postgres-db:5432/shservices_db
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
+      RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
     networks:
       - shservices-net
     depends_on:
@@ -294,8 +304,8 @@ services:
     restart: always
     environment:
       # Credenciales del panel de Grafana para la sustentación.
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:?Falta GF_SECURITY_ADMIN_USER en .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?Falta GF_SECURITY_ADMIN_PASSWORD en .env}
     volumes:
       # Persiste dashboards y datasources entre reinicios.
       - grafana_data:/var/lib/grafana
