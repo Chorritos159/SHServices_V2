@@ -103,6 +103,9 @@ services:
       # Debe ser idéntica en auth-service y api-gateway o los tokens no validan.
       JWT_SECRET_KEY: super_secreto_shservices_2026
       CORS_ORIGINS: http://localhost:3000
+      # Métricas multiproceso: agrega los contadores de los 4 workers gunicorn
+      # (si no, cada worker cuenta por su lado y el Circuit Breaker se subestima).
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
     ports:
       - "8000:80"        # <-- ÚNICO mapeo al host
     networks:

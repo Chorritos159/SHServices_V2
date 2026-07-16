@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from sqlalchemy import text
+from prometheus_fastapi_instrumentator import Instrumentator
 from app.api import health, almacen
 from app.core.exceptions import global_exception_handler
 from app.core.logger import get_logger
@@ -25,6 +26,9 @@ app.add_exception_handler(Exception, global_exception_handler)
 # Registrar rutas
 app.include_router(health.router)
 app.include_router(almacen.router, prefix="/api/v1/almacen", tags=["Almacén"])
+
+# Observabilidad: expone /metrics para Prometheus.
+Instrumentator().instrument(app).expose(app)
 
 @app.on_event("startup")
 async def startup_event():

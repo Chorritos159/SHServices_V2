@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 from app.api import health, auth
 from app.core.exceptions import global_exception_handler
 from app.core.logger import get_logger
@@ -44,6 +45,9 @@ app = FastAPI(
 app.add_exception_handler(Exception, global_exception_handler)
 app.include_router(health.router)
 app.include_router(auth.router, prefix="/api/v1/auth")
+
+# Observabilidad: expone /metrics para Prometheus.
+Instrumentator().instrument(app).expose(app)
 
 
 @app.on_event("startup")

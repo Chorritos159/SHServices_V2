@@ -7,3 +7,4 @@ alembic
 psycopg2-binary
 aio-pika
 httpx
+prometheus-fastapi-instrumentator

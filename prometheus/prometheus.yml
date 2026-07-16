@@ -2,25 +2,53 @@
 # Prometheus - Configuración de scraping para SHServices
 # Los targets usan el NOMBRE DE CONTENEDOR y el PUERTO INTERNO (80),
 # resueltos por el DNS interno de la red 'shservices-net'.
+# up{job="..."} == 0  →  el servicio está caído (panel de disponibilidad).
 # =====================================================================
 global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+  scrape_interval: 10s
+  evaluation_interval: 10s
 
 scrape_configs:
-  # El propio Prometheus (útil para verificar que vive)
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]
 
-  # API Gateway (expone /metrics gracias al Instrumentator)
   - job_name: "api-gateway"
     metrics_path: /metrics
     static_configs:
       - targets: ["api-gateway:80"]
 
-  # Ticket Service
+  - job_name: "auth-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["auth-service:80"]
+
   - job_name: "ticket-service"
     metrics_path: /metrics
     static_configs:
       - targets: ["ticket-service:80"]
+
+  - job_name: "almacen-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["almacen-service:80"]
+
+  - job_name: "diagnostico-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["diagnostico-service:80"]
+
+  - job_name: "facturacion-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["facturacion-service:80"]
+
+  - job_name: "auditoria-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["auditoria-service:80"]
+
+  - job_name: "notificacion-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["notificacion-service:80"]

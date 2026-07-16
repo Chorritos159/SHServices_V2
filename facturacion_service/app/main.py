@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from sqlalchemy import text
+from prometheus_fastapi_instrumentator import Instrumentator
 from app.api import health, facturacion
 from app.core.exceptions import global_exception_handler
 from app.core.logger import get_logger
@@ -24,6 +25,9 @@ app.add_exception_handler(Exception, global_exception_handler)
 
 app.include_router(health.router)
 app.include_router(facturacion.router, prefix="/api/v1/facturas", tags=["Facturación"])
+
+# Observabilidad: expone /metrics para Prometheus.
+Instrumentator().instrument(app).expose(app)
 
 @app.on_event("startup")
 async def startup_event():

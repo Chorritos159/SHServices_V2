@@ -1,10 +1,18 @@
 import os
 import uuid
 import httpx
+
+# Modo multiproceso de prometheus_client (gunicorn con varios workers):
+# el directorio debe existir ANTES de crear cualquier métrica.
+_MP_DIR = os.environ.get("PROMETHEUS_MULTIPROC_DIR")
+if _MP_DIR:
+    os.makedirs(_MP_DIR, exist_ok=True)
+
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Counter
 from app.core.security import validar_token
 from app.core.logger import get_logger
 from app.core.exceptions import global_exception_handler
@@ -39,6 +47,14 @@ app.include_router(health.router)
 # Observabilidad: expone /metrics para Prometheus (endpoint público, fuera del candado JWT
 # porque el catch-all protegido vive bajo /api/v1/, no en la raíz).
 Instrumentator().instrument(app).expose(app)
+
+# Métrica DEDICADA del Circuit Breaker (el status agrupado 5xx no distingue el motivo).
+# motivo="conexion" (503, servicio caído) | motivo="timeout" (504, servicio lento > 5s).
+CIRCUIT_BREAKER = Counter(
+    "gateway_circuit_breaker_total",
+    "Cortes del Circuit Breaker del API Gateway por servicio y motivo",
+    ["service", "motivo"],
+)
 
 # 2. Mapa de Microservicios para Docker
 MICROSERVICIOS = {
@@ -129,6 +145,7 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
             
         except httpx.ConnectError:
             # ¡CIRCUIT BREAKER EN ACCIÓN! El microservicio está apagado.
+            CIRCUIT_BREAKER.labels(service=service, motivo="conexion").inc()
             logger.error(f"🚨 CIRCUIT BREAKER: El servicio '{service}' está inaccesible.")
             return JSONResponse(
                 status_code=503, 
@@ -139,8 +156,9 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
                 }
             )
         except httpx.TimeoutException:
+            CIRCUIT_BREAKER.labels(service=service, motivo="timeout").inc()
             logger.error(f"⏱️ TIMEOUT: El servicio '{service}' tardó demasiado en responder.")
             return JSONResponse(
-                status_code=504, 
+                status_code=504,
                 content={"error": "Gateway Timeout", "trace_id": correlation_id}
             )
