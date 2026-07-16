@@ -20,12 +20,12 @@ deja evidencia.
 | Mecanismo S34 | Estado actual | Acción |
 | :-- | :-- | :-- |
 | Timeout | ✅ 5s fijo en el gateway | Ajustar a por-operación |
-| Retry + backoff + jitter | ❌ | Fase 1 |
-| Circuit breaker con **estados** (CLOSED/OPEN/HALF_OPEN) | ❌ (solo captura excepciones) | Fase 1 |
-| Fallback honesto | ⚠️ parcial (503/504) | Fase 1 |
-| Bulkhead | ❌ | Fase 2 |
-| Backpressure (rate limit 429) | ❌ | Fase 2 |
-| Buffering + dropping/sampling | ❌ | Fase 2 |
+| Retry + backoff + jitter | ✅ Fase 1 | — |
+| Circuit breaker con **estados** (CLOSED/OPEN/HALF_OPEN) | ✅ Fase 1 | — |
+| Fallback honesto | ✅ Fase 1 | — |
+| Bulkhead | ✅ Fase 2 | — |
+| Backpressure (rate limit 429) | ✅ Fase 2 | — |
+| Buffering + dropping/sampling | ✅ Fase 2 (sampling de logs; shedding de tráfico) | — |
 | Idempotencia | ❌ | Fase 3 |
 | Logs estructurados S34 (operation/durationMs/event/result) | ⚠️ básico | Fase 3 |
 | **Dashboard: circuit state, retry/fallback, queue depth, consumer lag** | ❌ | Fase 4 |

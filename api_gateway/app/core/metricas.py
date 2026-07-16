@@ -47,3 +47,31 @@ TIMEOUTS = Counter(
     "Timeouts del gateway hacia dependencias",
     ["service"],
 )
+
+# --- Contención de recursos (Fase 2, S34) ---------------------------------
+
+# Llamadas en vuelo por servicio (bulkhead). Gauge: sube/baja en tiempo real.
+BULKHEAD_IN_FLIGHT = Gauge(
+    "gateway_bulkhead_in_flight",
+    "Llamadas en vuelo hacia cada servicio (cupo del bulkhead)",
+    ["service"],
+)
+
+# Rechazos del bulkhead, separando saturación real de shedding preventivo.
+BULKHEAD_REJECTS = Counter(
+    "gateway_bulkhead_rejects_total",
+    "Peticiones rechazadas por el bulkhead",
+    ["service", "razon"],   # razon: saturado | shed_baja_prioridad
+)
+
+# Rechazos del rate limiter global del Gateway (token bucket).
+RATE_LIMIT_REJECTS = Counter(
+    "gateway_rate_limit_rejects_total",
+    "Peticiones rechazadas por el rate limiter global (429)",
+)
+
+# Logs de rutina omitidos por sampling bajo carga (nunca se muestrean errores).
+LOGS_MUESTREADOS = Counter(
+    "gateway_logs_sampled_total",
+    "Logs de entrada rutinarios omitidos por sampling bajo carga alta",
+)
