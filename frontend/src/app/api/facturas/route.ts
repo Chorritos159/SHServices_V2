@@ -37,7 +37,11 @@ export async function POST(request: NextRequest) {
   // reservado y genera la GARANTÍA de 90 días. Devolvemos la garantía al comprobante.
   let garantia: unknown = null;
   try {
-    const res = await gateway.post(`/tickets/tickets/${encodeURIComponent(payload.idTicket)}/entregar`, {});
+    const montoTotal = (data as { montoTotal?: number })?.montoTotal ?? 0;
+    const res = await gateway.post(
+      `/tickets/tickets/${encodeURIComponent(payload.idTicket)}/entregar`,
+      { monto_total: montoTotal },
+    );
     garantia = (res.data as { garantia?: unknown })?.garantia ?? null;
   } catch {
     // La factura ya se emitió; no bloqueamos el éxito por el cierre del ticket.

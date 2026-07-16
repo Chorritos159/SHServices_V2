@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, DateTime
+from sqlalchemy import Column, String, Integer, DateTime, Float
 from app.core.database import Base
 import datetime
 
@@ -19,3 +19,4 @@ class GarantiaDB(Base):
     fecha_entrega = Column(DateTime, default=datetime.datetime.utcnow)
     fecha_vencimiento = Column(DateTime, nullable=False)        # fecha_entrega + 90 días
     dias = Column(Integer, default=90, nullable=False)
+    monto_total = Column(Float, nullable=True)                 # cuánto se cobró por la reparación

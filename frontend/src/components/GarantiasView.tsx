@@ -117,6 +117,13 @@ function TarjetaGarantia({ g }: { g: Garantia }) {
         )}
       </p>
 
+      <p className="mt-2 rounded-lg bg-slate-800/60 px-3 py-1.5 text-sm">
+        <span className="text-slate-400">Monto cobrado: </span>
+        <span className="font-bold text-white">
+          {g.monto_total != null ? `S/. ${g.monto_total.toFixed(2)}` : "—"}
+        </span>
+      </p>
+
       <dl className="mt-3 space-y-1 border-t border-slate-800 pt-3 text-sm">
         <Fila k="DNI/RUC" v={g.documento_cliente ?? "—"} />
         <Fila k="Equipo" v={g.equipo ?? "—"} />

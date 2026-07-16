@@ -67,6 +67,11 @@ class DiagnosticarRequest(BaseModel):
     repuestos: List[RepuestoRef] = Field(default_factory=list)
 
 
+class EntregarRequest(BaseModel):
+    """Datos del cobro al entregar (el BFF pasa el monto ya facturado)."""
+    monto_total: float = Field(0.0, ge=0)
+
+
 class GarantiaOut(BaseModel):
     id: str
     id_ticket: str
@@ -77,5 +82,6 @@ class GarantiaOut(BaseModel):
     fecha_entrega: datetime
     fecha_vencimiento: datetime
     dias: int
+    monto_total: Optional[float] = None
     vigente: bool
     dias_restantes: int

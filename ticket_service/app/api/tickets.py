@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
 from app.models.schemas import (
     TicketCreate, TicketResponse, TicketPendiente, EstadoUpdate,
-    DiagnosticarRequest, GarantiaOut,
+    DiagnosticarRequest, EntregarRequest, GarantiaOut,
 )
 from app.models.ticket import TicketDB
 from app.models.garantia import GarantiaDB
@@ -263,10 +263,16 @@ async def rechazar_ticket(ticket_id: str, request: Request, db: Session = Depend
 
 
 @router.post("/{ticket_id}/entregar", tags=["Máquina de Estados"])
-async def entregar_ticket(ticket_id: str, request: Request, db: Session = Depends(get_db)):
+async def entregar_ticket(
+    ticket_id: str,
+    datos: EntregarRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     """
     → ENTREGADO. Se cobró y se entrega: CONFIRMA (consume) el stock reservado y,
-    si es SOPORTE, genera automáticamente una GARANTÍA de 90 días exactos.
+    si es SOPORTE, genera automáticamente una GARANTÍA de 90 días exactos, guardando
+    el monto cobrado (que el BFF pasa desde la factura).
     """
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
@@ -292,6 +298,7 @@ async def entregar_ticket(ticket_id: str, request: Request, db: Session = Depend
             fecha_entrega=ahora,
             fecha_vencimiento=ahora + timedelta(days=DIAS_GARANTIA),
             dias=DIAS_GARANTIA,
+            monto_total=datos.monto_total,
         )
         db.add(garantia)
         garantia_out = {"id": garantia.id, "fecha_vencimiento": garantia.fecha_vencimiento.isoformat() + "Z", "dias": DIAS_GARANTIA}
@@ -312,6 +319,7 @@ def _garantia_out(g: GarantiaDB) -> dict:
         "id": g.id, "id_ticket": g.id_ticket, "documento_cliente": g.documento_cliente,
         "equipo": g.equipo, "numero_serie": g.numero_serie, "descripcion": g.descripcion,
         "fecha_entrega": g.fecha_entrega, "fecha_vencimiento": g.fecha_vencimiento, "dias": g.dias,
+        "monto_total": g.monto_total,
         "vigente": g.fecha_vencimiento >= ahora, "dias_restantes": max(restantes, 0),
     }
 
