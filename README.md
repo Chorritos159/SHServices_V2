@@ -230,8 +230,11 @@ que el usuario note nada.
 
 - `documentacion/` — changelog y contrato de cada servicio (formato S31),
   `runbook_general.md`, `registro_de_carga.md`, `matriz_revision_resiliencia.md`,
-  `fichas_falla_controlada.md`, `brechas_finales.md` (tabla riesgo/acción/
-  responsable para el dictamen).
+  `fichas_falla_controlada.md`, `evidencias_observabilidad.md` (checklist de
+  la S34: log mínimo, dashboard mínimo, trazas), `brechas_finales.md` (tabla
+  riesgo/acción/responsable para el dictamen).
+- `seguridad/` — `OWASP_Top10.md` (revisión de las 10 categorías sobre este
+  código) y `sonarqube_resultados.md`.
 - `documentacion/adr/` — decisiones de arquitectura formalizadas (ADR-0001:
   Gateway de 1 solo worker; ADR-0002: estrategia de idempotencia; ADR-0003:
   carga por nodos/bloques).

@@ -67,10 +67,16 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Falta RABBITMQ_DEFAULT_USER en .env}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Falta RABBITMQ_DEFAULT_PASS en .env}
-    volumes:
-      # Habilita el plugin rabbitmq_prometheus (S34, Fase 4): expone queue
-      # depth y consumer count en /metrics para que Prometheus los scrapee.
-      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    # Habilita rabbitmq_prometheus (S34, Fase 4: queue depth y consumer lag)
+    # con un comando, NO montando /etc/rabbitmq/enabled_plugins: ese bind
+    # mount resultaba ilegible dentro del contenedor
+    # (cannot_read_enabled_plugins_file ... :eio) y, al no poder leer el
+    # archivo, RabbitMQ se quedaba SIN rabbitmq_management -> el panel
+    # web devolvía "Management API returned status code 500".
+    # `--offline` habilita el plugin antes de arrancar el broker.
+    command: >
+      sh -c "rabbitmq-plugins enable --offline rabbitmq_prometheus &&
+             exec docker-entrypoint.sh rabbitmq-server"
     networks:
       - shservices-net
     # Panel de administración web (útil para la demo del docente).

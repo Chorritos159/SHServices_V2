@@ -19,7 +19,7 @@ import time
 from datetime import datetime, timedelta
 
 router = APIRouter()
-logger = get_logger("ticket_service")
+logger = get_logger("ticket-service")   # con guion, como los otros 8 servicios
 
 # URL interna del almacén (red Docker). El ticket_service orquesta el stock aquí.
 ALMACEN_URL = "http://almacen-service:80/api/v1/almacen"
