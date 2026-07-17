@@ -1,15 +1,18 @@
 # Catálogo de Servicios — SHServices V2
 
 > Gate **G8 · FF-DEP-08** · Arquitectura de microservicios (FastAPI + PostgreSQL + RabbitMQ)
-> Última actualización: 2026-07-15
+> Última actualización: 2026-07-16 (Fase 6 del plan de integración S34)
 
 ## 1. Visión general
 
-Sistema de gestión de servicio técnico (recepción → diagnóstico → facturación) construido
-sobre 7 microservicios FastAPI, orquestados con Docker Compose. El **API Gateway** es el único
-punto de entrada público y el único validador de identidad (JWT). Los microservicios internos
-**no** están expuestos al host y confían en las cabeceras de identidad (`X-User-*`) que el
-Gateway inyecta.
+Sistema de gestión de servicio técnico (recepción → diagnóstico → facturación → notificación)
+construido sobre 7 microservicios de negocio FastAPI + el API Gateway, orquestados con Docker
+Compose. El **API Gateway** es el único punto de entrada público, el único validador de
+identidad (JWT), y desde la Fase 1-2 de la S34 también el punto donde vive **toda la
+resiliencia del sistema**: circuit breaker, timeouts, retry+backoff+jitter, bulkhead, rate
+limiting, shedding e idempotencia (ver §7 y `matriz-resiliencia.md`). Los microservicios
+internos **no** están expuestos al host y confían en las cabeceras de identidad (`X-User-*`)
+que el Gateway inyecta.
 
 ## 2. Roles e identidad
 
@@ -34,18 +37,20 @@ El `auth-service` emite un JWT (HS256, expiración 2 h) con la forma:
 | **Tickets** | `ticket-service` | interno (vía Toxiproxy) | Alta de tickets, bandeja de pendientes, cambio de estado | ✔ | Publica `ticket.creado` |
 | **Almacén** | `almacen-service` | interno | Inventario: listar, ingresar (código autogenerado), reservar stock | ✔ | — |
 | **Diagnóstico** | `diagnostico-service` | interno | Diagnóstico técnico con precio + repuestos; reserva stock en Almacén | ✔ | Publica `ticket.diagnosticado` |
-| **Facturación** | `facturacion-service` | interno | Emisión de comprobantes | ✔ | Publica `ticket.facturado` |
-| **Auditoría** | `auditoria-service` | interno | Consume `ticket.*` y **persiste la traza en PostgreSQL** | ✔ | Consume `ticket.*` |
+| **Facturación** | `facturacion-service` | interno | Emisión de comprobantes; idempotente por `id_ticket` (Fase 3) | ✔ | Publica `ticket.facturado` |
+| **Auditoría** | `auditoria-service` | interno | Consume `ticket.*` y **persiste la traza en PostgreSQL**; idempotente por `(trace_id, evento)` (Fase 3) | ✔ | Consume `ticket.*` |
+| **Notificaciones** | `notificacion-service` | interno | Alertas internas dirigidas por rol (ADMIN/TECNICO/CAJA); idempotente por `(trace_id, evento, rol_destino)` (Fase 3) | ✔ | Consume `ticket.creado`, `ticket.listo`, `producto.registrado` |
 
 ### Infraestructura de soporte
 
 | Componente | Contenedor | Puerto host | Función |
 |---|---|---|---|
 | PostgreSQL | `postgres-db` | interno | Persistencia (una BD compartida `shservices_db`) |
-| RabbitMQ | `rabbitmq` | `15672` (panel) | Bus de eventos (exchange `tickets.eventos`, tipo topic) |
+| RabbitMQ | `rabbitmq` | `15672` (panel), `15692` (métricas Prometheus, `/metrics/per-object`) | Bus de eventos (exchange `tickets.eventos`, tipo topic) |
 | Toxiproxy | `toxiproxy` | `8474` (control) | Inyección de fallos hacia `ticket-service` (Chaos Engineering) |
-| Prometheus | `prometheus` | `9090` | Scrape de métricas |
-| Grafana | `grafana` | `3000` | Dashboards de observabilidad |
+| Prometheus | `prometheus` | `9090` | Scrape de métricas: Gateway, ticket/auditoria/notificacion-service, RabbitMQ |
+| Grafana | `grafana` | `3000` | Dashboard de resiliencia provisionado por archivo (Fase 4): circuit state, retry/fallback, bulkhead, rate limit, queue depth, consumer lag |
+| Loki + Promtail | `loki`, `promtail` | interno | Agregación de logs estructurados, consultable desde Grafana |
 | Frontend (Next.js) | (local) | `3001` | Cliente web (BFF + cookies HttpOnly) |
 
 ## 4. Endpoints públicos (vía Gateway `:8000`)
@@ -64,6 +69,8 @@ El `auth-service` emite un JWT (HS256, expiración 2 h) con la forma:
 | POST | `/api/v1/diagnosticos/diagnosticos/` | TECNICO | Registrar diagnóstico |
 | POST | `/api/v1/facturas/facturas/` | CAJA | Emitir comprobante |
 | GET | `/api/v1/auditoria/auditoria/eventos` | ADMIN | Traza de auditoría |
+| GET | `/api/v1/notificaciones/notificaciones/mis-alertas` | cualquier rol autenticado | Bandeja de alertas no leídas (filtra por el rol del token) |
+| POST | `/api/v1/notificaciones/notificaciones/marcar-leidas` | cualquier rol autenticado | Marca como leídas las alertas del rol |
 
 ## 5. Contrato de Health Check (FF-DEP-02)
 
@@ -77,7 +84,25 @@ Si la BD no responde: `status: "DEGRADED"`, `dependencies.database: "DOWN"` (el 
 
 ## 6. Flujo de negocio
 
-1. **CAJA** registra el ticket (`SOPORTE` → `EN_COLA`, `VENTA` → `VENTA_REGISTRADA`).
-2. **TECNICO** toma un ticket `EN_COLA`, registra diagnóstico (precio + repuestos), descuenta stock; el ticket pasa a `DIAGNOSTICADO`.
+1. **CAJA** registra el ticket (`SOPORTE` → `EN_COLA`, `VENTA` → `VENTA_REGISTRADA`) → **TECNICO** recibe una alerta.
+2. **TECNICO** toma un ticket `EN_COLA`, registra diagnóstico (precio + repuestos), descuenta stock; el ticket pasa a `DIAGNOSTICADO` → **CAJA** recibe una alerta de que ya puede cobrar.
 3. **CAJA** emite la factura del ticket.
 4. **ADMIN** gestiona inventario y audita toda la traza de eventos.
+
+## 7. Resiliencia (S34, Fases 1-5)
+
+Todos los mecanismos de tolerancia a fallos viven en el **API Gateway**
+(único punto de entrada, único lugar donde tiene sentido protegerlos a
+todos de una vez). Detalle completo, verificación en vivo y métricas en
+`matriz-resiliencia.md`; resumen:
+
+| Mecanismo | Qué hace |
+|---|---|
+| Circuit breaker (CLOSED/OPEN/HALF_OPEN) | Fail-fast ante un servicio caído o lento, por servicio destino |
+| Timeout + retry + backoff/jitter | Corta esperas; reintenta solo lo seguro (lecturas, o cualquier método si el request nunca llegó) |
+| Bulkhead + shedding | Aísla la capacidad de cada servicio; descarta tráfico de baja prioridad antes de saturar del todo |
+| Rate limiting global | Protege al Gateway mismo de una ráfaga, sin importar el destino |
+| Idempotencia | `Idempotency-Key` (tickets) / clave natural (facturas) / índice único (consumidores RabbitMQ) |
+| Logs estructurados S34 | `service, correlationId, operation, event, result, durationMs` en los 9 servicios |
+| Dashboard de resiliencia | Grafana, provisionado por archivo — circuit state, retry/fallback, bulkhead, rate limit, queue depth, consumer lag |
+| Pruebas de carga y caos | `pruebas/` (Python puro) — 6 pruebas, ver README raíz §"Cómo ejecutar las pruebas" |

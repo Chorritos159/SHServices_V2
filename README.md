@@ -176,7 +176,11 @@ y la reponen internamente, ya a salvo.
 
 - `documentacion/` — changelog y contrato de cada servicio (formato S31),
   `runbook_general.md`, `registro_de_carga.md`, `matriz_revision_resiliencia.md`,
-  `fichas_falla_controlada.md`.
+  `fichas_falla_controlada.md`, `brechas_finales.md` (tabla riesgo/acción/
+  responsable para el dictamen).
+- `documentacion/adr/` — decisiones de arquitectura formalizadas (ADR-0001:
+  Gateway de 1 solo worker; ADR-0002: estrategia de idempotencia; ADR-0003:
+  carga por nodos/bloques).
 - `matriz-resiliencia.md`, `catalogo-servicios.md`, `matriz-auditoria.md`,
   `runbook.md` — gobierno a nivel de sistema completo.
 - `PLAN_INTEGRACION.md` — plan de integración final S34, fase por fase.

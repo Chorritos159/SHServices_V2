@@ -1,7 +1,7 @@
 # Matriz de Auditoría — SHServices V2
 
 > Gate **G8 · FF-DEP-08** · Trazabilidad de eventos (FF-DEP-05 correlationId · FF-DEP-07 persistencia)
-> Última actualización: 2026-07-15
+> Última actualización: 2026-07-16 (Fase 6 del plan de integración S34)
 
 ## 1. Modelo de eventos
 
@@ -14,11 +14,23 @@ Coreografía basada en RabbitMQ. Todos los servicios publican al mismo exchange 
 
 ## 2. Catálogo de eventos auditados
 
+El binding de la cola de auditoría es `ticket.*` — captura los 4 eventos
+del ciclo de vida del ticket. `producto.registrado` (almacen-service) **no**
+matchea el patrón y por lo tanto **no queda auditado** — ver brecha
+conocida en `matriz-resiliencia.md` / README raíz.
+
 | Evento | Routing key | Publicado por | Datos clave |
 |---|---|---|---|
-| `TicketCreado.v1` | `ticket.creado` | ticket-service | `idTicket`, `sede` |
+| `TicketCreado.v1` | `ticket.creado` | ticket-service | `idTicket`, `sede`, `estado` |
+| `TicketListo.v1` | `ticket.listo` | ticket-service (al diagnosticar con repuesto reservado) | `idTicket`, `sede` |
 | `DiagnosticoRegistrado.v1` | `ticket.diagnosticado` | diagnostico-service | `idDiagnostico`, `idTicket`, `sede`, `estadoReserva`, `precioReparacion` |
 | `FacturaGenerada.v1` | `ticket.facturado` | facturacion-service | `idFactura`, `idTicket`, `montoTotal`, `sede` |
+
+**Idempotencia del consumidor (Fase 3, S34):** índice único
+`(trace_id, evento)` en `auditoria_eventos` — un redelivery de RabbitMQ
+(ack perdido tras persistir) no duplica el registro; el `IntegrityError`
+se captura y se descarta como no-op. Verificado con un insert duplicado
+directo, rechazado por el índice (ver `documentacion/fichas_falla_controlada.md`).
 
 ## 3. Propagación del `correlationId` (FF-DEP-05)
 

@@ -122,12 +122,35 @@ en vez de `async with`), pero no se corrieron todavía a pedido explícito.
 Rate limit del Gateway hecho configurable por entorno
 (`RATE_LIMIT_RPS`/`RATE_LIMIT_BURST`) para soportar estas corridas — antes
 era un valor fijo en código; ya verificado que la ampliación funciona
-(corrida previa con el diseño anterior, ver `registro_de_carga.md`).
+(corrida previa con el diseño anterior, ver `registro_de_carga.md`). Toda
+la suite migrada a Python puro después (cero `.sh` en `pruebas/`), a
+pedido explícito.
 
-### FASE 6 — Gobierno y paquete de defensa
-Actualizar `matriz-resiliencia.md`, `matriz-auditoria.md`, catálogo, runbook,
-ADRs y README operativo; consolidar changelogs; tabla de **brechas finales**
-(riesgo, acción, responsable) para el dictamen.
+### FASE 6 — Gobierno y paquete de defensa ✅ COMPLETA
+- `matriz-resiliencia.md`: actualizada, referencia cruzada a los ADRs y a
+  `brechas_finales.md`.
+- `matriz-auditoria.md`: catálogo de eventos corregido (faltaba
+  `TicketListo.v1`/`ticket.listo`), documentada la brecha de
+  `producto.registrado` sin auditar, y la idempotencia del consumidor
+  (Fase 3).
+- `catalogo-servicios.md`: agregado `notificacion-service` (faltaba por
+  completo del catálogo de microservicios), nueva sección §7 Resiliencia
+  con el resumen de los mecanismos de las Fases 1-5.
+- `runbook.md`: agregado `notificacion-service` a los health checks,
+  corregido el nombre de la toxina de ejemplo (estaba desalineado con el
+  comportamiento real de Toxiproxy), agregado `.env`/`RATE_LIMIT_*` a
+  prerrequisitos, nuevas entradas de troubleshooting (429/503 de
+  contención), pointer a `pruebas/06_caos.py` como verificación completa.
+- `documentacion/adr/`: 3 ADRs nuevos (el proyecto no tenía ninguno) —
+  ADR-0001 (Gateway 1 worker), ADR-0002 (estrategia de idempotencia),
+  ADR-0003 (carga por nodos/bloques).
+- `documentacion/brechas_finales.md`: tabla consolidada de 9 brechas reales
+  (riesgo/acción/responsable) para el dictamen — todas con evidencia o
+  razonamiento concreto, ninguna bloquea la demostración de los mecanismos
+  de resiliencia exigidos.
+- Changelogs verificados: los 8 servicios (+ gateway) sin huecos de
+  versión, cada fase de resiliencia reflejada donde corresponde.
+- `README.md` raíz: ya cubre el checklist operativo completo (Fase 4/5).
 
 ```
 Fase 1 (resiliencia núcleo) → Fase 2 (contención) → Fase 3 (idempotencia+logs)

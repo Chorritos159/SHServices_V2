@@ -1,7 +1,11 @@
 # Matriz de Resiliencia — SHServices V2
 
 > Gate **G8 · FF-DEP-08** · Estrategias de tolerancia a fallos y Chaos Engineering
-> Última actualización: 2026-07-16 (Fase 4 del plan de integración S34)
+> Última actualización: 2026-07-16 (Fase 6 del plan de integración S34)
+> Decisiones de diseño formalizadas en `documentacion/adr/` (ADR-0001: 1 solo
+> worker del Gateway; ADR-0002: estrategia de idempotencia; ADR-0003: carga
+> por nodos/bloques). Brechas conocidas consolidadas en
+> `documentacion/brechas_finales.md`.
 
 ## 1. Resumen de mecanismos
 

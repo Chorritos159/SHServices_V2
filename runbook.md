@@ -1,19 +1,23 @@
 # Runbook Operativo — SHServices V2
 
 > Gate **G8 · FF-DEP-08** · Despliegue básico y operación del servicio
-> Última actualización: 2026-07-15
+> Última actualización: 2026-07-16 (Fase 6 del plan de integración S34)
 
 ## 1. Prerrequisitos
 
 - Docker Desktop / Docker Engine + Docker Compose v2
 - Node.js 20+ (solo para el frontend web)
-- Puertos host libres: `8000`, `8003`, `15672`, `8474`, `9090`, `3000` y `3001` (frontend)
+- Python 3.11+ con `httpx` (`pip install httpx`) — solo para correr `pruebas/`
+- Puertos host libres: `8000`, `8003`, `15672`, `15692`, `8474`, `9090`, `3000` y `3001` (frontend)
+- Un `.env` en la raíz (copiar de `.env.example` y completar) — sin él, `docker compose up` falla
+  explícitamente en vez de correr con secretos vacíos
 
 ## 2. Levantar todo el sistema
 
-Desde la raíz del proyecto (`C:\SHServices_V2`):
+Desde la raíz del proyecto:
 
 ```bash
+cp .env.example .env   # completar los valores, solo la primera vez
 docker compose up --build
 ```
 
@@ -44,7 +48,8 @@ Salida esperada:
 ```json
 {"status":"UP","service":"ticket-service","version":"1.0.0","dependencies":{"database":"UP"}}
 ```
-Repetir para `almacen-service`, `diagnostico-service`, `facturacion-service`, `auditoria-service`.
+Repetir para `almacen-service`, `diagnostico-service`, `facturacion-service`, `auditoria-service`,
+`notificacion-service`.
 
 ### 3.3 Autenticación (JWT con rol + sede)
 ```bash
@@ -94,16 +99,24 @@ docker compose down                          # detener todo (conserva volúmenes
 docker compose down -v                       # detener y BORRAR datos (¡destructivo!)
 ```
 
-## 6. Prueba de caos (Circuit Breaker)
+## 6. Prueba de caos (Circuit Breaker, bulkhead, rate limit, idempotencia)
+
+Chequeo manual rápido (un solo mecanismo):
 
 ```bash
-# Inyectar latencia de 8 s en el tráfico hacia Tickets
+# Inyectar latencia de 8 s en el tráfico hacia Tickets (timeout del Gateway: 3s)
 curl -X POST http://localhost:8474/proxies/ticket_proxy/toxics \
-  -d '{"type":"latency","attributes":{"latency":8000}}'
-# Crear un ticket ahora debe devolver 504 Gateway Timeout.
-# Quitar la toxina para restaurar el servicio:
-curl -X DELETE http://localhost:8474/proxies/ticket_proxy/toxics/latency
+  -d '{"name":"latencia_manual","type":"latency","attributes":{"latency":8000}}'
+# Crear/leer un ticket ahora debe devolver 504; tras 3 fallos seguidos, 503 con "circuito":"OPEN".
+# Quitar la toxina (usa el "name" que le pusiste arriba) para restaurar el servicio:
+curl -X DELETE http://localhost:8474/proxies/ticket_proxy/toxics/latencia_manual
+# Tras el cooldown (15s), la sonda HALF_OPEN cierra el circuito sola.
 ```
+
+**Verificación completa (recomendada):** `python pruebas/06_caos.py` corre las 5 fichas de
+falla controlada de la S34 (servicio caído, latencia, cola saturada/bulkhead+shed, rate limit,
+evento duplicado) en ~1 minuto, con veredicto explícito al final. Detalle de cada ficha
+(hipótesis, métrica observada, evidencia) en `documentacion/fichas_falla_controlada.md`.
 
 ## 7. Troubleshooting
 
@@ -115,3 +128,6 @@ curl -X DELETE http://localhost:8474/proxies/ticket_proxy/toxics/latency
 | `504` al crear ticket | Latencia > 5 s (toxina) | Quitar la toxina de latencia |
 | Frontend no llega al backend | Contenedores abajo | `docker compose up -d` |
 | Puerto 3000 ocupado | Grafana usa el 3000 | El frontend corre en el **3001** (por diseño) |
+| `429` en ráfagas de peticiones | Rate limit global del Gateway (backpressure, no una falla) | Esperar unos segundos (se repone a 20 tokens/s) o revisar `Retry-After` en la respuesta |
+| `503` "está bajo presión... baja prioridad" | Shedding del bulkhead (contención, no una falla) | Esperar; el cupo se libera apenas terminan las llamadas en vuelo — ver `gateway_bulkhead_in_flight` en Grafana |
+| `docker compose up` falla con `Falta VAR en .env` | No existe `.env` o falta una variable | `cp .env.example .env` y completar los valores faltantes |
