@@ -209,16 +209,25 @@ Dos huecos que la Fase 7 deja al descubierto:
   **todos** los servicios, no solo `tickets`.
 - Caos: `docker stop` a cada servicio, no solo a `almacen`.
 
-### FASE 9 — Swagger de todos los servicios + webhooks + seed
+### FASE 9 — Swagger de todos los servicios + webhooks + seed 🔶 EN PROGRESO
 
 - **Swagger:** hoy solo `api-gateway` (8000) y `auth-service` (8003)
   publican puerto; el `/docs` de los otros 6 es inalcanzable desde el host.
-  Exponer un puerto por servicio y documentarlos.
-- **Webhooks:** no existe ninguno en el proyecto (verificado). Implementar
-  suscripción y entrega firmada ante los eventos del flujo, con reintentos
-  (S31/S34).
+  Exponer un puerto por servicio y documentarlos. *(pendiente)*
+- **Webhooks salientes:** ✅ **HECHO.** Implementados en `notificacion-service`
+  (`app/core/webhooks.py` entrega, `app/api/webhooks.py` suscripciones,
+  `app/models/webhook.py` tablas). Un tercero se suscribe con su URL a un
+  evento (`ticket.creado`/`ticket.listo`/`producto.registrado`/`*`); al
+  consumir el evento se hace POST **firmado con HMAC-SHA256** (`X-Firma`),
+  con hasta 3 reintentos+backoff y bitácora en `webhook_entregas`. Var
+  `WEBHOOK_SECRET`, `httpx` agregado a requirements, `extra_hosts` en el
+  compose para poder entregar a un receptor del host.
+  **Verificado en vivo:** suscripción -> ticket creado -> primer intento
+  fallido (receptor caído) registrado con 3 reintentos y estado FALLIDO;
+  con el receptor arriba, ENTREGADO en 1 intento (HTTP 200) y firma HMAC
+  validada por el receptor.
 - **Seed de inventario:** el almacén arranca vacío; sembrar productos
-  iniciales de forma idempotente, como el seed de usuarios.
+  iniciales de forma idempotente, como el seed de usuarios. *(pendiente)*
 
 ```
 Fase 1 (resiliencia núcleo) → Fase 2 (contención) → Fase 3 (idempotencia+logs)

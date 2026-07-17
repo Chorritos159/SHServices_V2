@@ -292,6 +292,13 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
+      # Secreto para firmar los webhooks salientes (HMAC-SHA256). El receptor
+      # recalcula la firma con este mismo valor para verificar autenticidad.
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-webhook_secreto_demo_shservices}
+    # Permite que los webhooks lleguen a un receptor corriendo en el HOST
+    # (p. ej. http://host.docker.internal:9100 para probar en local).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - shservices-net
     depends_on:

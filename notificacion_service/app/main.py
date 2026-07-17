@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from sqlalchemy import text
 from prometheus_fastapi_instrumentator import Instrumentator
-from app.api import health, notificaciones
+from app.api import health, notificaciones, webhooks
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.exceptions import (
@@ -10,6 +10,7 @@ from app.core.exceptions import (
 from app.core.logger import get_logger
 from app.core.database import engine, Base
 from app.models import notificacion  # noqa: F401 (registra la tabla)
+from app.models import webhook  # noqa: F401 (registra webhook_suscripciones y webhook_entregas)
 from app.core.consumer import iniciar_consumidor
 import asyncio
 
@@ -46,6 +47,8 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, global_exception_handler)
 app.include_router(health.router)
 app.include_router(notificaciones.router, prefix="/api/v1/notificaciones", tags=["Notificaciones"])
+# Webhooks salientes (S31/S34): ABM de suscripciones + bitacora de entregas.
+app.include_router(webhooks.router, prefix="/api/v1/notificaciones", tags=["Webhooks"])
 
 # Observabilidad (Fase 4, S34): expone /metrics para que Prometheus haga scrape.
 Instrumentator().instrument(app).expose(app)

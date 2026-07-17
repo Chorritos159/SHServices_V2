@@ -82,6 +82,49 @@ Roles: `ADMIN` (gestión), `CAJA`/`recepción` (registro y cobro), `TECNICO`
 (diagnóstico), por sede (`PIURA`/`TALARA`) — inyectados por el Gateway
 desde el JWT, nunca confiados del body de la petición.
 
+## Webhooks salientes
+
+Además de las notificaciones internas (bandeja por rol), un **sistema
+externo** puede suscribirse para recibir los eventos del negocio por HTTP.
+Vive en `notificacion-service` (`app/core/webhooks.py` = entrega,
+`app/api/webhooks.py` = suscripciones).
+
+**Cómo funciona, paso a paso:**
+
+1. **El tercero se suscribe** con su URL y el evento que le interesa
+   (`ticket.creado`, `ticket.listo`, `producto.registrado` o `*` para todos):
+   ```bash
+   curl -X POST http://localhost:8000/api/v1/notificaciones/notificaciones/webhooks/suscripciones \
+     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"url":"https://mi-sistema.com/hook","evento":"ticket.creado"}'
+   ```
+2. **Ocurre el evento.** Cuando el `notificacion-service` consume ese evento
+   de RabbitMQ, además de crear la notificación interna, hace **POST** a cada
+   URL suscrita con el payload del evento.
+3. **El payload va firmado.** La cabecera `X-Firma` lleva un
+   **HMAC-SHA256** del cuerpo con un secreto compartido (`WEBHOOK_SECRET`).
+   El receptor recalcula la firma con ese mismo secreto: si coincide, el
+   evento vino de verdad de nosotros y no fue alterado. También van
+   `X-Evento` y `X-Trace-Id` (el `correlationId`, para que el receptor
+   pueda correlacionar).
+4. **Reintentos + bitácora.** Si la entrega falla, se reintenta hasta 3
+   veces con backoff. Cada intento (ENTREGADO o FALLIDO, con el nº de
+   intentos y el código HTTP) queda en la tabla `webhook_entregas`,
+   consultable en
+   `GET /api/v1/notificaciones/notificaciones/webhooks/entregas` — así un
+   webhook que falla en silencio no es invisible.
+
+**Cómo verificar la firma** (lado del receptor, Python):
+```python
+import hashlib, hmac
+firma_esperada = hmac.new(WEBHOOK_SECRET.encode(), cuerpo_bytes, hashlib.sha256).hexdigest()
+valida = hmac.compare_digest(request.headers["X-Firma"], firma_esperada)
+```
+
+Endpoints de gestión (todos bajo `/api/v1/notificaciones/notificaciones/webhooks/`):
+`POST /suscripciones`, `GET /suscripciones`, `DELETE /suscripciones/{id}`,
+`GET /entregas`.
+
 ## Cómo ejecutar las pruebas
 
 Todo en Python puro (`pip install httpx`), corridas **desde la raíz del

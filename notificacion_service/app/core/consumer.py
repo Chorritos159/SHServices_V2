@@ -6,6 +6,7 @@ import time
 from sqlalchemy.exc import IntegrityError
 from app.core.logger import get_logger
 from app.core.database import SessionLocal
+from app.core.webhooks import despachar_webhooks
 from app.models.notificacion import NotificacionDB
 
 logger = get_logger("notificacion-service")
@@ -91,8 +92,12 @@ async def iniciar_consumidor():
                     async for message in queue_iter:
                         async with message.process():
                             payload = json.loads(message.body.decode())
-                            logger.extra["correlation_id"] = message.correlation_id or "N/A"
+                            trace_id = message.correlation_id or "N/A"
+                            logger.extra["correlation_id"] = trace_id
+                            # 1. Notificacion INTERNA (bandeja por rol).
                             _enrutar(message.routing_key, payload)
+                            # 2. Webhooks SALIENTES (avisar a terceros suscritos).
+                            await despachar_webhooks(message.routing_key, payload, trace_id)
 
         except Exception as e:
             logger.error(f"Consumidor de Notificaciones caído, reintentando en 5s: {e}")
