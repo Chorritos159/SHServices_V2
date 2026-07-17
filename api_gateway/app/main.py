@@ -84,6 +84,9 @@ TIMEOUT_DEFAULT = 5.0
 # Un circuit breaker por servicio destino (aísla el estado de salud de cada uno).
 BREAKERS = {svc: CircuitBreaker(svc) for svc in MICROSERVICIOS}
 _aperturas_vistas = {svc: 0 for svc in MICROSERVICIOS}
+# Último estado logueado por servicio: para emitir UNA línea por TRANSICIÓN
+# (CLOSED->OPEN, OPEN->HALF_OPEN, HALF_OPEN->CLOSED) y no una por request.
+_estado_visto = {svc: "CLOSED" for svc in MICROSERVICIOS}
 
 # Inicialización de TODAS las series de métricas al arranque (Fase 4/5, S34).
 # Un Counter de prometheus_client no existe como serie hasta su primer .inc():
@@ -106,13 +109,60 @@ for _svc in MICROSERVICIOS:
         metricas.BULKHEAD_REJECTS.labels(service=_svc, razon=_razon)
 
 
+# Mensaje claro por cada transicion de estado del breaker. La clave es el
+# par (estado_anterior -> estado_nuevo); asi el log DICE que mecanismo de
+# resiliencia actuo y en que direccion, sin que haya que deducirlo.
+_TRANSICIONES = {
+    ("CLOSED", "OPEN"):
+        ("error", "Circuit breaker ABIERTO para '{s}': demasiados fallos seguidos. "
+                  "Se activa fail-fast (se deja de llamar a '{s}' durante el cooldown)."),
+    ("OPEN", "HALF_OPEN"):
+        ("warning", "Circuit breaker en HALF_OPEN para '{s}': cooldown vencido, "
+                    "se prueba UNA sonda para ver si '{s}' ya se recupero."),
+    ("HALF_OPEN", "CLOSED"):
+        ("info", "Circuit breaker CERRADO para '{s}': la sonda respondio OK, "
+                 "'{s}' se recupero y el trafico vuelve a fluir normal."),
+    ("HALF_OPEN", "OPEN"):
+        ("warning", "Circuit breaker REABIERTO para '{s}': la sonda volvio a fallar, "
+                    "'{s}' sigue caido; se reinicia el cooldown."),
+    # Fallback: si la sonda cierra el circuito tan rapido que no se observo el
+    # estado HALF_OPEN intermedio, se registra la recuperacion igual.
+    ("OPEN", "CLOSED"):
+        ("info", "Circuit breaker CERRADO para '{s}': la sonda respondio OK, "
+                 "'{s}' se recupero y el trafico vuelve a fluir normal."),
+}
+
+
 def _sincronizar_metricas_breaker(service: str, breaker: CircuitBreaker):
-    """Refleja el estado y las aperturas del breaker en Prometheus tras cada llamada."""
+    """Refleja el estado del breaker en Prometheus y loguea las TRANSICIONES.
+
+    El log de transiciones es lo que permite ver en Loki/Dozzle, para CADA
+    servicio, cuando su circuito abre, cuando prueba recuperarse y cuando se
+    cierra — una linea por cambio de estado, no una por request.
+    """
     metricas.CIRCUIT_STATE.labels(service=service).set(breaker.estado_numerico())
     nuevas = breaker.aperturas - _aperturas_vistas[service]
     if nuevas > 0:
         metricas.CIRCUIT_OPENS.labels(service=service).inc(nuevas)
         _aperturas_vistas[service] = breaker.aperturas
+
+    anterior = _estado_visto[service]
+    actual = breaker.estado
+    if actual != anterior:
+        _estado_visto[service] = actual
+        entrada = _TRANSICIONES.get((anterior, actual))
+        if entrada:
+            nivel, plantilla = entrada
+            getattr(logger, nivel)(
+                plantilla.format(s=service),
+                extra={"campos": {
+                    "operation": "circuit_breaker",
+                    "event": service,
+                    "circuitFrom": anterior,
+                    "circuitTo": actual,
+                    "result": "recuperado" if actual == "CLOSED" else "degradado",
+                }},
+            )
 
 # Retry responsable (S34): reintentar NO es insistir ciegamente. Presupuesto de
 # 1 reintento corto, solo para errores transitorios, con backoff + JITTER
@@ -121,6 +171,21 @@ MAX_INTENTOS = 2
 
 def _backoff_jitter(intento: int) -> float:
     return 0.2 * intento + random.uniform(0, 0.15)
+
+
+def _log_retry(service: str, intento: int, motivo: str, espera: float):
+    """Deja constancia de que el mecanismo de RETRY se activo (no solo la metrica).
+
+    Un reintento significa que algo salio mal y la resiliencia esta
+    compensando: debe verse en la traza, no solo en un contador de Grafana.
+    """
+    logger.warning(
+        f"Retry a '{service}' (intento {intento}/{MAX_INTENTOS}) por {motivo}; "
+        f"backoff {espera:.2f}s antes de reintentar.",
+        extra={"campos": {"operation": "retry", "event": service,
+                           "retryAttempt": intento, "motivo": motivo,
+                           "backoffSeg": round(espera, 2), "result": "degradado"}},
+    )
 
 
 # ---------------------------------------------------------------------
@@ -206,10 +271,14 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
         return round((time.monotonic() - inicio) * 1000, 1)
 
     # Fail-fast: si el circuito está OPEN, ni siquiera golpeamos a la dependencia.
-    if not breaker.permite():
+    # permite() puede mover OPEN->HALF_OPEN al vencer el cooldown; se sincroniza
+    # inmediatamente despues para que ESA transicion quede logueada aunque la
+    # sonda siguiente cierre el circuito enseguida.
+    permitido = breaker.permite()
+    _sincronizar_metricas_breaker(service, breaker)
+    if not permitido:
         metricas.REQUESTS.labels(service=service, outcome="circuit_open").inc()
         metricas.FALLBACKS.labels(service=service).inc()
-        _sincronizar_metricas_breaker(service, breaker)
         logger.warning(
             f"Circuito OPEN para '{service}': fail-fast (la dependencia está en recuperación).",
             extra={"campos": {"operation": "proxy_request", "event": service,
@@ -238,7 +307,9 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
 
                 if not ok and es_lectura and intento < MAX_INTENTOS and breaker.estado == "CLOSED":
                     metricas.RETRIES.labels(service=service).inc()
-                    await asyncio.sleep(_backoff_jitter(intento))
+                    espera = _backoff_jitter(intento)
+                    _log_retry(service, intento, f"respuesta {response.status_code}", espera)
+                    await asyncio.sleep(espera)
                     continue
 
                 outcome = "ok" if response.status_code < 400 else ("client_error" if ok else "server_error")
@@ -263,7 +334,9 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
                 _sincronizar_metricas_breaker(service, breaker)
                 if es_lectura and intento < MAX_INTENTOS and breaker.estado == "CLOSED":
                     metricas.RETRIES.labels(service=service).inc()
-                    await asyncio.sleep(_backoff_jitter(intento))
+                    espera = _backoff_jitter(intento)
+                    _log_retry(service, intento, f"timeout de {timeout}s", espera)
+                    await asyncio.sleep(espera)
                     continue
                 metricas.TIMEOUTS.labels(service=service).inc()
                 metricas.REQUESTS.labels(service=service, outcome="timeout").inc()
@@ -300,7 +373,9 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
                 nunca_llego = isinstance(exc, httpx.ConnectError)
                 if (nunca_llego or es_lectura) and intento < MAX_INTENTOS and breaker.estado == "CLOSED":
                     metricas.RETRIES.labels(service=service).inc()
-                    await asyncio.sleep(_backoff_jitter(intento))
+                    espera = _backoff_jitter(intento)
+                    _log_retry(service, intento, f"fallo de transporte ({type(exc).__name__})", espera)
+                    await asyncio.sleep(espera)
                     continue
 
                 metricas.REQUESTS.labels(service=service, outcome="unreachable").inc()

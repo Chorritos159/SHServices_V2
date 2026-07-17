@@ -98,6 +98,7 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | 4 | `python pruebas/04_carga_500k.py` | Nivel **500k**: 10 nodos x bloques de 80, ventana de 15 min | 15 min |
 | 5 | `python pruebas/05_carga_1M.py` | Nivel **1M**: 15 nodos x bloques de 120, ventana de 15 min | 15 min |
 | 6 | `python pruebas/06_caos.py` | 5 fichas de falla controlada: servicio caído, latencia, cola saturada (bulkhead+shed), rate limit, evento duplicado | ~1 min |
+| 7 | `python pruebas/07_breaker_todos.py` | El circuit breaker abre para **los 6 servicios**: tumba cada uno, exige 503 (no 500) y circuito OPEN, y verifica la recuperación automática | ~3 min |
 
 **Metodología de las pruebas 3-5 (nodos, bloques, ventana fija):**
 `carga_nodos.py` simula varios **nodos** independientes — no un solo hilo,
@@ -145,6 +146,89 @@ de caos (hipótesis, métrica observada, evidencia) está en
 que empiece con "/" se lo pases a mano a un runner se lo va a convertir en
 una ruta de Windows — los scripts ya pasan las rutas sin la barra inicial
 y la reponen internamente, ya a salvo.
+
+### Probar el circuit breaker tú mismo (y por qué a veces "no abre")
+
+Si tumbas un servicio en Docker y ves que su circuito **no** abre en Grafana,
+casi siempre es por una de estas tres razones — ninguna es un bug:
+
+**1. El circuit breaker es "por demanda": solo abre si le llega tráfico.**
+El breaker abre cuando observa **fallos reales**, y solo observa fallos de
+un servicio si le están llegando peticiones a ese servicio mientras está
+caído. Si tumbas `facturas` pero nadie está pidiendo facturas, su circuito
+se queda en CLOSED — correctamente, porque no ha visto ningún fallo. Por eso
+en tu pantalla "solo notificaciones" cambiaba: el frontend hace *polling*
+continuo a `/notificaciones/mis-alertas`, así que ese es el único servicio
+con tráfico constante. Para ver abrir el circuito de otro, hay que mandarle
+peticiones mientras está caído:
+
+```bash
+# 1. token
+TOKEN=$(curl -s -X POST http://localhost:8003/api/v1/auth/login \
+  -H "Content-Type: application/json" -d '{"usuario":"admin","password":"admin123"}' \
+  | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+
+# 2. tumba el servicio
+docker stop almacen-service
+
+# 3. MÁNDALE TRÁFICO (esto es lo que faltaba): 5 peticiones
+for i in 1 2 3 4 5; do
+  curl -s -o /dev/null -w "HTTP %{http_code}\n" \
+    http://localhost:8000/api/v1/almacen/almacen/productos \
+    -H "Authorization: Bearer $TOKEN"
+done
+# -> las primeras dan 503 y abren el circuito; las siguientes son fail-fast (<100ms)
+
+# 4. míralo en /metrics (2 = OPEN) o en Grafana
+curl -s http://localhost:8000/metrics | grep 'gateway_circuit_state{service="almacen"}'
+
+# 5. restaura; tras el cooldown (15s) el circuito se cierra solo con una sonda
+docker start almacen-service
+```
+
+La prueba automatizada `python pruebas/07_breaker_todos.py` hace exactamente
+esto para los 6 servicios de corrido.
+
+**2. `docker pause` y `docker stop` NO fallan igual** (ambos abren el
+circuito, pero por caminos distintos — verificado en vivo):
+
+| Comando | Qué le pasa a la conexión | Error que ve el Gateway | Velocidad en abrir |
+| :-- | :-- | :-- | :-- |
+| `docker stop` | El contenedor desaparece, el puerto deja de escuchar | `ConnectError` (rechazo instantáneo) -> **503** | Rápido (~ms por intento) |
+| `docker pause` | El proceso se congela pero la red sigue viva: la conexión TCP se acepta y queda esperando una respuesta que no llega | `TimeoutException` -> **504** | Lento (~3-6s por intento, hay que esperar el timeout) |
+
+Con `pause` verás primero un par de **504** (timeouts de 3s) antes de que el
+circuito abra y pase a **503** fail-fast; con `stop` verás **503** desde el
+primer intento. Los dos terminan con el circuito OPEN.
+
+> **`tickets` es especial:** va a través de Toxiproxy. Al tumbar
+> `ticket-service`, Toxiproxy sigue vivo y acepta la conexión para luego
+> cerrarla -> `httpx.ReadError`. Esto rompía el breaker de tickets hasta la
+> Fase 7 (daba 500 y no abría); ya está corregido (se captura toda la
+> familia `httpx.TransportError`).
+
+**3. `auth` nunca abre — y es correcto.** El login va **directo** a
+`auth-service` (`:8003`), sin pasar por el Gateway (que de hecho bloquea
+`/api/v1/auth/*` con 403). Como ninguna petición a `auth` atraviesa el
+circuit breaker del Gateway, su circuito jamás se ejercita: siempre CLOSED.
+Aparece en el panel por consistencia, pero es inerte por diseño.
+
+### Ver el circuit breaker en los logs (no solo en Grafana)
+
+El Gateway loguea **cada transición de estado** del circuito, para todos los
+servicios, una línea por cambio (no una por request). En Dozzle
+(`:9999`) o Loki, filtra por `operation="circuit_breaker"`:
+
+```
+CLOSED -> OPEN       Circuit breaker ABIERTO para 'almacen': demasiados fallos seguidos...
+OPEN -> HALF_OPEN    ... cooldown vencido, se prueba UNA sonda para ver si 'almacen' se recupero.
+HALF_OPEN -> CLOSED  Circuit breaker CERRADO para 'almacen': la sonda respondio OK, se recupero.
+```
+
+También se loguea cuándo se activa el **retry** (`operation="retry"`, con
+`retryAttempt` y `backoffSeg`), el **timeout**, el **fallback**, el
+**bulkhead** y el **rate limit** — así, ante cualquier problema, el log dice
+qué mecanismo de resiliencia está compensando, no solo que "algo falló".
 
 ## Análisis estático con SonarQube
 
