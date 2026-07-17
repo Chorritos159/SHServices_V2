@@ -152,8 +152,78 @@ pedido explícito.
   versión, cada fase de resiliencia reflejada donde corresponde.
 - `README.md` raíz: ya cubre el checklist operativo completo (Fase 4/5).
 
+### FASE 7 — El circuit breaker de `tickets` no abre (BUG REAL) ✅ COMPLETA
+
+**Síntoma observado:** al pausar `notificacion-service`, el circuito abre y
+se ve en Grafana y en Dozzle. Al pausar `ticket-service`, **no pasa nada**:
+el circuito sigue en CLOSED y el cliente recibe un **500 opaco** en vez del
+503 con fallback honesto.
+
+**Causa raíz (reproducida en vivo):** `tickets` es el único servicio que
+el Gateway alcanza **a través de Toxiproxy** (`http://toxiproxy:8666`); los
+demás van directo al contenedor.
+
+- Servicio directo caído -> nadie escucha en el puerto -> `httpx.ConnectError`.
+- `ticket-service` caído -> **Toxiproxy sigue vivo** y acepta la conexión
+  TCP; al no poder hablar con el upstream muerto, cierra la conexión sin
+  responder -> **`httpx.ReadError`**.
+
+`_proxy_resiliente` solo captura `ConnectError` y `TimeoutException`, así
+que el `ReadError` se escapa hasta el manejador global: 500, y el breaker
+**nunca se entera del fallo**. El mecanismo de resiliencia queda ciego
+justo para el servicio que se usa para demostrarlo.
+
+**Corrección aplicada:** se captura toda la familia `httpx.TransportError`
+(ConnectError, ReadError, WriteError, RemoteProtocolError, ProxyError...)
+en vez de enumerar dos casos y dejar el resto al azar. `TimeoutException`
+va primero en el `except` porque es subclase de `TransportError` (si no,
+nunca se alcanzaría). Además se afinó el retry: solo `ConnectError`
+garantiza que el request **nunca llegó** (reintentable con cualquier
+método); con `ReadError` la conexión sí se abrió y el servidor pudo haber
+procesado la escritura antes de cortar, así que un POST **no** se
+reintenta (duplicaría).
+
+**Verificado** con `pruebas/07_breaker_todos.py` (nueva, queda como
+regresión): `docker stop` a los 6 servicios, uno por uno. Antes: `tickets`
+daba 500 y el circuito seguía en CLOSED. Ahora los 6 dan **503 controlado,
+circuito OPEN y recuperación automática a CLOSED** tras el cooldown.
+
+### FASE 8 — Cobertura de logs y pruebas para TODOS los servicios 🔴
+
+Dos huecos que la Fase 7 deja al descubierto:
+
+1. **Logs:** la Fase 3 dejó los campos S34 en las operaciones de negocio,
+   pero hay que verificar servicio por servicio que **toda** operación
+   (incluidos health checks, consumidores y publicadores) emite log
+   estructurado — no solo las rutas principales.
+2. **Pruebas:** hoy `01_traza_unica.py` toca 4 servicios y las de carga
+   solo golpean `tickets`. **Ninguna prueba ejercita los 8.** Un servicio
+   sin tráfico en las pruebas es un servicio cuyo comportamiento bajo
+   presión y ante fallas nadie verificó.
+
+**Acción:**
+- Prueba de traza: cubrir el flujo real completo (caja registra -> técnico
+  diagnostica -> caja cobra y entrega) + los casos sueltos (admin agrega
+  inventario, consulta de auditoría/notificaciones).
+- Pruebas de carga (nodos/bloques y la corta): repartir el tráfico entre
+  **todos** los servicios, no solo `tickets`.
+- Caos: `docker stop` a cada servicio, no solo a `almacen`.
+
+### FASE 9 — Swagger de todos los servicios + webhooks + seed
+
+- **Swagger:** hoy solo `api-gateway` (8000) y `auth-service` (8003)
+  publican puerto; el `/docs` de los otros 6 es inalcanzable desde el host.
+  Exponer un puerto por servicio y documentarlos.
+- **Webhooks:** no existe ninguno en el proyecto (verificado). Implementar
+  suscripción y entrega firmada ante los eventos del flujo, con reintentos
+  (S31/S34).
+- **Seed de inventario:** el almacén arranca vacío; sembrar productos
+  iniciales de forma idempotente, como el seed de usuarios.
+
 ```
 Fase 1 (resiliencia núcleo) → Fase 2 (contención) → Fase 3 (idempotencia+logs)
    → Fase 4 (dashboard) → Fase 5 (carga+fallas) → Fase 6 (gobierno)
+   → Fase 7 (fix breaker tickets) → Fase 8 (cobertura logs+pruebas)
+   → Fase 9 (swagger+webhooks+seed)
 ```
 Cada fase se entrega, se verifica y se documenta antes de la siguiente.

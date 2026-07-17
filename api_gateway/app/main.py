@@ -256,27 +256,8 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
                     data = response.text
                 return JSONResponse(status_code=response.status_code, content=data)
 
-            except httpx.ConnectError:
-                breaker.registrar(False)
-                _sincronizar_metricas_breaker(service, breaker)
-                # El request nunca llegó: reintentar es seguro para cualquier método.
-                if intento < MAX_INTENTOS and breaker.estado == "CLOSED":
-                    metricas.RETRIES.labels(service=service).inc()
-                    await asyncio.sleep(_backoff_jitter(intento))
-                    continue
-                metricas.REQUESTS.labels(service=service, outcome="unreachable").inc()
-                metricas.FALLBACKS.labels(service=service).inc()
-                logger.error(
-                    f"CIRCUIT BREAKER: el servicio '{service}' está inaccesible (estado: {breaker.estado}).",
-                    extra={"campos": {"operation": "proxy_request", "event": service,
-                                       "result": "unreachable", "durationMs": _duracion_ms()}},
-                )
-                return JSONResponse(
-                    status_code=503,
-                    content={"error": "Service Unavailable",
-                             "detalle": f"El servicio '{service}' se encuentra temporalmente fuera de línea.",
-                             "circuito": breaker.estado, "trace_id": correlation_id},
-                )
+            # OJO con el orden: TimeoutException es subclase de TransportError,
+            # asi que va primero o nunca se alcanzaria.
             except httpx.TimeoutException:
                 breaker.registrar(False)
                 _sincronizar_metricas_breaker(service, breaker)
@@ -288,14 +269,54 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
                 metricas.REQUESTS.labels(service=service, outcome="timeout").inc()
                 metricas.FALLBACKS.labels(service=service).inc()
                 logger.error(
-                    f"⏱TIMEOUT: '{service}' superó su presupuesto de {timeout}s (circuito: {breaker.estado}).",
+                    f"Timeout: '{service}' supero su presupuesto de {timeout}s (circuito: {breaker.estado}).",
                     extra={"campos": {"operation": "proxy_request", "event": service,
                                        "result": "timeout", "durationMs": _duracion_ms()}},
                 )
                 return JSONResponse(
                     status_code=504,
-                    content={"error": "Gateway Timeout", "circuito": breaker.estado,
-                             "trace_id": correlation_id},
+                    content={"error": "Gateway Timeout",
+                             "detalle": (f"El servicio '{service}' tardo mas de {timeout}s en responder. "
+                                         "Vuelve a intentarlo en unos segundos."),
+                             "circuito": breaker.estado, "trace_id": correlation_id},
+                )
+
+            # TODA la familia de fallos de transporte, no solo ConnectError:
+            # ReadError, WriteError, RemoteProtocolError, ProxyError, PoolTimeout...
+            # Enumerar dos casos dejaba el resto sin capturar: se escapaban al
+            # manejador global (500 opaco) y el breaker NUNCA se enteraba del
+            # fallo. Se veia justo con 'tickets', el unico servicio que va via
+            # Toxiproxy: al caer el upstream, Toxiproxy sigue vivo y acepta la
+            # conexion TCP, luego la cierra -> httpx.ReadError, no ConnectError.
+            except httpx.TransportError as exc:
+                breaker.registrar(False)
+                _sincronizar_metricas_breaker(service, breaker)
+
+                # ConnectError = la conexion nunca se establecio, el request no
+                # llego a ejecutarse: reintentar es seguro para cualquier metodo.
+                # El resto (ReadError, RemoteProtocolError...) = la conexion SI
+                # se abrio; el servidor pudo haber procesado la escritura antes
+                # de cortar, asi que reintentar un POST podria duplicarla.
+                nunca_llego = isinstance(exc, httpx.ConnectError)
+                if (nunca_llego or es_lectura) and intento < MAX_INTENTOS and breaker.estado == "CLOSED":
+                    metricas.RETRIES.labels(service=service).inc()
+                    await asyncio.sleep(_backoff_jitter(intento))
+                    continue
+
+                metricas.REQUESTS.labels(service=service, outcome="unreachable").inc()
+                metricas.FALLBACKS.labels(service=service).inc()
+                logger.error(
+                    f"Circuit breaker: el servicio '{service}' esta inaccesible (estado: {breaker.estado}).",
+                    extra={"campos": {"operation": "proxy_request", "event": service,
+                                       "result": "unreachable", "durationMs": _duracion_ms(),
+                                       "errorType": type(exc).__name__}},
+                )
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "Service Unavailable",
+                             "detalle": f"El servicio '{service}' se encuentra temporalmente fuera de linea.",
+                             "circuito": breaker.estado, "trace_id": correlation_id},
+                    headers={"Retry-After": "5"},
                 )
 
 # 3. Middleware de Observabilidad (Genera el Rastro)
