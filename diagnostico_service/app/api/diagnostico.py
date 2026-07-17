@@ -9,6 +9,7 @@ import datetime
 from app.models.schemas import DiagnosticoCreate, DiagnosticoResponse, DiagnosticoDetalle, RepuestoDetalle
 from app.models.diagnostico import DiagnosticoDB
 from app.models.idempotencia import IdempotenciaDB
+from app.models.asignacion import AsignacionDB
 from app.core.database import get_db
 from app.core.logger import get_logger, NO_ENCONTRADO, RECHAZADO, DUPLICADO
 from app.core.rabbitmq import publicar_evento
@@ -57,6 +58,22 @@ async def registrar_diagnostico(
         "registrar_diagnostico", event="DiagnosticoRegistrado.v1",
         idTicket=diagnostico.idTicket, sede=sede, repuestos=len(diagnostico.repuestos),
     ) as op:
+        # 0. ¿El ticket YA tiene un diagnóstico? (id_ticket es UNIQUE). Se
+        # comprueba ANTES de reservar stock para no dejar reservas huérfanas y,
+        # sobre todo, para devolver un 409 legible en vez de un 500 opaco
+        # ("error inesperado") por la violación de la restricción única.
+        ya_existe = db.query(DiagnosticoDB).filter(
+            DiagnosticoDB.id_ticket == diagnostico.idTicket
+        ).first()
+        if ya_existe:
+            op.result = RECHAZADO
+            op.mensaje = f"El ticket {diagnostico.idTicket} ya tiene un diagnostico registrado ({ya_existe.id})."
+            raise HTTPException(
+                status_code=409,
+                detail=(f"El ticket '{diagnostico.idTicket}' ya tiene un diagnostico registrado. "
+                        "No se puede registrar otro."),
+            )
+
         # 1. Reservar stock en almacén por CADA repuesto de la lista.
         estado_reserva = "SIN_REPUESTOS" if not diagnostico.repuestos else "RESERVA_CONFIRMADA"
         async with httpx.AsyncClient() as client:
@@ -106,7 +123,28 @@ async def registrar_diagnostico(
             estado="DIAGNOSTICADO",
         )
         db.add(nuevo_diag)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # Carrera: otro request registró el diagnóstico de este ticket entre
+            # la comprobación y el commit. Se responde 409 legible, no 500.
+            db.rollback()
+            op.result = RECHAZADO
+            op.mensaje = f"Carrera: el ticket {diagnostico.idTicket} ya tenia diagnostico al confirmar."
+            raise HTTPException(
+                status_code=409,
+                detail=f"El ticket '{diagnostico.idTicket}' ya tiene un diagnostico registrado.",
+            )
+
+        # Si el ticket estaba asignado a un técnico, refleja el avance en su
+        # bandeja "Mis Tickets" (TOMADO -> DIAGNOSTICADO). No es crítico: si no
+        # hay asignación, simplemente no se toca.
+        asignacion = db.query(AsignacionDB).filter(
+            AsignacionDB.id_ticket == diagnostico.idTicket
+        ).first()
+        if asignacion:
+            asignacion.estado = "DIAGNOSTICADO"
+            db.commit()
 
         op.campos.update({
             "idDiagnostico": id_diag,

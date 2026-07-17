@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from sqlalchemy import text
-from app.api import health, diagnostico
+from app.api import health, diagnostico, asignaciones
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.exceptions import (
@@ -10,8 +10,9 @@ from app.core.logger import get_logger
 from app.core.database import engine
 from app.models.diagnostico import Base
 from app.models import idempotencia  # noqa: F401 (registra la tabla de idempotencia en Base)
+from app.models import asignacion    # noqa: F401 (registra la tabla de asignaciones en Base)
 
-# Crea las tablas automáticamente (diagnósticos + idempotencia).
+# Crea las tablas automáticamente (diagnósticos + idempotencia + asignaciones).
 Base.metadata.create_all(bind=engine)
 
 # Migración no destructiva: create_all NO altera tablas existentes, así que
@@ -36,6 +37,12 @@ app.add_exception_handler(Exception, global_exception_handler)
 
 app.include_router(health.router)
 app.include_router(diagnostico.router, prefix="/api/v1/diagnosticos", tags=["Diagnósticos"])
+# Asignaciones (¿quién atiende qué?): diagnostico-service es el dueño para que
+# "Mis Tickets" no dependa del ticket-service. Se monta en /api/v1/asignaciones
+# (sin doblar "diagnosticos") para que el Gateway lo exponga como
+# /api/v1/diagnosticos/asignaciones/... (el prefijo "diagnosticos" lo pone el
+# enrutado del Gateway a partir del nombre del servicio).
+app.include_router(asignaciones.router, prefix="/api/v1/asignaciones", tags=["Asignaciones"])
 
 @app.on_event("startup")
 async def startup_event():
