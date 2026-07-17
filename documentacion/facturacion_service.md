@@ -35,3 +35,4 @@ El changelog explica qué cambió y a quién afecta. No es una bitácora extensa
 | :--- | :--- | :--- | :--- |
 | `v2.0` | Extracción y creación del servicio de facturación en V2 | Release | Consumir API de emisión de comprobantes |
 | `v2.1` | feat(resiliencia S34, Fase 3): idempotencia en `POST /facturas` por clave natural `id_ticket` (ya era `unique` en BD, pero un reintento devolvía un error 500 crudo en vez de la factura existente) — un ticket tiene, a lo sumo, una factura; un reintento del cliente o del Gateway devuelve la MISMA factura, nunca duplica el cobro. Logs migrados al formato mínimo S34 | Compatible | Ninguna (un reintento ahora es seguro) |
+| `v2.2` | refactor(logs): el endpoint usa el helper `logger.operacion()` como el resto de servicios (mide `durationMs` solo, una línea por operación, `result=ok`/`duplicado`); se elimina el `logger.info` suelto sin campos S34 y el cronometraje manual | Compatible | Ninguna |

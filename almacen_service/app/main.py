@@ -8,6 +8,7 @@ from app.core.exceptions import (
 )
 from app.core.logger import get_logger
 from app.core.database import engine
+from app.core.seed import seed_inventario_base
 from app.models.inventario import Base
 
 # Crear la tabla 'inventario' en Postgres si no existe
@@ -16,6 +17,9 @@ Base.metadata.create_all(bind=engine)
 # Migración NO destructiva: agrega el precio de venta si aún no existe (idempotente).
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE inventario ADD COLUMN IF NOT EXISTS precio_unitario DOUBLE PRECISION NOT NULL DEFAULT 0"))
+
+# Seed de inventario base (idempotente): que el almacen no arranque vacio.
+seed_inventario_base()
 
 app = FastAPI(
     title="Servicio de Almacén e Inventario",
