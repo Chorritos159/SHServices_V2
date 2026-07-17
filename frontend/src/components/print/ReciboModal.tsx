@@ -1,6 +1,7 @@
 "use client";
 
 import PrintableModal, { EncabezadoEmpresa, Fila } from "@/components/print/PrintableModal";
+import { fechaHora } from "@/lib/fecha";
 
 export interface ReciboData {
   idTicket: string;
@@ -24,7 +25,7 @@ export default function ReciboModal({ data, onClose }: { data: ReciboData; onClo
         <p className="font-mono text-lg font-bold">{data.idTicket}</p>
       </div>
 
-      <Fila label="Fecha" value={new Date(data.fecha).toLocaleString()} />
+      <Fila label="Fecha" value={fechaHora(data.fecha)} />
 
       <div className="my-2 border-t border-dashed border-slate-300 pt-2">
         <p className="mb-1 text-xs font-semibold uppercase text-slate-400">Cliente</p>

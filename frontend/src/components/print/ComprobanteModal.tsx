@@ -1,6 +1,7 @@
 "use client";
 
 import PrintableModal, { EncabezadoEmpresa, Fila } from "@/components/print/PrintableModal";
+import { fechaHora, soloFecha } from "@/lib/fecha";
 
 export interface ComprobanteData {
   idFactura: string;
@@ -29,7 +30,7 @@ export default function ComprobanteModal({ data, onClose }: { data: ComprobanteD
         <p className="font-mono text-lg font-bold">{data.idFactura}</p>
       </div>
 
-      <Fila label="Fecha" value={new Date(data.fecha).toLocaleString()} />
+      <Fila label="Fecha" value={fechaHora(data.fecha)} />
       <Fila label="Ticket" value={data.idTicket} />
       <Fila label="Cliente" value={data.cliente} />
       <Fila label="DNI/RUC" value={data.documento} />
@@ -52,7 +53,7 @@ export default function ComprobanteModal({ data, onClose }: { data: ComprobanteD
       </div>
       {data.garantiaVence ? (
         <p className="mt-2 text-center text-xs font-medium text-slate-600">
-          🛡️ Garantía de 90 días válida hasta el {new Date(data.garantiaVence).toLocaleDateString()}
+          🛡️ Garantía de 90 días válida hasta el {soloFecha(data.garantiaVence)}
         </p>
       ) : null}
       <p className="mt-2 text-center text-xs text-slate-500">¡Gracias por su preferencia!</p>

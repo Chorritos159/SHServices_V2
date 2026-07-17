@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { isAxiosError } from "axios";
 import { api } from "@/lib/api/client";
+import { fechaHora } from "@/lib/fecha";
 import type { EventoAuditoria } from "@/lib/types/backend";
 
 /**
@@ -74,7 +75,7 @@ export default function EventosTable() {
               {eventos.map((e, i) => (
                 <tr key={`${e.trace_id}-${i}`} className="border-b border-slate-800/60 last:border-0">
                   <td className="px-5 py-2.5 whitespace-nowrap text-xs text-slate-400">
-                    {new Date(e.recibido_en).toLocaleString()}
+                    {fechaHora(e.recibido_en)}
                   </td>
                   <td className="px-5 py-2.5">
                     <span className="rounded bg-sky-600/15 px-2 py-0.5 text-xs font-medium text-sky-300">

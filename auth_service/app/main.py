@@ -16,26 +16,48 @@ logger = get_logger("auth-service")
 Base.metadata.create_all(bind=engine)
 
 
+# Usuarios base de la demo. Solo hay dos sedes reales: PIURA y TALARA (no LIMA).
+# El admin queda en PIURA; hay caja y tecnico en cada sede.
+_USUARIOS_BASE = [
+    ("admin",     "admin123",    "ADMIN",   "PIURA"),
+    ("caja01",    "caja123",     "CAJA",    "PIURA"),
+    ("tecnico01", "tecnico123",  "TECNICO", "PIURA"),
+    ("caja02",    "caja123",     "CAJA",    "TALARA"),
+    ("tecnico02", "tecnico123",  "TECNICO", "TALARA"),
+]
+
+
 def seed_usuarios_base():
     """
-    SEED de credenciales maestras: si la tabla está VACÍA, inserta los 3 usuarios
-    base. Garantiza que el sistema NUNCA quede inaccesible por falta de credenciales
-    (incluso tras borrar el volumen). Es idempotente: no duplica si ya hay usuarios.
+    SEED de credenciales maestras: inserta los usuarios base que falten.
+    Garantiza que el sistema NUNCA quede inaccesible por falta de credenciales
+    (incluso tras borrar el volumen). Es idempotente: no duplica.
+
+    Ademas corrige la sede LIMA de una version anterior del seed: LIMA no es una
+    sede valida del negocio (solo PIURA y TALARA), asi que se migra a PIURA.
     """
     db = SessionLocal()
     try:
-        if db.query(UsuarioDB).count() == 0:
+        # Correccion idempotente: cualquier usuario que quedo en LIMA pasa a PIURA.
+        migrados = db.query(UsuarioDB).filter(UsuarioDB.sede == "LIMA").update({UsuarioDB.sede: "PIURA"})
+        if migrados:
+            logger.info(f"Sede LIMA corregida a PIURA en {migrados} usuario(s).")
+
+        existentes = {u.usuario for u in db.query(UsuarioDB.usuario).all()}
+        nuevos = [
+            UsuarioDB(usuario=u, password=pwd.hashear(p), rol=r, sede=s)
+            for (u, p, r, s) in _USUARIOS_BASE if u not in existentes
+        ]
+        if nuevos:
             # Las credenciales de demo se hashean igual que cualquier otra
             # (OWASP A02): ni siquiera el seed escribe texto plano en la BD.
-            db.add_all([
-                UsuarioDB(usuario="admin",     password=pwd.hashear("admin123"),   rol="ADMIN",   sede="LIMA"),
-                UsuarioDB(usuario="caja01",    password=pwd.hashear("caja123"),    rol="CAJA",    sede="PIURA"),
-                UsuarioDB(usuario="tecnico01", password=pwd.hashear("tecnico123"), rol="TECNICO", sede="PIURA"),
-            ])
+            db.add_all(nuevos)
             db.commit()
-            logger.info("Seed aplicado: usuarios base (admin, caja01, tecnico01) creados.")
+            logger.info(f"Seed de usuarios: {len(nuevos)} usuario(s) creados "
+                        f"({', '.join(u.usuario for u in nuevos)}).")
         else:
-            logger.info("Seed omitido: ya existen usuarios en la base de datos.")
+            db.commit()
+            logger.info("Seed de usuarios omitido: todos ya existen.")
     finally:
         db.close()
 

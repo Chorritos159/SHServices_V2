@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isAxiosError } from "axios";
 import { api } from "@/lib/api/client";
+import { soloFecha } from "@/lib/fecha";
 import type { Garantia } from "@/lib/types/backend";
 
 /**
@@ -130,8 +131,8 @@ function TarjetaGarantia({ g }: { g: Garantia }) {
         <Fila k="N° de serie" v={g.numero_serie ?? "—"} mono />
         <Fila k="Reparación" v={g.descripcion ?? "—"} />
         <Fila k="Ticket" v={g.id_ticket} mono />
-        <Fila k="Entrega" v={new Date(g.fecha_entrega).toLocaleDateString()} />
-        <Fila k="Vence" v={new Date(g.fecha_vencimiento).toLocaleDateString()} />
+        <Fila k="Entrega" v={soloFecha(g.fecha_entrega)} />
+        <Fila k="Vence" v={soloFecha(g.fecha_vencimiento)} />
       </dl>
     </article>
   );

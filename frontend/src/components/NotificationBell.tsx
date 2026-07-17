@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api/client";
+import { fechaHora } from "@/lib/fecha";
 import type { Notificacion } from "@/lib/types/backend";
 
 const POLL_MS = 10_000;
@@ -85,7 +86,7 @@ export default function NotificationBell() {
                   <li key={a.id} className="px-4 py-3">
                     <p className="text-sm text-slate-200">{a.mensaje}</p>
                     <p className="mt-0.5 text-xs text-slate-500">
-                      {new Date(a.created_at).toLocaleString()}
+                      {fechaHora(a.created_at)}
                     </p>
                   </li>
                 ))}
