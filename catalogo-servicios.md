@@ -36,7 +36,7 @@ El `auth-service` emite un JWT (HS256, expiración 2 h) con la forma:
 | **Auth** | `auth-service` | `8003→80` | Emite JWT con `rol` + `sede` | — | — |
 | **Tickets** | `ticket-service` | interno (vía Toxiproxy) | Alta de tickets, bandeja de pendientes, cambio de estado | ✔ | Publica `ticket.creado` |
 | **Almacén** | `almacen-service` | interno | Inventario: listar, ingresar (código autogenerado), reservar stock | ✔ | — |
-| **Diagnóstico** | `diagnostico-service` | interno | Diagnóstico técnico con precio + repuestos; reserva stock en Almacén | ✔ | Publica `ticket.diagnosticado` |
+| **Diagnóstico** | `diagnostico-service` | interno | Diagnóstico técnico con precio + repuestos; reserva stock en Almacén. **Dueño de las asignaciones** (¿qué técnico atiende qué ticket?): sirve "Mis Tickets" y la vista de admin sin depender de tickets | ✔ | Publica `ticket.diagnosticado`, `ticket.tomado` |
 | **Facturación** | `facturacion-service` | interno | Emisión de comprobantes; idempotente por `id_ticket` (Fase 3) | ✔ | Publica `ticket.facturado` |
 | **Auditoría** | `auditoria-service` | interno | Consume `ticket.*` y **persiste la traza en PostgreSQL**; idempotente por `(trace_id, evento)` (Fase 3) | ✔ | Consume `ticket.*` |
 | **Notificaciones** | `notificacion-service` | interno | Alertas internas dirigidas por rol (ADMIN/TECNICO/CAJA); idempotente por `(trace_id, evento, rol_destino)` (Fase 3) | ✔ | Consume `ticket.creado`, `ticket.listo`, `producto.registrado` |
@@ -66,7 +66,10 @@ El `auth-service` emite un JWT (HS256, expiración 2 h) con la forma:
 | PATCH | `/api/v1/tickets/tickets/{id}` | TECNICO | Cambiar estado |
 | GET/POST | `/api/v1/almacen/almacen/productos` | ADMIN | Listar / ingresar producto |
 | POST | `/api/v1/almacen/almacen/reservar` | (interno) | Reservar stock |
-| POST | `/api/v1/diagnosticos/diagnosticos/` | TECNICO | Registrar diagnóstico |
+| POST | `/api/v1/diagnosticos/diagnosticos/` | TECNICO | Registrar diagnóstico (idempotente por `Idempotency-Key`; 409 si el ticket ya tiene diagnóstico) |
+| POST | `/api/v1/diagnosticos/asignaciones/tomar` | TECNICO | Tomar un ticket (queda asignado solo a él; 409 si otro lo tomó) |
+| GET | `/api/v1/diagnosticos/asignaciones/mias` | TECNICO | "Mis Tickets" del técnico (sin depender de ticket-service) |
+| GET | `/api/v1/diagnosticos/asignaciones/` | ADMIN | Todos los tickets tomados y quién los atiende |
 | POST | `/api/v1/facturas/facturas/` | CAJA | Emitir comprobante |
 | GET | `/api/v1/auditoria/auditoria/eventos` | ADMIN | Traza de auditoría |
 | GET | `/api/v1/notificaciones/notificaciones/mis-alertas` | cualquier rol autenticado | Bandeja de alertas no leídas (filtra por el rol del token) |
@@ -85,7 +88,7 @@ Si la BD no responde: `status: "DEGRADED"`, `dependencies.database: "DOWN"` (el 
 ## 6. Flujo de negocio
 
 1. **CAJA** registra el ticket (`SOPORTE` → `EN_COLA`, `VENTA` → `VENTA_REGISTRADA`) → **TECNICO** recibe una alerta.
-2. **TECNICO** toma un ticket `EN_COLA`, registra diagnóstico (precio + repuestos), descuenta stock; el ticket pasa a `DIAGNOSTICADO` → **CAJA** recibe una alerta de que ya puede cobrar.
+2. **TECNICO** ve la cola `EN_COLA` **de su sede** y **toma** un ticket: queda asignado solo a él (otro técnico de la sede no puede tomarlo) y aparece en su bandeja **"Mis Tickets"** (servida por diagnóstico, resiliente a caídas de tickets). Registra el diagnóstico (precio + repuestos), descuenta stock; el ticket pasa a `DIAGNOSTICADO` → **CAJA** recibe una alerta de que ya puede cobrar. El **ADMIN** puede ver en todo momento quién atiende cada ticket.
 3. **CAJA** emite la factura del ticket.
 4. **ADMIN** gestiona inventario y audita toda la traza de eventos.
 

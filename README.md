@@ -81,9 +81,14 @@ o inseguros.
 
 1. **Recepción** registra un ticket (`POST /tickets`) — SOPORTE (equipo con
    falla) o VENTA directa. Un SOPORTE nace en `EN_COLA`.
-2. **Técnico** toma el ticket (`EN_DIAGNOSTICO`) y diagnostica: si necesita
-   un repuesto, `diagnostico-service` lo reserva en `almacen-service`
-   (orquestación síncrona) y el ticket pasa a `DIAGNOSTICADO`.
+2. **Técnico** ve la cola de **su sede** y **toma** un ticket: queda asignado
+   solo a él (exclusivo por sede) y entra en su bandeja **"Mis Tickets"**
+   (`EN_DIAGNOSTICO`). Diagnostica: si necesita un repuesto,
+   `diagnostico-service` lo reserva en `almacen-service` (orquestación
+   síncrona) y el ticket pasa a `DIAGNOSTICADO`. Las asignaciones las gestiona
+   `diagnostico-service`, así que "Mis Tickets" y el "quién atiende qué" del
+   admin funcionan aunque `ticket-service` esté caído (ver *Asignación de
+   tickets* más abajo).
 3. Se emite `ticket.listo` → **notificacion-service** avisa a Caja.
 4. **Caja** cobra (`POST /facturas`, `facturacion-service`) y entrega
    (`ENTREGADO`).
@@ -94,6 +99,47 @@ o inseguros.
 Roles: `ADMIN` (gestión), `CAJA`/`recepción` (registro y cobro), `TECNICO`
 (diagnóstico), por sede (`PIURA`/`TALARA`) — inyectados por el Gateway
 desde el JWT, nunca confiados del body de la petición.
+
+## Asignación de tickets (¿quién atiende qué?)
+
+El **técnico** ve la cola `EN_COLA` **de su sede** y **toma** un ticket. A
+partir de ese momento el ticket queda asignado **solo a él**: otro técnico de
+la misma sede que intente tomarlo recibe un `409` (exclusividad). Los tickets
+tomados aparecen en la bandeja **"Mis Tickets"** del técnico, y el **admin**
+ve en `/admin/asignaciones` todos los tickets tomados y **quién los atiende**.
+
+**Quién lo gestiona (y por qué):** las asignaciones son propiedad del
+`diagnostico-service` (tabla `asignaciones`, con la clave primaria `id_ticket`
+que garantiza "un ticket = un técnico"), **no** del `ticket-service`. Así, la
+bandeja "Mis Tickets" y la vista del admin siguen funcionando **aunque
+`ticket-service` esté caído** — el trabajo del técnico no se detiene por una
+caída del servicio de tickets. Al tomar, se avisa a `ticket-service`
+(`EN_COLA → EN_DIAGNOSTICO`) en **segundo plano best-effort**: la respuesta es
+instantánea y la asignación es autoritativa aunque ese aviso se pierda.
+
+| Acción | Endpoint | Rol |
+| :-- | :-- | :-- |
+| Tomar un ticket | `POST /api/v1/diagnosticos/asignaciones/tomar` | TECNICO |
+| Mis Tickets | `GET /api/v1/diagnosticos/asignaciones/mias` | TECNICO |
+| Quién atiende qué | `GET /api/v1/diagnosticos/asignaciones/` | ADMIN |
+
+Pruébalo: `docker pause ticket-service`, abre la pantalla de un técnico → la
+cola avisa "no disponible" pero **"Mis Tickets" sigue cargando**; `docker
+unpause ticket-service` para restaurar.
+
+## Cero pérdida de escrituras: outbox transaccional del Gateway
+
+Cuando el cliente hace una **escritura** (crear ticket, registrar diagnóstico,
+cobrar, mover inventario) y el microservicio destino está **caído**, el
+API Gateway **no pierde la petición**: la guarda en una tabla durable
+(`gateway_outbox`) y responde `202 { "encolado": true }` en vez de un error.
+Un worker de fondo la reintenta sola contra el servicio con la **misma
+`Idempotency-Key`**; en cuanto el servicio vuelve, se entrega. **Nada se
+pierde ni se duplica.**
+
+Pruébalo: `docker pause ticket-service`, crea un ticket → `202 encolado`;
+`docker unpause ticket-service` → el worker lo registra solo, una sola vez.
+Ver `api_gateway/app/core/outbox.py`.
 
 ## Webhooks salientes
 
@@ -378,6 +424,26 @@ que el usuario note nada.
 - **Traza única de un ticket**: `python pruebas/01_traza_unica.py` — crea
   un ticket con un `correlationId` conocido y confirma que aparece en
   auditoría, notificaciones y los logs de los 4 contenedores del flujo.
+
+## Mejoras que se pueden implementar (lo que faltó del catálogo funcional)
+
+El catálogo funcional describe capacidades por servicio más amplias que lo
+implementado. Por tiempo se priorizó el flujo núcleo (ticket → diagnóstico →
+almacén → facturación → notificación/auditoría), la asignación de tickets y la
+resiliencia. Lo que quedaría como siguiente iteración, por servicio:
+
+| Servicio | Pendiente del catálogo | Nota |
+| :-- | :-- | :-- |
+| **Tickets** | Estados intermedios completos (recibido, en reparación, validado, listo para entrega, cerrado) y control de tiempos/SLA por ticket | Hoy: `EN_COLA → EN_DIAGNOSTICO → DIAGNOSTICADO → ENTREGADO/RECHAZADO`. Falta el detalle de SLA. |
+| **Diagnóstico** | Registro separado de acciones de reparación y de pruebas de validación/QA | Hoy se registra la falla + repuestos + precio en un solo diagnóstico. |
+| **Almacén** | Flujo de **venta directa** (salida de productos por venta) e ingreso incremental de stock por lote | Hoy: reservar/confirmar/liberar/descontar para servicio técnico + alta de productos. |
+| **Facturación** | **Anulación/corrección** controlada de comprobantes y consulta de comprobantes por cliente/orden | Hoy: emisión idempotente por `id_ticket` + garantías. |
+| **Notificaciones** | Notificación **al cliente** (hoy solo interna por rol) y aviso explícito de "listo para entrega" / cierre | Hoy: alertas internas dirigidas por rol + webhooks salientes. |
+| **Auditoría** | Consulta filtrada por usuario/sede/fecha desde la UI | Hoy: se persiste la traza y se lista; falta el buscador avanzado. |
+| **Autenticación** | Estado de cuenta (activa/bloqueada/inactiva), registro de intentos de acceso e invalidación de sesión/token | Hoy: login JWT + alta de usuarios + RBAC por rol/sede. |
+
+Ninguna de estas brechas afecta al flujo principal ni a la resiliencia
+demostrada; son ampliaciones funcionales.
 
 ## Brechas conocidas
 

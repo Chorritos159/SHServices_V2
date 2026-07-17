@@ -19,9 +19,12 @@
 | **Shedding por prioridad** | API Gateway (umbral 70% de ocupación) | Protege escrituras críticas descartando lecturas de baja prioridad primero |
 | **Rate limiting global** | API Gateway (`app/core/ratelimit.py`, token bucket) | El Gateway mismo no colapsa ante una ráfaga, sin importar el destino |
 | **Sampling de logs** | API Gateway (middleware de correlación) | Evita que el logging se vuelva cuello de botella bajo carga alta |
-| **Idempotencia (Idempotency-Key)** | `POST /tickets` (ticket_service) | Un reintento del cliente/Gateway no duplica el ticket |
+| **Idempotencia (Idempotency-Key)** | `POST /tickets` (ticket_service), `POST /diagnosticos` (diagnostico_service), `tomar` (asignaciones) | Un reintento del cliente/Gateway/outbox no duplica el ticket, el diagnóstico ni la asignación |
 | **Idempotencia (clave natural)** | `POST /facturas` (facturacion_service) | Un ticket tiene, a lo sumo, una factura |
 | **Idempotencia de consumidores** | auditoria-service, notificacion-service (índice único) | Un redelivery de RabbitMQ no duplica la traza ni la alerta |
+| **Outbox transaccional (store-and-forward)** | API Gateway (`app/core/outbox.py`, tabla `gateway_outbox`) | Si un servicio está caído, la ESCRITURA del cliente no se pierde: se encola (202) y un worker la reintenta sola con la misma Idempotency-Key (ni se pierde ni se duplica) |
+| **"Mis Tickets" independiente** | diagnostico-service (tabla `asignaciones`) | La bandeja del técnico y el "quién atiende qué" del admin los sirve diagnóstico, no ticket-service: el técnico sigue trabajando aunque tickets caiga |
+| **Sync best-effort en 2º plano** | diagnostico → ticket (`BackgroundTask`) | Tomar un ticket responde al instante; la sincronización de estado con ticket-service no bloquea ni falla la operación |
 | **Logs estructurados S34** | Los 9 servicios (`app/core/logger.py`) | `service, correlationId, operation, event, result, durationMs` — trazables y filtrables |
 | **Métricas de resiliencia** | Gateway → `/metrics` → Prometheus | Circuit state, retries, fallbacks, bulkhead, rate limit, timeouts observables |
 | **Dashboard de resiliencia** | Grafana (`grafana/dashboards/resiliencia_s34.json`, provisionado) | Circuit state, retry/fallback, bulkhead, rate limit, queue depth, consumer lag — todo en un solo lugar |
