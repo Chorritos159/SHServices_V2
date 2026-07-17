@@ -118,8 +118,14 @@ BULKHEADS = {svc: Bulkhead(svc, BULKHEAD_LIMITES.get(svc, BULKHEAD_LIMITE_DEFAUL
 UMBRAL_SHED = 0.7
 
 # Rate limit GLOBAL del Gateway (protege al proceso mismo, no a una
-# dependencia): 40 peticiones de ráfaga, repuestas a 20/s en régimen.
-RATE_LIMITER = TokenBucket(capacidad=40, tasa_por_seg=20.0)
+# dependencia): 40 peticiones de ráfaga, repuestas a 20/s en régimen por
+# defecto. Configurable por entorno (Fase 5, S34) para poder AMPLIARLO
+# temporalmente en las pruebas de carga 500k/1M — así se mide el throughput
+# real del backend y no el techo del propio limitador.
+RATE_LIMITER = TokenBucket(
+    capacidad=int(os.getenv("RATE_LIMIT_BURST", "40")),
+    tasa_por_seg=float(os.getenv("RATE_LIMIT_RPS", "20")),
+)
 
 
 def _prioridad(service: str, metodo: str) -> str:

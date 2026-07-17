@@ -17,6 +17,9 @@ env/
 # Documentación Word generada por generar_doc.py (artefacto regenerable)
 Documentacion_Integrador2.docx
 
+# Reportes de las pruebas de carga (Fase 5, S34) — regenerables, no versionar
+pruebas/resultados/
+
 # IDEs and editors
 .vscode/
 .idea/
