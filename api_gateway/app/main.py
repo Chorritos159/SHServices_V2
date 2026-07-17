@@ -406,10 +406,59 @@ async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: s
                 )
                 return _encolar_o_error(service, path, metodo, body, headers, error_503)
 
-# 2.d Outbox transaccional (store-and-forward).
-# Al arrancar: creamos la tabla y lanzamos el worker que reintenta las
-# escrituras encoladas hasta que el microservicio caído vuelve. Así ninguna
-# escritura del cliente se pierde por una caída temporal.
+# Sonda ACTIVA del circuit breaker (recuperación automática).
+# Cada cuánto el prober revisa los circuitos que no están CLOSED.
+SONDA_BREAKER_INTERVALO_S = 5
+
+
+async def bucle_sonda_breakers():
+    """Recupera los circuitos SOLOS, sin necesidad de tráfico del cliente.
+
+    Un circuit breaker clásico es "lazy": solo pasa OPEN -> HALF_OPEN -> CLOSED
+    cuando llega una petición del cliente después del cooldown. Si nadie manda
+    tráfico, el circuito se queda OPEN para siempre. Esta sonda recorre los
+    breakers cada pocos segundos y, para los que NO están CLOSED y ya cumplieron
+    el cooldown, manda un probe al `/health` del servicio (por la MISMA ruta que
+    el tráfico real). Si responde, el circuito se cierra por sí mismo — el
+    usuario NO tiene que mandar peticiones para que se recupere.
+    """
+    await asyncio.sleep(3)  # deja arrancar el resto del sistema
+    while True:
+        for service, breaker in BREAKERS.items():
+            try:
+                if breaker.estado == "CLOSED":
+                    continue  # los sanos no se molestan
+                # permite() mueve OPEN->HALF_OPEN si el cooldown venció y reclama
+                # la sonda; devuelve False si sigue en cooldown o ya hay una en vuelo.
+                if not breaker.permite():
+                    _sincronizar_metricas_breaker(service, breaker)
+                    continue
+                base = MICROSERVICIOS[service]
+                ok = False
+                try:
+                    async with httpx.AsyncClient() as client:
+                        r = await client.get(f"{base}/health", timeout=3.0)
+                        ok = r.status_code < 500
+                except httpx.HTTPError:
+                    ok = False
+                # registrar() cierra el circuito si el probe salió bien, o lo
+                # reabre (con nuevo cooldown) si falló. La transición la loguea
+                # _sincronizar_metricas_breaker (una línea por cambio de estado).
+                breaker.registrar(ok)
+                _sincronizar_metricas_breaker(service, breaker)
+            except Exception as exc:
+                logger.error(
+                    f"Fallo en la sonda del breaker de '{service}': {exc}",
+                    extra={"campos": {"operation": "circuit_probe", "event": service, "result": "error"}},
+                )
+        await asyncio.sleep(SONDA_BREAKER_INTERVALO_S)
+
+
+# 2.d Outbox transaccional (store-and-forward) + sonda del breaker.
+# Al arrancar: creamos la tabla del outbox, lanzamos el worker que reintenta las
+# escrituras encoladas hasta que el microservicio caído vuelve, y la sonda que
+# recupera los circuitos automáticamente. Así ninguna escritura se pierde y los
+# circuitos se cierran solos cuando el servicio revive.
 @app.on_event("startup")
 async def _iniciar_outbox():
     try:
@@ -418,6 +467,7 @@ async def _iniciar_outbox():
         logger.error(f"No se pudo preparar la tabla del outbox: {exc}",
                      extra={"campos": {"operation": "outbox_init", "result": "error"}})
     asyncio.create_task(outbox.bucle_drenaje(MICROSERVICIOS, BREAKERS))
+    asyncio.create_task(bucle_sonda_breakers())
 
 
 def _encolar_o_error(service: str, path: str, metodo: str, body: bytes,

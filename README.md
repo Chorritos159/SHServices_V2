@@ -307,12 +307,52 @@ done
 # 4. míralo en /metrics (2 = OPEN) o en Grafana
 curl -s http://localhost:8000/metrics | grep 'gateway_circuit_state{service="almacen"}'
 
-# 5. restaura; tras el cooldown (15s) el circuito se cierra solo con una sonda
+# 5. restaura; el circuito se cierra SOLO (sonda activa), sin mandar mas trafico
 docker start almacen-service
 ```
 
 La prueba automatizada `python pruebas/07_breaker_todos.py` hace exactamente
 esto para los 6 servicios de corrido.
+
+**Recuperación automática (sonda activa).** El circuito ahora se **cierra
+solo** cuando el servicio revive, **sin necesidad de que mandes más
+peticiones**. Un *prober* de fondo en el Gateway (`bucle_sonda_breakers`)
+recorre cada 5s los circuitos que no están CLOSED y, pasado el cooldown,
+manda una sonda al `/health` del servicio; si responde, cierra el circuito.
+Así, tras restaurar el servicio, el circuito vuelve a CLOSED en ~15-20s
+(cooldown + sonda) aunque no haya tráfico de cliente. (Abrir el circuito sí
+requiere tráfico real: solo se detecta un fallo si alguien llama al servicio
+caído.)
+
+### Auto-restart: por qué "pauso el contenedor y no se levanta solo"
+
+`restart: always` (en los 9 contenedores) reinicia un servicio cuando su
+**proceso muere solo** (crash real, OOM) o cuando el daemon/PC se reinicia.
+**NO** actúa cuando **tú** paras el contenedor a mano — y esto incluye a los
+tres:
+
+| Comando | ¿Qué hace? | ¿`restart: always` lo revive? |
+| :-- | :-- | :-- |
+| `docker pause <c>` | Congela el proceso (sigue "corriendo") | ❌ No (no murió, está congelado) → `docker unpause` |
+| `docker stop <c>` | Parada solicitada por el usuario | ❌ No (Docker respeta tu decisión) → `docker start` |
+| `docker kill <c>` | Señal desde fuera; Docker la marca como parada del usuario | ❌ No → `docker start` |
+| **Crash real del proceso** | El proceso sale solo (p. ej. `os._exit`) | ✅ **Sí, en ~2s** |
+
+Por eso, cuando **pausas** un contenedor, "no se levanta solo": está
+congelado, no caído. Para **demostrar el auto-restart** de verdad hay un
+endpoint de caos que hace que el proceso muera por su cuenta:
+
+```bash
+# provoca un CRASH real de ticket-service (puerto directo 8001)
+curl -s -X POST http://localhost:8001/_chaos/crash
+
+# obsérvalo revivir solo (restart: always) en ~2s
+for i in $(seq 6); do sleep 2; docker ps -a --filter name=ticket-service --format '{{.Status}}'; done
+```
+
+(También está en `diagnostico-service`: `POST http://localhost:8004/_chaos/crash`.)
+Para el resto, `restart: always` funciona igual ante un crash real; con
+`pause`/`stop`/`kill` usa `docker unpause`/`docker start` para levantarlos.
 
 **2. `docker pause` y `docker stop` NO fallan igual** (ambos abren el
 circuito, pero por caminos distintos — verificado en vivo):

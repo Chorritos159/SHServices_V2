@@ -12,6 +12,7 @@
 | Mecanismo | Dónde | Qué protege |
 |---|---|---|
 | **Circuit Breaker formal** (CLOSED/OPEN/HALF_OPEN) | API Gateway (`app/core/resilience.py`) | Aísla un microservicio caído o lento con fail-fast |
+| **Sonda activa del breaker** (recuperación automática) | API Gateway (`bucle_sonda_breakers`, cada 5s) | Cierra el circuito SOLO cuando el servicio revive, sin necesidad de tráfico del cliente (no es "lazy") |
 | **Timeouts por operación** | API Gateway (3–5 s según servicio) | Corta la espera ante dependencias lentas |
 | **Retry + backoff + jitter** | API Gateway (máx. 1 reintento, solo lecturas) | Absorbe fallos transitorios sin duplicar escrituras |
 | **Fallback honesto** | API Gateway (503/504 + `circuito` + `Retry-After`) | Respuesta degradada semántica, nunca 500 opaco |
@@ -30,7 +31,8 @@
 | **Dashboard de resiliencia** | Grafana (`grafana/dashboards/resiliencia_s34.json`, provisionado) | Circuit state, retry/fallback, bulkhead, rate limit, queue depth, consumer lag — todo en un solo lugar |
 | **Queue depth / consumer lag** | RabbitMQ (`rabbitmq_prometheus`, `/metrics/per-object`) | Visibilidad de cuánto trabajo pendiente/atascado hay por cola |
 | **Toxiproxy** | Tráfico Gateway → Tickets | Simula latencia/caídas (prueba del breaker) |
-| **`restart: always`** | Todos los contenedores | Auto-recuperación ante crash |
+| **`restart: always`** | Todos los contenedores | Auto-recuperación ante crash REAL del proceso (no ante `docker pause/stop/kill`, que Docker trata como parada del usuario) |
+| **Endpoint de caos `/_chaos/crash`** | ticket-service, diagnostico-service | Provoca un crash real (`os._exit`) para demostrar el auto-restart de `restart: always` |
 | **Health checks** | Dockerfile + `/health` | Detección de servicios no saludables |
 | **`depends_on` + `condition`** | Compose | Orden de arranque controlado |
 | **`connect_robust` + retry loop** | Consumidor de Auditoría | Sobrevive a RabbitMQ no disponible |
