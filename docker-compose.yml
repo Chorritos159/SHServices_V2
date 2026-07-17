@@ -26,6 +26,11 @@ networks:
 volumes:
   postgres_data:
   grafana_data:
+  # SonarQube (perfil "analisis"): persisten el proyecto y el historial de
+  # análisis entre corridas del escáner.
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
 
 services:
 
@@ -361,3 +366,71 @@ services:
       - shservices-net
     depends_on:
       - loki
+
+  # ------------------------------------------------------------------
+  # LOGS EN VIVO: Dozzle
+  # Loki+Grafana son para BUSCAR en el historial (filtrar por correlationId,
+  # correlacionar con métricas). Dozzle es para MIRAR los logs fluyendo en
+  # tiempo real, sin refrescar nada: se suscribe al socket de Docker y hace
+  # streaming vía WebSocket a la UI. Complementario, no reemplazo.
+  # ------------------------------------------------------------------
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: always
+    environment:
+      # Solo lectura de logs; sin auth para la demo local (no exponer fuera).
+      DOZZLE_NO_ANALYTICS: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "9999:8080"
+    networks:
+      - shservices-net
+
+  # ------------------------------------------------------------------
+  # ANÁLISIS ESTÁTICO: SonarQube (perfil "analisis", no arranca por defecto)
+  #   docker compose --profile analisis up -d sonarqube
+  # Pesa ~1.4 GB y tarda ~2 min en arrancar: por eso queda fuera del
+  # levantamiento normal del sistema.
+  # ------------------------------------------------------------------
+  sonarqube:
+    image: sonarqube:community
+    container_name: sonarqube
+    profiles: ["analisis"]
+    restart: unless-stopped
+    environment:
+      # La demo corre con la BD embebida (H2): suficiente para un análisis
+      # puntual, no apto para uso continuo/producción.
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    ports:
+      - "9001:9000"   # 9001 en el host para no chocar con otros servicios
+    networks:
+      - shservices-net
+
+  # Escáner de SonarQube. Se corre a demanda (no queda levantado):
+  #   docker compose --profile analisis run --rm sonar-scanner
+  # Va como servicio de compose (y no `docker run -v`) porque el bind mount
+  # directo falla cuando el proyecto vive dentro de OneDrive; compose sí
+  # resuelve la ruta correctamente.
+  sonar-scanner:
+    image: sonarsource/sonar-scanner-cli:latest
+    container_name: sonar-scanner
+    profiles: ["analisis"]
+    environment:
+      SONAR_HOST_URL: "http://sonarqube:9000"
+      # Default vacío a propósito (y NO `${VAR:?...}`): compose interpola las
+      # variables de TODOS los servicios aunque su profile no esté activo, así
+      # que un `:?` aquí rompería cualquier `docker compose up` del sistema.
+      # Si falta el token, el propio scanner falla con un mensaje claro.
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+    volumes:
+      - .:/usr/src
+    networks:
+      - shservices-net
+    depends_on:
+      - sonarqube

@@ -12,6 +12,13 @@ import time
 
 import httpx
 
+# La consola de Windows usa cp1252 por defecto: los acentos y emojis de los
+# reportes salen como "�". Forzamos UTF-8 en la salida para que todas las
+# pruebas se lean bien en PowerShell/CMD sin tocar la config del sistema.
+for _flujo in (sys.stdout, sys.stderr):
+    if hasattr(_flujo, "reconfigure"):
+        _flujo.reconfigure(encoding="utf-8", errors="replace")
+
 RAIZ = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 LIB = os.path.dirname(os.path.abspath(__file__))
 RESULTADOS = os.path.join(RAIZ, "pruebas", "resultados")
@@ -62,9 +69,14 @@ def metrica_gateway(patron: str) -> str:
 
 
 def docker(*args, env=None):
-    """Ejecuta `docker <args>` desde la raíz del repo (p.ej. docker("compose", "up", "-d", "api-gateway"))."""
+    """Ejecuta `docker <args>` desde la raíz del repo (p.ej. docker("compose", "up", "-d", "api-gateway")).
+
+    encoding utf-8 explícito: la salida de docker trae emojis/acentos y en
+    Windows `text=True` decodifica con cp1252 por defecto -> UnicodeDecodeError.
+    """
     cmd = ["docker", *[str(a) for a in args]]
-    return subprocess.run(cmd, cwd=RAIZ, capture_output=True, text=True, env=env)
+    return subprocess.run(cmd, cwd=RAIZ, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=env)
 
 
 def ampliar_rate_limit(rps: int = 100000, burst: int = 100000, espera_seg: int = 6):

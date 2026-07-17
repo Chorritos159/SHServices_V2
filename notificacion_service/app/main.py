@@ -43,7 +43,16 @@ app.include_router(notificaciones.router, prefix="/api/v1/notificaciones", tags=
 Instrumentator().instrument(app).expose(app)
 
 
+# El event loop solo guarda referencias DÉBILES a las tareas: si nadie más
+# referencia la del consumidor, el garbage collector puede recolectarla a
+# medio camino y el servicio dejaría de emitir notificaciones en silencio
+# (sin error, sin log). Guardar la referencia a nivel de módulo lo evita.
+_tareas_fondo: set[asyncio.Task] = set()
+
+
 @app.on_event("startup")
 async def startup_event():
     logger.info("El microservicio de Notificaciones ha arrancado.")
-    asyncio.create_task(iniciar_consumidor())
+    tarea = asyncio.create_task(iniciar_consumidor())
+    _tareas_fondo.add(tarea)
+    tarea.add_done_callback(_tareas_fondo.discard)

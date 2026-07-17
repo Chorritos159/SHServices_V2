@@ -7,6 +7,7 @@ import os
 import datetime
 from app.core.logger import get_logger
 from app.core.database import get_db
+from app.core import password as pwd
 from app.models.usuario import UsuarioDB
 
 router = APIRouter()
@@ -71,9 +72,19 @@ async def login(credenciales: LoginRequest, request: Request, db: Session = Depe
     logger.extra["correlation_id"] = correlation_id
 
     empleado = db.query(UsuarioDB).filter(UsuarioDB.usuario == credenciales.usuario).first()
-    if empleado is None or empleado.password != credenciales.password:
+    if empleado is None or not pwd.verificar(credenciales.password, empleado.password):
+        # Mismo mensaje para "no existe" y "clave incorrecta": distinguirlos
+        # permitiría enumerar usuarios válidos (OWASP A07).
         logger.warning(f"Intento de login fallido para usuario: {credenciales.usuario}")
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+
+    # Migración transparente (OWASP A02): si la contraseña estaba en texto
+    # plano (de antes del hashing), se re-hashea ahora que sabemos que es
+    # correcta. El usuario no nota nada y la fila queda protegida.
+    if not pwd.es_hash(empleado.password):
+        empleado.password = pwd.hashear(credenciales.password)
+        db.commit()
+        logger.info(f"🔒 Contraseña de '{empleado.usuario}' migrada a hash bcrypt.")
 
     # Fabricamos el pasaporte (Token JWT) con rol Y sede.
     tiempo_expiracion = datetime.datetime.utcnow() + datetime.timedelta(hours=2)
@@ -117,7 +128,7 @@ async def registrar_usuario(
 
     empleado = UsuarioDB(
         usuario=nuevo.usuario,
-        password=nuevo.password,
+        password=pwd.hashear(nuevo.password),   # nunca en texto plano (OWASP A02)
         rol=rol,
         sede=nuevo.sede.upper(),
     )

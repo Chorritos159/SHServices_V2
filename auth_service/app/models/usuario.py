@@ -7,6 +7,8 @@ class UsuarioDB(Base):
     __tablename__ = "usuarios"
 
     usuario = Column(String, primary_key=True, index=True)
-    password = Column(String, nullable=False)  # demo: texto plano (igual que el resto del proyecto)
+    # Hash bcrypt con salt (OWASP A02). Nunca texto plano: ver app/core/password.py.
+    # Las filas legadas en texto plano se migran solas en el primer login exitoso.
+    password = Column(String, nullable=False)
     rol = Column(String, nullable=False)        # ADMIN | CAJA | TECNICO
     sede = Column(String, nullable=False)       # PIURA, LIMA, etc.

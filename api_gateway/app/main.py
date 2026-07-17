@@ -76,8 +76,26 @@ TIMEOUT_DEFAULT = 5.0
 # Un circuit breaker por servicio destino (aísla el estado de salud de cada uno).
 BREAKERS = {svc: CircuitBreaker(svc) for svc in MICROSERVICIOS}
 _aperturas_vistas = {svc: 0 for svc in MICROSERVICIOS}
+
+# Inicialización de TODAS las series de métricas al arranque (Fase 4/5, S34).
+# Un Counter de prometheus_client no existe como serie hasta su primer .inc():
+# sin esto, los paneles de Grafana muestran "No data" (en vez de 0) mientras
+# no haya ocurrido nunca un retry/fallback/timeout/rechazo — lo que se lee
+# como "la métrica está rota", cuando en realidad significa "no ha pasado
+# nada malo todavía". Tocar .labels(...) crea la serie en 0.
+_OUTCOMES = ("ok", "client_error", "server_error", "timeout", "unreachable", "circuit_open")
+_RAZONES_BULKHEAD = ("saturado", "shed_baja_prioridad")
 for _svc in MICROSERVICIOS:
-    metricas.CIRCUIT_STATE.labels(service=_svc).set(0)  # inicializa las series en CLOSED
+    metricas.CIRCUIT_STATE.labels(service=_svc).set(0)   # arranca en CLOSED
+    metricas.CIRCUIT_OPENS.labels(service=_svc)
+    metricas.RETRIES.labels(service=_svc)
+    metricas.FALLBACKS.labels(service=_svc)
+    metricas.TIMEOUTS.labels(service=_svc)
+    metricas.BULKHEAD_IN_FLIGHT.labels(service=_svc).set(0)
+    for _outcome in _OUTCOMES:
+        metricas.REQUESTS.labels(service=_svc, outcome=_outcome)
+    for _razon in _RAZONES_BULKHEAD:
+        metricas.BULKHEAD_REJECTS.labels(service=_svc, razon=_razon)
 
 
 def _sincronizar_metricas_breaker(service: str, breaker: CircuitBreaker):

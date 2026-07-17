@@ -95,11 +95,15 @@ def main():
     out(" 3. Logs estructurados de los contenedores — mismo correlationId")
     out("=" * 44)
     for contenedor in ("api-gateway", "ticket-service", "auditoria-service", "notificacion-service"):
+        # encoding utf-8 explícito: los logs traen emojis (🔔, 💾...) y en
+        # Windows `text=True` decodifica con cp1252 por defecto -> peta con
+        # UnicodeDecodeError. errors="replace" por si algún byte suelto no
+        # es UTF-8 válido (no queremos que la prueba muera por un log raro).
         r = subprocess.run(
             ["docker", "logs", contenedor, "--since", "30s"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
-        n = (r.stdout + r.stderr).count(f'"correlationId": "{cid}"')
+        n = ((r.stdout or "") + (r.stderr or "")).count(f'"correlationId": "{cid}"')
         out(f"  {contenedor}: {n} líneas con correlationId={cid}")
 
     marca = datetime.now().strftime("%Y%m%d_%H%M%S")

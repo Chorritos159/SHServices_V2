@@ -41,7 +41,9 @@ alcanzables dentro de la red Docker `shservices-net`.
 | toxiproxy | `8474` (API de control) | Inyecta fallas en `ticket-service` (Chaos Engineering) |
 | prometheus | `9090` | Scrapea Gateway, ticket/auditoria/notificacion-service y RabbitMQ |
 | grafana | `3000` | Dashboard de resiliencia provisionado automáticamente (Fase 4) |
-| loki | *(sin exponer)* | Agregación de logs, consultable desde Grafana |
+| loki | *(sin exponer)* | Agregación de logs (búsqueda histórica), consultable desde Grafana |
+| **dozzle** | `9999` | **Logs de todos los contenedores en vivo**, sin refrescar |
+| sonarqube | `9001` | Análisis estático — solo con `--profile analisis` |
 | ticket-service, almacen-service, diagnostico-service, facturacion-service, auditoria-service, notificacion-service | *(sin exponer)* | Solo vía Gateway (`/api/v1/<servicio>/...`) |
 
 ## Variables necesarias
@@ -144,13 +146,65 @@ que empiece con "/" se lo pases a mano a un runner se lo va a convertir en
 una ruta de Windows — los scripts ya pasan las rutas sin la barra inicial
 y la reponen internamente, ya a salvo.
 
+## Análisis estático con SonarQube
+
+SonarQube va en el perfil `analisis`: **no arranca** con el sistema normal
+(pesa ~1.4 GB y tarda ~2 min en levantar).
+
+```bash
+# 1. Levantar SonarQube (esperar ~2 min a que quede "UP")
+docker compose --profile analisis up -d sonarqube
+curl -s http://localhost:9001/api/system/status     # -> {"status":"UP"}
+
+# 2. Generar un token de análisis (admin/admin)
+TOKEN=$(curl -s -u admin:admin -X POST \
+  "http://localhost:9001/api/user_tokens/generate?name=analisis-$(date +%s)" \
+  | python -c "import sys,json;print(json.load(sys.stdin)['token'])")
+
+# 3. Correr el escáner (el código se copia dentro del contenedor: ver nota)
+docker rm -f sonar-scan 2>/dev/null
+docker create --name sonar-scan --network shservices_yassir_shservices-net \
+  -e SONAR_HOST_URL=http://sonarqube:9000 -e SONAR_TOKEN="$TOKEN" \
+  sonarsource/sonar-scanner-cli
+docker cp . sonar-scan:/usr/src/
+docker start -a sonar-scan          # ~45 s
+```
+
+Resultados: **http://localhost:9001** (`admin` / `admin`) → proyecto
+*SHServices V2*. Estado actual: **0 bugs, Quality Gate OK**, 15
+vulnerabilidades MINOR aceptadas (HTTP/AMQP interno entre contenedores) —
+detalle y justificación en `seguridad/sonarqube_resultados.md`.
+
+> **Nota:** el escáner copia el código con `docker cp` en vez de montarlo
+> porque en esta máquina Docker Desktop falla al crear bind mounts nuevos
+> (`mkdir /run/desktop/mnt/host/c: file exists`; se arregla reiniciando
+> Docker Desktop). El servicio `sonar-scanner` del compose usa bind mount y
+> sirve como alternativa cuando el file sharing funciona:
+> `SONAR_TOKEN=$TOKEN docker compose --profile analisis run --rm sonar-scanner`
+
+## Seguridad (OWASP Top 10)
+
+Revisión completa del código en `seguridad/OWASP_Top10.md`. Lo más
+relevante: las contraseñas **estaban en texto plano** en la base de datos y
+ahora usan **bcrypt** (coste 12, salt por contraseña, comparación en tiempo
+constante). Las cuentas existentes se migran solas en su primer login, sin
+que el usuario note nada.
+
 ## Cómo ver logs y métricas
 
+- **Logs en vivo (sin refrescar nada): Dozzle → http://localhost:9999**
+  Streaming por WebSocket de los logs de todos los contenedores, en tiempo
+  real, con filtro y búsqueda. Es lo que quieres para *mirar* el sistema
+  mientras corre una prueba. (Equivalente en terminal:
+  `docker compose logs -f api-gateway ticket-service`.)
+- **Logs históricos y correlacionados: Grafana → Explore → Loki.** Loki es
+  para *buscar* en el pasado (p. ej. filtrar por un `correlationId`
+  concreto y ver el recorrido completo de una operación) y correlacionar
+  con las métricas. También tiene tiempo real: botón **Live** arriba a la
+  derecha en Explore. Dozzle y Loki se complementan, no compiten.
 - **Logs estructurados** (JSON, un evento por línea —
   `service, correlationId, operation, event, result, durationMs`):
-  `docker logs <servicio> --tail 50`, o agregados en **Grafana → Explore →
-  Loki** filtrando por `correlationId` para seguir una operación completa
-  a través de todos los servicios que tocó.
+  `docker logs <servicio> --tail 50` para una mirada rápida a un servicio.
 - **Métricas** (Prometheus, `GET http://localhost:8000/metrics` en texto
   plano): circuit breaker state, retries, fallbacks, bulkhead, rate limit,
   timeouts.

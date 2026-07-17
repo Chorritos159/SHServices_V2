@@ -3,6 +3,7 @@ from app.api import health, auth
 from app.core.exceptions import global_exception_handler
 from app.core.logger import get_logger
 from app.core.database import engine, SessionLocal, Base
+from app.core import password as pwd
 from app.models.usuario import UsuarioDB
 
 logger = get_logger("auth-service")
@@ -20,10 +21,12 @@ def seed_usuarios_base():
     db = SessionLocal()
     try:
         if db.query(UsuarioDB).count() == 0:
+            # Las credenciales de demo se hashean igual que cualquier otra
+            # (OWASP A02): ni siquiera el seed escribe texto plano en la BD.
             db.add_all([
-                UsuarioDB(usuario="admin",     password="admin123",   rol="ADMIN",   sede="LIMA"),
-                UsuarioDB(usuario="caja01",    password="caja123",     rol="CAJA",    sede="PIURA"),
-                UsuarioDB(usuario="tecnico01", password="tecnico123",  rol="TECNICO", sede="PIURA"),
+                UsuarioDB(usuario="admin",     password=pwd.hashear("admin123"),   rol="ADMIN",   sede="LIMA"),
+                UsuarioDB(usuario="caja01",    password=pwd.hashear("caja123"),    rol="CAJA",    sede="PIURA"),
+                UsuarioDB(usuario="tecnico01", password=pwd.hashear("tecnico123"), rol="TECNICO", sede="PIURA"),
             ])
             db.commit()
             logger.info("🌱 Seed aplicado: usuarios base (admin, caja01, tecnico01) creados.")

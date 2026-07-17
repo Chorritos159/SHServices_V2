@@ -99,7 +99,7 @@ def main():
     titulo("FICHA C: COLA SATURADA (bulkhead + shedding, ráfaga real de 40 a auditoría, cupo=5)")
     r = subprocess.run(
         [sys.executable, os.path.join(LIB, "rafaga_async.py"), "api/v1/auditoria/auditoria/eventos", "40"],
-        cwd=RAIZ, capture_output=True, text=True,
+        cwd=RAIZ, capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     out(r.stdout.strip())
     shed = metrica_gateway('gateway_bulkhead_rejects_total{razon="shed_baja_prioridad",service="auditoria"}')
@@ -111,7 +111,7 @@ def main():
     titulo("FICHA D: BACKPRESSURE (rate limit global, ráfaga real de 100 a tickets)")
     r = subprocess.run(
         [sys.executable, os.path.join(LIB, "rafaga_async.py"), "api/v1/tickets/tickets/", "100"],
-        cwd=RAIZ, capture_output=True, text=True,
+        cwd=RAIZ, capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     out(r.stdout.strip())
     rate_rejects = metrica_gateway("gateway_rate_limit_rejects_total")
