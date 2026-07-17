@@ -196,11 +196,11 @@ def seccion_flujos(doc):
     doc.add_heading("Flujos Principales del Negocio", level=1)
 
     doc.add_heading("Soporte Técnico", level=2)
-    doc.add_paragraph("CAJA registra el ticket (SOPORTE → EN_COLA) e imprime el Ticket de Recepción.", style="List Bullet")
-    doc.add_paragraph("TECNICO diagnostica: define repuestos (se RESERVAN en almacén) y mano de obra → DIAGNOSTICADO.", style="List Bullet")
+    doc.add_paragraph("CAJA registra el ticket (SOPORTE -> EN_COLA) e imprime el Ticket de Recepción.", style="List Bullet")
+    doc.add_paragraph("TECNICO diagnostica: define repuestos (se RESERVAN en almacén) y mano de obra -> DIAGNOSTICADO.", style="List Bullet")
     doc.add_paragraph("Se notifica a CAJA que el equipo está listo para cobro y entrega.", style="List Bullet")
-    doc.add_paragraph("CAJA cobra: se CONFIRMA (consume) el stock, se emite la boleta y se genera la garantía de 90 días → ENTREGADO.", style="List Bullet")
-    doc.add_paragraph("Si el cliente rechaza el presupuesto, el stock reservado se LIBERA → RECHAZADO.", style="List Bullet")
+    doc.add_paragraph("CAJA cobra: se CONFIRMA (consume) el stock, se emite la boleta y se genera la garantía de 90 días -> ENTREGADO.", style="List Bullet")
+    doc.add_paragraph("Si el cliente rechaza el presupuesto, el stock reservado se LIBERA -> RECHAZADO.", style="List Bullet")
 
     doc.add_heading("Venta Directa", level=2)
     doc.add_paragraph("CAJA selecciona productos del almacén; el stock se descuenta de golpe y se emite la boleta con detalle.", style="List Bullet")

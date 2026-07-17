@@ -26,14 +26,14 @@ def _guardar(rol_destino: str, mensaje: str, referencia: str, evento: str, trace
         ))
         db.commit()
         logger.info(
-            f"🔔 Notificación para {rol_destino}: {mensaje}",
+            f"Notificación para {rol_destino}: {mensaje}",
             extra={"campos": {"operation": "guardar_notificacion", "event": evento, "result": "ok",
                                "durationMs": round((time.monotonic() - inicio) * 1000, 1)}},
         )
     except IntegrityError:
         db.rollback()
         logger.warning(
-            f"♻️ Notificación duplicada (redelivery de RabbitMQ) descartada: {evento} → {rol_destino}.",
+            f"Notificación duplicada (redelivery de RabbitMQ) descartada: {evento} -> {rol_destino}.",
             extra={"campos": {"operation": "guardar_notificacion", "event": evento, "result": "duplicado",
                                "durationMs": round((time.monotonic() - inicio) * 1000, 1)}},
         )
@@ -43,10 +43,10 @@ def _guardar(rol_destino: str, mensaje: str, referencia: str, evento: str, trace
 
 def _enrutar(routing_key: str, payload: dict):
     """
-    Reglas de enrutamiento por evento → rol:
-      · ProductoRegistrado (producto.registrado) → ADMIN
-      · TicketCreado en EN_COLA (ticket.creado)  → TECNICO
-      · TicketListo / DIAGNOSTICADO (ticket.listo) → CAJA
+    Reglas de enrutamiento por evento -> rol:
+      - ProductoRegistrado (producto.registrado) -> ADMIN
+      - TicketCreado en EN_COLA (ticket.creado)  -> TECNICO
+      - TicketListo / DIAGNOSTICADO (ticket.listo) -> CAJA
     """
     evento = payload.get("evento", "")
     datos = payload.get("datos") or {}
@@ -85,7 +85,7 @@ async def iniciar_consumidor():
                 await queue.bind(exchange, routing_key="ticket.listo")
                 await queue.bind(exchange, routing_key="producto.registrado")
 
-                logger.info("🎧 Servicio de Notificaciones conectado y escuchando eventos...")
+                logger.info("Servicio de Notificaciones conectado y escuchando eventos...")
 
                 async with queue.iterator() as queue_iter:
                     async for message in queue_iter:
@@ -95,5 +95,5 @@ async def iniciar_consumidor():
                             _enrutar(message.routing_key, payload)
 
         except Exception as e:
-            logger.error(f"🚨 Consumidor de Notificaciones caído, reintentando en 5s: {e}")
+            logger.error(f"Consumidor de Notificaciones caído, reintentando en 5s: {e}")
             await asyncio.sleep(5)

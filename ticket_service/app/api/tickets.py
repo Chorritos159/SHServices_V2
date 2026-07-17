@@ -38,7 +38,7 @@ def _validar_transicion(actual: str, destino: str):
     if destino not in TRANSICIONES.get(actual, set()):
         raise HTTPException(
             status_code=409,
-            detail=f"Transición ilegal: {actual} → {destino}.",
+            detail=f"Transición ilegal: {actual} -> {destino}.",
         )
 
 
@@ -89,7 +89,7 @@ async def crear_ticket(
         previo = db.query(IdempotenciaDB).filter(IdempotenciaDB.clave == clave_idem).first()
         if previo:
             logger.info(
-                f"♻️ Idempotency-Key '{clave_idem}' ya procesada; se devuelve la respuesta original.",
+                f"Idempotency-Key '{clave_idem}' ya procesada; se devuelve la respuesta original.",
                 extra={"campos": {"operation": "crear_ticket", "event": "TicketCreado.v1",
                                    "result": "duplicado"}},
             )
@@ -121,7 +121,7 @@ async def crear_ticket(
     db.refresh(nuevo_ticket_db)
     duracion_ms = round((time.monotonic() - inicio) * 1000, 1)
     logger.info(
-        f"💾 Ticket {ticket_id} guardado (sede {sede}, por {usuario}).",
+        f"Ticket {ticket_id} guardado (sede {sede}, por {usuario}).",
         extra={"campos": {"operation": "crear_ticket", "event": "TicketCreado.v1",
                            "result": "ok", "durationMs": duracion_ms, "idTicket": ticket_id}},
     )
@@ -180,7 +180,7 @@ async def listar_pendientes(request: Request, db: Session = Depends(get_db)):
         .order_by(TicketDB.fecha_registro)
         .all()
     )
-    logger.info(f"📋 Tickets pendientes (EN_COLA) solicitados: {len(tickets)}.")
+    logger.info(f"Tickets pendientes (EN_COLA) solicitados: {len(tickets)}.")
     return tickets
 
 
@@ -207,7 +207,7 @@ async def listar_por_estado(estado: str, request: Request, db: Session = Depends
         .order_by(TicketDB.fecha_registro.desc())
         .all()
     )
-    logger.info(f"📋 Tickets en estado '{estado.upper()}': {len(tickets)}.")
+    logger.info(f"Tickets en estado '{estado.upper()}': {len(tickets)}.")
     return tickets
 
 
@@ -218,7 +218,7 @@ async def actualizar_estado(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Actualiza el estado de un ticket (ej. tras el diagnóstico: EN_COLA → DIAGNOSTICADO)."""
+    """Actualiza el estado de un ticket (ej. tras el diagnóstico: EN_COLA -> DIAGNOSTICADO)."""
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
 
@@ -229,7 +229,7 @@ async def actualizar_estado(
     ticket.estado = cambio.estado
     db.commit()
     db.refresh(ticket)
-    logger.info(f"🔄 Ticket {ticket_id} actualizado a estado '{cambio.estado}'.")
+    logger.info(f"Ticket {ticket_id} actualizado a estado '{cambio.estado}'.")
     return ticket
 
 
@@ -247,7 +247,7 @@ def _obtener_ticket(db: Session, ticket_id: str) -> TicketDB:
 
 @router.post("/{ticket_id}/tomar", response_model=TicketPendiente, tags=["Máquina de Estados"])
 async def tomar_ticket(ticket_id: str, request: Request, db: Session = Depends(get_db)):
-    """EN_COLA → EN_DIAGNOSTICO (el técnico toma la atención)."""
+    """EN_COLA -> EN_DIAGNOSTICO (el técnico toma la atención)."""
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
     ticket = _obtener_ticket(db, ticket_id)
     _validar_transicion(ticket.estado, "EN_DIAGNOSTICO")
@@ -265,7 +265,7 @@ async def diagnosticar_ticket(
     db: Session = Depends(get_db),
 ):
     """
-    → DIAGNOSTICADO. Registra en el ticket los repuestos reservados (el stock ya
+    -> DIAGNOSTICADO. Registra en el ticket los repuestos reservados (el stock ya
     lo reservó el diagnostico_service) para poder CONFIRMAR/LIBERAR luego.
     Emite 'ticket.listo' para que Recepción (CAJA) sepa que ya se puede cobrar.
     """
@@ -276,7 +276,7 @@ async def diagnosticar_ticket(
     ticket.repuestos_reservados = json.dumps([r.model_dump() for r in datos.repuestos])
     ticket.estado = "DIAGNOSTICADO"
     db.commit(); db.refresh(ticket)
-    logger.info(f"🩺 Ticket {ticket_id} → DIAGNOSTICADO ({len(datos.repuestos)} repuesto(s) reservado(s)).")
+    logger.info(f"Ticket {ticket_id} -> DIAGNOSTICADO ({len(datos.repuestos)} repuesto(s) reservado(s)).")
 
     # Notifica a CAJA que el equipo está listo para cobro y entrega.
     evento_payload = {
@@ -293,7 +293,7 @@ async def diagnosticar_ticket(
 
 @router.post("/{ticket_id}/rechazar", response_model=TicketPendiente, tags=["Máquina de Estados"])
 async def rechazar_ticket(ticket_id: str, request: Request, db: Session = Depends(get_db)):
-    """→ RECHAZADO. El cliente no aceptó: LIBERA el stock reservado (vuelve a disponible)."""
+    """-> RECHAZADO. El cliente no aceptó: LIBERA el stock reservado (vuelve a disponible)."""
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
     ticket = _obtener_ticket(db, ticket_id)
@@ -304,7 +304,7 @@ async def rechazar_ticket(ticket_id: str, request: Request, db: Session = Depend
 
     ticket.estado = "RECHAZADO"
     db.commit(); db.refresh(ticket)
-    logger.info(f"🚫 Ticket {ticket_id} → RECHAZADO. Stock liberado.")
+    logger.info(f"Ticket {ticket_id} -> RECHAZADO. Stock liberado.")
     return ticket
 
 
@@ -316,7 +316,7 @@ async def entregar_ticket(
     db: Session = Depends(get_db),
 ):
     """
-    → ENTREGADO. Se cobró y se entrega: CONFIRMA (consume) el stock reservado y,
+    -> ENTREGADO. Se cobró y se entrega: CONFIRMA (consume) el stock reservado y,
     si es SOPORTE, genera automáticamente una GARANTÍA de 90 días exactos, guardando
     el monto cobrado (que el BFF pasa desde la factura).
     """
@@ -350,7 +350,7 @@ async def entregar_ticket(
         garantia_out = {"id": garantia.id, "fecha_vencimiento": garantia.fecha_vencimiento.isoformat() + "Z", "dias": DIAS_GARANTIA}
 
     db.commit()
-    logger.info(f"📦 Ticket {ticket_id} → ENTREGADO. Stock confirmado. Garantía: {garantia_out}")
+    logger.info(f"Ticket {ticket_id} -> ENTREGADO. Stock confirmado. Garantía: {garantia_out}")
     return {"id": ticket.id, "estado": "ENTREGADO", "garantia": garantia_out}
 
 

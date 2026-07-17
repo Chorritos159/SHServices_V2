@@ -50,7 +50,7 @@ async def emitir_comprobante(
     existente = db.query(FacturaDB).filter(FacturaDB.id_ticket == factura.idTicket).first()
     if existente:
         logger.info(
-            f"♻️ Factura ya existía para el ticket {factura.idTicket} ({existente.id}); "
+            f"Factura ya existía para el ticket {factura.idTicket} ({existente.id}); "
             "se devuelve la existente (idempotencia).",
             extra={"campos": {"operation": "emitir_comprobante", "event": "FacturaGenerada.v1",
                                "result": "duplicado", "durationMs": round((time.monotonic() - inicio) * 1000, 1),
@@ -92,7 +92,7 @@ async def emitir_comprobante(
         db.rollback()
         existente = db.query(FacturaDB).filter(FacturaDB.id_ticket == factura.idTicket).first()
         logger.warning(
-            f"♻️ Carrera de idempotencia resuelta para el ticket {factura.idTicket}; se devuelve {existente.id}.",
+            f"Carrera de idempotencia resuelta para el ticket {factura.idTicket}; se devuelve {existente.id}.",
             extra={"campos": {"operation": "emitir_comprobante", "event": "FacturaGenerada.v1",
                                "result": "duplicado_carrera", "durationMs": round((time.monotonic() - inicio) * 1000, 1),
                                "idTicket": factura.idTicket}},
@@ -101,7 +101,7 @@ async def emitir_comprobante(
     db.refresh(nueva_factura)
     duracion_ms = round((time.monotonic() - inicio) * 1000, 1)
     logger.info(
-        f"💾 Comprobante {id_factura} guardado por S/.{total_calculado} ({len(lineas_out)} línea(s)).",
+        f"Comprobante {id_factura} guardado por S/.{total_calculado} ({len(lineas_out)} línea(s)).",
         extra={"campos": {"operation": "emitir_comprobante", "event": "FacturaGenerada.v1",
                            "result": "ok", "durationMs": duracion_ms,
                            "idTicket": factura.idTicket, "idFactura": id_factura}},

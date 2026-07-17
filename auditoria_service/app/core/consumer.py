@@ -16,7 +16,7 @@ async def iniciar_consumidor():
 
     BUG CORREGIDO: antes, si la PRIMERA conexión fallaba (RabbitMQ aún no acepta
     AMQP al arrancar — su healthcheck 'ping' da 'healthy' antes de abrir el 5672),
-    el `except` mataba la corrutina y el consumidor NUNCA reintentaba → 0 consumers
+    el `except` mataba la corrutina y el consumidor NUNCA reintentaba -> 0 consumers
     y los eventos quedaban atascados en la cola.
 
     Ahora envolvemos todo en un bucle infinito con reintento: si falla el arranque
@@ -41,7 +41,7 @@ async def iniciar_consumidor():
                 # 4. Vincular la cola al megáfono (cualquier evento "ticket.*")
                 await queue.bind(exchange, routing_key="ticket.*")
 
-                logger.info("🎧 Servicio de Auditoría conectado y escuchando eventos en RabbitMQ...")
+                logger.info("Servicio de Auditoría conectado y escuchando eventos en RabbitMQ...")
 
                 # 5. Bucle escuchando mensajes
                 async with queue.iterator() as queue_iter:
@@ -56,7 +56,7 @@ async def iniciar_consumidor():
                             evento_nombre = payload.get("evento")
                             datos = payload.get("datos") or {}
                             logger.info(
-                                f"📝 EXPEDIENTE AUDITADO | Evento: {evento_nombre} "
+                                f"EXPEDIENTE AUDITADO | Evento: {evento_nombre} "
                                 f"| Sede: {datos.get('sede')} | ID: {datos.get('idTicket')}"
                             )
 
@@ -65,5 +65,5 @@ async def iniciar_consumidor():
 
         except Exception as e:
             # No matamos la tarea: esperamos y reintentamos (arranque o reconexión).
-            logger.error(f"🚨 Consumidor RabbitMQ caído, reintentando en 5s: {e}")
+            logger.error(f"Consumidor RabbitMQ caído, reintentando en 5s: {e}")
             await asyncio.sleep(5)

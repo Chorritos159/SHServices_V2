@@ -14,5 +14,5 @@ async def listar_eventos(request: Request, limite: int = 100):
     logger.extra["correlation_id"] = correlation_id
 
     eventos = obtener_eventos(limite)
-    logger.info(f"📖 Traza de auditoría solicitada: {len(eventos)} eventos.")
+    logger.info(f"Traza de auditoría solicitada: {len(eventos)} eventos.")
     return eventos

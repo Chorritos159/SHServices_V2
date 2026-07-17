@@ -48,7 +48,7 @@ def main():
     titulo("FICHA A: SERVICIO CAÍDO (docker stop almacen-service)")
     circuito_almacen = metrica_gateway('gateway_circuit_state{service="almacen"}')
     marca(f"circuit_state almacen (antes): {circuito_almacen}  (0=CLOSED)")
-    marca("💥 docker stop almacen-service")
+    marca("docker stop almacen-service")
     subprocess.run(["docker", "stop", "almacen-service"], capture_output=True)
     time.sleep(1)
     for i in range(1, 5):
@@ -62,7 +62,7 @@ def main():
                    headers={"Authorization": f"Bearer {token}"}, timeout=10.0)
     ms = round((time.perf_counter() - t0) * 1000)
     marca(f"fail-fast con el circuito abierto -> HTTP {r.status_code} en {ms}ms (esperado: <100ms, sin tocar la red)")
-    marca("🔌 docker start almacen-service")
+    marca("docker start almacen-service")
     subprocess.run(["docker", "start", "almacen-service"], capture_output=True)
     marca("Esperando cooldown del circuito (15s) + arranque del servicio...")
     time.sleep(20)
@@ -75,7 +75,7 @@ def main():
     titulo("FICHA B: LATENCIA INYECTADA (Toxiproxy en tickets)")
     circuito_tickets = metrica_gateway('gateway_circuit_state{service="tickets"}')
     marca(f"circuit_state tickets (antes): {circuito_tickets}")
-    marca("💉 inyectando latencia de 8s en ticket_proxy (timeout configurado: 3s)")
+    marca("inyectando latencia de 8s en ticket_proxy (timeout configurado: 3s)")
     httpx.post(f"{TOXIPROXY}/proxies/ticket_proxy/toxics",
                json={"name": "latencia_caos", "type": "latency", "attributes": {"latency": 8000}}, timeout=10.0)
     for i in range(1, 4):
@@ -86,7 +86,7 @@ def main():
         marca(f"  intento {i} -> HTTP {r.status_code} en {ms}ms (504 = timeout de los 3s configurados)")
     circuito_tickets = metrica_gateway('gateway_circuit_state{service="tickets"}')
     marca(f"circuit_state tickets (tras timeouts): {circuito_tickets}  (2=OPEN esperado)")
-    marca("🧹 quitando la toxina")
+    marca("quitando la toxina")
     httpx.delete(f"{TOXIPROXY}/proxies/ticket_proxy/toxics/latencia_caos", timeout=10.0)
     marca("Esperando cooldown del circuito (15s)...")
     time.sleep(16)
@@ -132,7 +132,7 @@ def main():
     if id1 and id1 == id2:
         marca(f"OK: mismo idTicket ({id1}) en el reintento -> no se duplicó")
     else:
-        marca(f"❌ idTicket distinto: '{id1}' vs '{id2}'")
+        marca(f"idTicket distinto: '{id1}' vs '{id2}'")
 
     titulo("Veredicto S26/S34: fallas CONTENIDAS (fail-fast + fallback honesto + "
            "recuperación automática + backpressure + idempotencia); sin cascada.")

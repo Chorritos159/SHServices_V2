@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 from app.api import health, auth
-from app.core.exceptions import global_exception_handler
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from app.core.exceptions import (
+    global_exception_handler, http_exception_handler, validation_exception_handler,
+)
 from app.core.logger import get_logger
 from app.core.database import engine, SessionLocal, Base
 from app.core import password as pwd
@@ -29,7 +33,7 @@ def seed_usuarios_base():
                 UsuarioDB(usuario="tecnico01", password=pwd.hashear("tecnico123"), rol="TECNICO", sede="PIURA"),
             ])
             db.commit()
-            logger.info("🌱 Seed aplicado: usuarios base (admin, caja01, tecnico01) creados.")
+            logger.info("Seed aplicado: usuarios base (admin, caja01, tecnico01) creados.")
         else:
             logger.info("Seed omitido: ya existen usuarios en la base de datos.")
     finally:
@@ -44,6 +48,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Errores legibles y trazables (ver app/core/exceptions.py):
+# 4xx/5xx explicitos, payloads invalidos y el ultimo recurso.
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, global_exception_handler)
 app.include_router(health.router)
 app.include_router(auth.router, prefix="/api/v1/auth")

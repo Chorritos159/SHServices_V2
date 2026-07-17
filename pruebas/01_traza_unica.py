@@ -53,7 +53,7 @@ def main():
     )
     tk = resp.json().get("idTicket") if resp.status_code < 400 else None
     if not tk:
-        out(f"❌ No se pudo crear el ticket: HTTP {resp.status_code} {resp.text}")
+        out(f"No se pudo crear el ticket: HTTP {resp.status_code} {resp.text}")
         sys.exit(1)
     out(f"Ticket creado: {tk}")
 
@@ -95,7 +95,7 @@ def main():
     out(" 3. Logs estructurados de los contenedores — mismo correlationId")
     out("=" * 44)
     for contenedor in ("api-gateway", "ticket-service", "auditoria-service", "notificacion-service"):
-        # encoding utf-8 explícito: los logs traen emojis (🔔, 💾...) y en
+        # encoding utf-8 explícito: los logs traen emojis (, ...) y en
         # Windows `text=True` decodifica con cp1252 por defecto -> peta con
         # UnicodeDecodeError. errors="replace" por si algún byte suelto no
         # es UTF-8 válido (no queremos que la prueba muera por un log raro).

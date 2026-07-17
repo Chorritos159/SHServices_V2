@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 import jwt
 import os
 import datetime
-from app.core.logger import get_logger
+from app.core.logger import get_logger, RECHAZADO
 from app.core.database import get_db
 from app.core import password as pwd
 from app.models.usuario import UsuarioDB
@@ -68,36 +68,39 @@ def _exigir_admin(credentials: HTTPAuthorizationCredentials | None) -> dict:
 
 @router.post("/login", response_model=TokenResponse, tags=["Seguridad"])
 async def login(credenciales: LoginRequest, request: Request, db: Session = Depends(get_db)):
-    correlation_id = request.headers.get("x-correlation-id", "N/A")
-    logger.extra["correlation_id"] = correlation_id
+    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
 
-    empleado = db.query(UsuarioDB).filter(UsuarioDB.usuario == credenciales.usuario).first()
-    if empleado is None or not pwd.verificar(credenciales.password, empleado.password):
-        # Mismo mensaje para "no existe" y "clave incorrecta": distinguirlos
-        # permitiría enumerar usuarios válidos (OWASP A07).
-        logger.warning(f"Intento de login fallido para usuario: {credenciales.usuario}")
-        raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+    # NUNCA se loguea la contraseña ni el token emitido (OWASP A09).
+    with logger.operacion("login", event="SesionIniciada.v1", usuario=credenciales.usuario) as op:
+        empleado = db.query(UsuarioDB).filter(UsuarioDB.usuario == credenciales.usuario).first()
+        if empleado is None or not pwd.verificar(credenciales.password, empleado.password):
+            # Mismo mensaje para "no existe" y "clave incorrecta": distinguirlos
+            # permitiría enumerar usuarios válidos (OWASP A07).
+            op.result = RECHAZADO
+            op.mensaje = f"Login rechazado para '{credenciales.usuario}': credenciales incorrectas."
+            raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos.")
 
-    # Migración transparente (OWASP A02): si la contraseña estaba en texto
-    # plano (de antes del hashing), se re-hashea ahora que sabemos que es
-    # correcta. El usuario no nota nada y la fila queda protegida.
-    if not pwd.es_hash(empleado.password):
-        empleado.password = pwd.hashear(credenciales.password)
-        db.commit()
-        logger.info(f"🔒 Contraseña de '{empleado.usuario}' migrada a hash bcrypt.")
+        # Migración transparente (OWASP A02): si la contraseña estaba en texto
+        # plano (de antes del hashing), se re-hashea ahora que sabemos que es
+        # correcta. El usuario no nota nada y la fila queda protegida.
+        if not pwd.es_hash(empleado.password):
+            empleado.password = pwd.hashear(credenciales.password)
+            db.commit()
+            op.campos["passwordMigrada"] = True
 
-    # Fabricamos el pasaporte (Token JWT) con rol Y sede.
-    tiempo_expiracion = datetime.datetime.utcnow() + datetime.timedelta(hours=2)
-    payload = {
-        "sub": empleado.usuario,
-        "rol": empleado.rol,
-        "sede": empleado.sede,
-        "exp": tiempo_expiracion,
-    }
-    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-    logger.info(f"🔑 Token JWT generado exitosamente para '{empleado.usuario}'")
+        # Fabricamos el pasaporte (Token JWT) con rol Y sede.
+        tiempo_expiracion = datetime.datetime.utcnow() + datetime.timedelta(hours=2)
+        payload = {
+            "sub": empleado.usuario,
+            "rol": empleado.rol,
+            "sede": empleado.sede,
+            "exp": tiempo_expiracion,
+        }
+        token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-    return TokenResponse(access_token=token, expires_in=7200)
+        op.campos.update({"rol": empleado.rol, "sede": empleado.sede})
+        op.mensaje = f"Token emitido para '{empleado.usuario}' ({empleado.rol}/{empleado.sede})."
+        return TokenResponse(access_token=token, expires_in=7200)
 
 
 @router.get("/usuarios", response_model=list[UsuarioOut], tags=["Seguridad"])
@@ -106,9 +109,12 @@ async def listar_usuarios(
     credentials: HTTPAuthorizationCredentials = Security(security_scheme),
 ):
     """Lista los empleados (sin contraseñas). Solo ADMIN."""
-    _exigir_admin(credentials)
-    empleados = db.query(UsuarioDB).order_by(UsuarioDB.usuario).all()
-    return [{"usuario": e.usuario, "rol": e.rol, "sede": e.sede} for e in empleados]
+    admin = _exigir_admin(credentials)
+    with logger.operacion("listar_usuarios", solicitadoPor=admin.get("sub")) as op:
+        empleados = db.query(UsuarioDB).order_by(UsuarioDB.usuario).all()
+        op.campos["totalUsuarios"] = len(empleados)
+        op.mensaje = f"Listado de usuarios entregado: {len(empleados)} empleado(s)."
+        return [{"usuario": e.usuario, "rol": e.rol, "sede": e.sede} for e in empleados]
 
 
 @router.post("/usuarios", response_model=UsuarioOut, status_code=201, tags=["Seguridad"])
@@ -120,20 +126,35 @@ async def registrar_usuario(
     """Da de alta un empleado con su rol y sede en PostgreSQL. Solo ADMIN."""
     admin = _exigir_admin(credentials)
 
-    rol = nuevo.rol.upper()
-    if rol not in ROLES_VALIDOS:
-        raise HTTPException(status_code=422, detail=f"Rol inválido. Use: {', '.join(sorted(ROLES_VALIDOS))}.")
-    if db.query(UsuarioDB).filter(UsuarioDB.usuario == nuevo.usuario).first():
-        raise HTTPException(status_code=409, detail="El usuario ya existe.")
+    with logger.operacion(
+        "registrar_usuario", event="UsuarioRegistrado.v1",
+        usuario=nuevo.usuario, registradoPor=admin.get("sub"),
+    ) as op:
+        rol = nuevo.rol.upper()
+        if rol not in ROLES_VALIDOS:
+            op.result = RECHAZADO
+            op.mensaje = f"Alta rechazada de '{nuevo.usuario}': rol '{nuevo.rol}' no es valido."
+            raise HTTPException(
+                status_code=422,
+                detail=f"El rol '{nuevo.rol}' no existe. Roles validos: {', '.join(sorted(ROLES_VALIDOS))}.",
+            )
+        if db.query(UsuarioDB).filter(UsuarioDB.usuario == nuevo.usuario).first():
+            op.result = RECHAZADO
+            op.mensaje = f"Alta rechazada: el usuario '{nuevo.usuario}' ya existe."
+            raise HTTPException(
+                status_code=409,
+                detail=f"El usuario '{nuevo.usuario}' ya existe. Elige otro identificador.",
+            )
 
-    empleado = UsuarioDB(
-        usuario=nuevo.usuario,
-        password=pwd.hashear(nuevo.password),   # nunca en texto plano (OWASP A02)
-        rol=rol,
-        sede=nuevo.sede.upper(),
-    )
-    db.add(empleado)
-    db.commit()
-    logger.info(f"👤 Usuario '{nuevo.usuario}' ({rol}/{nuevo.sede.upper()}) registrado por '{admin.get('sub')}'.")
+        empleado = UsuarioDB(
+            usuario=nuevo.usuario,
+            password=pwd.hashear(nuevo.password),   # nunca en texto plano (OWASP A02)
+            rol=rol,
+            sede=nuevo.sede.upper(),
+        )
+        db.add(empleado)
+        db.commit()
 
-    return {"usuario": empleado.usuario, "rol": empleado.rol, "sede": empleado.sede}
+        op.campos.update({"rol": rol, "sede": empleado.sede})
+        op.mensaje = f"Usuario '{nuevo.usuario}' ({rol}/{empleado.sede}) dado de alta por '{admin.get('sub')}'."
+        return {"usuario": empleado.usuario, "rol": empleado.rol, "sede": empleado.sede}

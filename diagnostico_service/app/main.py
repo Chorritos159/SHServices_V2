@@ -1,7 +1,11 @@
 from fastapi import FastAPI
 from sqlalchemy import text
 from app.api import health, diagnostico
-from app.core.exceptions import global_exception_handler
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from app.core.exceptions import (
+    global_exception_handler, http_exception_handler, validation_exception_handler,
+)
 from app.core.logger import get_logger
 from app.core.database import engine
 from app.models.diagnostico import Base
@@ -23,6 +27,10 @@ app = FastAPI(
 )
 
 logger = get_logger("diagnostico-service")
+# Errores legibles y trazables (ver app/core/exceptions.py):
+# 4xx/5xx explicitos, payloads invalidos y el ultimo recurso.
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, global_exception_handler)
 
 app.include_router(health.router)

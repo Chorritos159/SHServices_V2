@@ -10,7 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.core.security import validar_token
 from app.core.logger import get_logger
-from app.core.exceptions import global_exception_handler
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from app.core.exceptions import (
+    global_exception_handler, http_exception_handler, validation_exception_handler,
+)
 from app.core.resilience import CircuitBreaker
 from app.core.bulkhead import Bulkhead
 from app.core.ratelimit import TokenBucket
@@ -24,6 +28,10 @@ app = FastAPI(
     version="2.0.0"
 )
 logger = get_logger("api-gateway")
+# Errores legibles y trazables (ver app/core/exceptions.py):
+# 4xx/5xx explicitos, payloads invalidos y el ultimo recurso.
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, global_exception_handler)
 
 # 1.b Política CORS para el frontend Next.js.
@@ -203,7 +211,7 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
         metricas.FALLBACKS.labels(service=service).inc()
         _sincronizar_metricas_breaker(service, breaker)
         logger.warning(
-            f"⛔ Circuito OPEN para '{service}': fail-fast (la dependencia está en recuperación).",
+            f"Circuito OPEN para '{service}': fail-fast (la dependencia está en recuperación).",
             extra={"campos": {"operation": "proxy_request", "event": service,
                                "result": "circuit_open", "durationMs": _duracion_ms()}},
         )
@@ -238,7 +246,7 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
                 duracion_ms = _duracion_ms()
                 if _debe_loggear_rutina():
                     logger.info(
-                        f"↔️ Proxy {metodo} '{service}' → {response.status_code} ({duracion_ms}ms).",
+                        f"Proxy {metodo} '{service}' -> {response.status_code} ({duracion_ms}ms).",
                         extra={"campos": {"operation": "proxy_request", "event": service,
                                            "result": outcome, "durationMs": duracion_ms}},
                     )
@@ -259,7 +267,7 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
                 metricas.REQUESTS.labels(service=service, outcome="unreachable").inc()
                 metricas.FALLBACKS.labels(service=service).inc()
                 logger.error(
-                    f"🚨 CIRCUIT BREAKER: el servicio '{service}' está inaccesible (estado: {breaker.estado}).",
+                    f"CIRCUIT BREAKER: el servicio '{service}' está inaccesible (estado: {breaker.estado}).",
                     extra={"campos": {"operation": "proxy_request", "event": service,
                                        "result": "unreachable", "durationMs": _duracion_ms()}},
                 )
@@ -280,7 +288,7 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
                 metricas.REQUESTS.labels(service=service, outcome="timeout").inc()
                 metricas.FALLBACKS.labels(service=service).inc()
                 logger.error(
-                    f"⏱️ TIMEOUT: '{service}' superó su presupuesto de {timeout}s (circuito: {breaker.estado}).",
+                    f"⏱TIMEOUT: '{service}' superó su presupuesto de {timeout}s (circuito: {breaker.estado}).",
                     extra={"campos": {"operation": "proxy_request", "event": service,
                                        "result": "timeout", "durationMs": _duracion_ms()}},
                 )
@@ -304,7 +312,7 @@ async def correlation_id_middleware(request: Request, call_next):
         metricas.RATE_LIMIT_REJECTS.inc()
         espera = max(1, round(RATE_LIMITER.segundos_hasta_proximo_token()))
         logger.warning(
-            "🚦 Rate limit: ráfaga por encima de la capacidad del Gateway.",
+            "Rate limit: ráfaga por encima de la capacidad del Gateway.",
             extra={"campos": {"operation": "rate_limit", "result": "rejected"}},
         )
         respuesta = JSONResponse(
@@ -318,7 +326,7 @@ async def correlation_id_middleware(request: Request, call_next):
         return respuesta
 
     if _debe_loggear_rutina():
-        logger.info(f"[{request.method}] Petición entrante ➔ {request.url.path}")
+        logger.info(f"[{request.method}] Petición entrante -> {request.url.path}")
 
     response = await call_next(request)
     response.headers["X-Correlation-ID"] = correlation_id
@@ -372,7 +380,7 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
     if bulkhead.ocupacion() >= UMBRAL_SHED and prioridad == "baja":
         metricas.BULKHEAD_REJECTS.labels(service=service, razon="shed_baja_prioridad").inc()
         logger.warning(
-            f"🧹 Shed: '{service}' al {bulkhead.ocupacion():.0%} de cupo, se descarta tráfico de baja prioridad.",
+            f"Shed: '{service}' al {bulkhead.ocupacion():.0%} de cupo, se descarta tráfico de baja prioridad.",
             extra={"campos": {"operation": "bulkhead", "event": service, "result": "shed_baja_prioridad"}},
         )
         return JSONResponse(
@@ -387,7 +395,7 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
     if not bulkhead.intentar_entrar():
         metricas.BULKHEAD_REJECTS.labels(service=service, razon="saturado").inc()
         logger.warning(
-            f"🧱 Bulkhead saturado para '{service}' ({bulkhead.en_vuelo}/{bulkhead.limite} en vuelo).",
+            f"Bulkhead saturado para '{service}' ({bulkhead.en_vuelo}/{bulkhead.limite} en vuelo).",
             extra={"campos": {"operation": "bulkhead", "event": service, "result": "saturado"}},
         )
         return JSONResponse(

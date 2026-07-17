@@ -44,7 +44,7 @@ def verificar_sistema():
         if r.status_code != 200:
             raise RuntimeError(f"HTTP {r.status_code}")
     except Exception:
-        print(f"❌ El gateway no responde en {GW}. Levanta el sistema: docker compose up -d")
+        print(f"El gateway no responde en {GW}. Levanta el sistema: docker compose up -d")
         sys.exit(1)
 
 
