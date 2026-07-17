@@ -1,5 +1,5 @@
 #!/bin/bash
-# PRUEBA 5 (Fase 5, S34): CAOS — 5 fichas de falla controlada.
+# PRUEBA 6 (Fase 5, S34): CAOS — 5 fichas de falla controlada.
 #   A. Servicio caído (docker stop almacen-service) -> circuit breaker OPEN
 #      -> fail-fast -> recuperación automática al volver.
 #   B. Latencia inyectada (Toxiproxy en tickets) -> timeout (504) -> circuito
@@ -7,13 +7,13 @@
 #   C. Cola saturada (ráfaga concurrente real) -> bulkhead + shedding (503).
 #   D. Backpressure (ráfaga concurrente real) -> rate limit global (429).
 #   E. Evento duplicado (redelivery simulado) -> idempotencia, no duplica.
-# Uso:  bash pruebas/05_caos.sh
+# Uso:  bash pruebas/06_caos.sh
 set -u
 source "$(dirname "$0")/lib/comun.sh"
 verificar_sistema
 LIB="$(dirname "$0")/lib"
 
-SALIDA="$RESULTADOS/05_caos_$(date +%Y%m%d_%H%M%S).txt"
+SALIDA="$RESULTADOS/06_caos_$(date +%Y%m%d_%H%M%S).txt"
 marca() { echo "[$(date +%H:%M:%S)] $1"; }
 
 {

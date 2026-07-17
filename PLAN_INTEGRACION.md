@@ -91,22 +91,38 @@ ráfaga a auditoría, 16 rechazos de rate limit, colas `auditoria_tickets_queue`
 y `notificaciones_queue` con su profundidad real.
 
 ### FASE 5 — Carga y fallas controladas 🔶 EN PROGRESO
-Suite `pruebas/` (scripts + runner Python en `pruebas/lib/`), 5 pruebas:
-traza única, 780 concurrentes con límites normales, carga sostenida 500k/1M
-(rate limit ampliado temporalmente para medir el throughput real), y 5
-fichas de falla controlada (servicio caído, latencia, cola saturada,
+Suite `pruebas/` (scripts + runners Python en `pruebas/lib/`), 6 pruebas:
+traza única, 780 concurrentes con límites normales, 3 niveles de carga
+sostenida por **nodos y bloques** (100k/500k/1M — ver metodología abajo), y
+6 fichas de falla controlada (servicio caído, latencia, cola saturada,
 rate limit, evento duplicado). `Registro de carga` y `Matriz de revisión de
 resiliencia` de la S34 llenados con el formato exacto del material (págs.
 24 y 28) en `documentacion/registro_de_carga.md` y
 `documentacion/matriz_revision_resiliencia.md`; fichas en
 `documentacion/fichas_falla_controlada.md` (formato pág. 30).
-**Completado y verificado en vivo:** pruebas 1, 2 y 5 (todas las fichas).
-**En curso:** prueba 3 (500k), lanzada en background — corre ~1.5-2h a la
-tasa real medida (~85 rps, limitada por el Gateway de 1 solo worker, el
-cuello de botella identificado). Prueba 4 (1M) queda para correr después,
-por el mismo motivo de duración. Rate limit del Gateway hecho configurable
-por entorno (`RATE_LIMIT_RPS`/`RATE_LIMIT_BURST`) para soportar estas
-corridas — antes era un valor fijo en código.
+
+**Metodología de carga (rediseñada):** el generador original (un pool de
+hilos disparando sin parar hasta completar el conteo literal) tomaba
+1.5-4 horas para 500k/1M — poco práctico. Se reemplazó por
+`pruebas/lib/carga_nodos.py`: varios **nodos** concurrentes independientes
+mandan **bloques** sucesivos de peticiones (no un hilo, no todo de golpe),
+con **backoff escalonado 3s→5s→8s + jitter** entre bloques que topan con
+429/503, acotado a una **ventana de tiempo fija de 10-15 min** por nivel
+(100k: 6 nodos x bloque 40 x 10min; 500k: 10 x 80 x 15min; 1M: 15 x 120 x
+15min). La etiqueta 100k/500k/1M es el nivel de carga ofrecida, no un
+conteo a cumplir — se reporta el throughput real sostenido y, si no se
+alcanza la etiqueta, se explica el cuello de botella con métricas (regla
+explícita de la S34).
+
+**Completado y verificado en vivo:** pruebas 1, 2 y 6 (todas las fichas de
+caos). **Pendiente, a ejecutar juntos:** pruebas 3-5 (100k/500k/1M, ~40 min
+en total con el nuevo diseño) — los scripts están escritos y revisados
+(se corrigió un bug real de concurrencia: `asyncio.Lock` usado con `with`
+en vez de `async with`), pero no se corrieron todavía a pedido explícito.
+Rate limit del Gateway hecho configurable por entorno
+(`RATE_LIMIT_RPS`/`RATE_LIMIT_BURST`) para soportar estas corridas — antes
+era un valor fijo en código; ya verificado que la ampliación funciona
+(corrida previa con el diseño anterior, ver `registro_de_carga.md`).
 
 ### FASE 6 — Gobierno y paquete de defensa
 Actualizar `matriz-resiliencia.md`, `matriz-auditoria.md`, catálogo, runbook,
