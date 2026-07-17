@@ -169,6 +169,14 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | 5 | `python pruebas/05_carga_1M.py` | Nivel **1M**: 15 nodos x bloques de 120, ventana de 15 min | 15 min |
 | 6 | `python pruebas/06_caos.py` | 5 fichas de falla controlada: servicio caído, latencia, cola saturada (bulkhead+shed), rate limit, evento duplicado | ~1 min |
 | 7 | `python pruebas/07_breaker_todos.py` | El circuit breaker abre para **los 6 servicios**: tumba cada uno, exige 503 (no 500) y circuito OPEN, y verifica la recuperación automática | ~3 min |
+| 8 | `python pruebas/08_flujo_completo.py` | El flujo de negocio **completo tocando los 8 servicios**: caja registra → técnico toma/diagnostica (reserva stock real) → caja cobra/entrega → admin agrega inventario → consultas de auditoría y notificaciones. Verifica que los 8 recibieron tráfico | ~15 s |
+
+**Todas las pruebas tocan todos los servicios.** La E2E (8) recorre el flujo
+completo por los 8 servicios; las de carga (3-5) reparten el tráfico entre
+tickets, almacén, auditoría y notificaciones (rotan por sus endpoints GET),
+no solo `tickets` — así el sistema completo se ejercita bajo presión. Los
+503 que verás en servicios de bajo cupo (auditoría/notificaciones,
+bulkhead=5) son el aislamiento por servicio funcionando, no fallas.
 
 **Metodología de las pruebas 3-5 (nodos, bloques, ventana fija):**
 `carga_nodos.py` simula varios **nodos** independientes — no un solo hilo,

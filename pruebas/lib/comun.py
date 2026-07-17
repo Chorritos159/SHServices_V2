@@ -107,12 +107,24 @@ def correr_runner(script: str, *args) -> int:
     return subprocess.run(cmd, cwd=RAIZ).returncode
 
 
+# Rutas GET (lecturas seguras) repartidas entre TODOS los servicios de
+# negocio con endpoint de consulta. La carga rota por esta lista, asi no
+# golpea solo 'tickets' sino que ejercita el sistema completo bajo presion.
+RUTAS_TODOS_SERVICIOS = ",".join([
+    "api/v1/tickets/tickets/",                       # ticket-service
+    "api/v1/almacen/almacen/productos",              # almacen-service
+    "api/v1/auditoria/auditoria/eventos",            # auditoria-service
+    "api/v1/notificaciones/notificaciones/mis-alertas",  # notificacion-service
+])
+
+
 def nivel_carga(nombre: str, objetivo: str, nodos: int, bloque: int, duracion_seg: int):
     """Corre un nivel de carga (100k/500k/1M) por nodos/bloques (S34,
     Fase 5): amplía el rate limit del gateway temporalmente, corre
     `carga_nodos.py` con los parámetros del nivel, restaura los límites
     (siempre, incluso si algo falla) e imprime las señales finales del
-    gateway.
+    gateway. La carga se reparte entre VARIOS servicios (Fase 8), no solo
+    tickets.
     """
     verificar_sistema()
     banner(f"{nombre.upper()} — nivel {objetivo}: {nodos} nodos x bloques de {bloque}, ventana {duracion_seg}s")
@@ -122,7 +134,7 @@ def nivel_carga(nombre: str, objetivo: str, nodos: int, bloque: int, duracion_se
         correr_runner(
             "carga_nodos.py",
             "--nodos", nodos, "--bloque", bloque, "--duracion-seg", duracion_seg,
-            "--ruta", "api/v1/tickets/tickets/", "--objetivo", objetivo,
+            "--rutas", RUTAS_TODOS_SERVICIOS, "--objetivo", objetivo,
             "--usuario", "admin", "--password", "admin123",
             "--nombre", nombre, "--salida", RESULTADOS,
         )

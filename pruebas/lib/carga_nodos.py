@@ -60,15 +60,18 @@ async def golpe(client, url, headers):
         return "ERR", (time.perf_counter() - t0) * 1000
 
 
-async def nodo(indice, url, headers, bloque, fin_ts, resultados, latencias, candado, bloques_enviados):
+async def nodo(indice, urls, headers, bloque, fin_ts, resultados, latencias, candado, bloques_enviados):
     """Un nodo: manda bloques sucesivos (concurrentes DENTRO del bloque,
     secuenciales ENTRE bloques) hasta que se acaba el tiempo de la corrida.
+
+    Si hay varias URLs (carga que toca varios servicios), cada peticion del
+    bloque rota por la lista para repartir el trafico entre todos.
     """
     nivel_backoff = 0
     limits = httpx.Limits(max_connections=bloque + 5, max_keepalive_connections=bloque + 5)
     async with httpx.AsyncClient(limits=limits) as client:
         while time.monotonic() < fin_ts:
-            tareas = [golpe(client, url, headers) for _ in range(bloque)]
+            tareas = [golpe(client, urls[j % len(urls)], headers) for j in range(bloque)]
             resp = await asyncio.gather(*tareas)
 
             hubo_limite = False
@@ -113,7 +116,12 @@ async def correr(args):
     if args.usuario:
         token = await login(args.usuario, args.password)
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    url = f"http://{args.host}:{args.puerto}/{args.ruta.lstrip('/')}"
+
+    # `--rutas` (coma) tiene prioridad sobre `--ruta`: reparte la carga entre
+    # varios servicios. MSYS convierte un "/" inicial en ruta de Windows, por
+    # eso las rutas van sin barra inicial y se repone aqui.
+    crudas = args.rutas.split(",") if args.rutas else [args.ruta]
+    urls = [f"http://{args.host}:{args.puerto}/{r.strip().lstrip('/')}" for r in crudas if r.strip()]
 
     resultados = collections.Counter()
     latencias = []
@@ -123,12 +131,13 @@ async def correr(args):
     inicio = time.monotonic()
     fin_ts = inicio + args.duracion_seg
 
+    destino = urls[0] if len(urls) == 1 else f"{len(urls)} servicios"
     print(f"== {args.nombre}: objetivo etiqueta '{args.objetivo}', "
-          f"{args.nodos} nodos x bloques de {args.bloque}, ventana {args.duracion_seg}s -> {url} ==",
+          f"{args.nodos} nodos x bloques de {args.bloque}, ventana {args.duracion_seg}s -> {destino} ==",
           flush=True)
 
     tareas_nodos = [
-        nodo(i, url, headers, args.bloque, fin_ts, resultados, latencias, candado, bloques_enviados)
+        nodo(i, urls, headers, args.bloque, fin_ts, resultados, latencias, candado, bloques_enviados)
         for i in range(args.nodos)
     ]
     await asyncio.gather(
@@ -149,7 +158,7 @@ async def correr(args):
         "bloque": args.bloque,
         "bloques_enviados": bloques_enviados[0],
         "duracion_objetivo_seg": args.duracion_seg,
-        "ruta": args.ruta,
+        "rutas": [u.split("/", 3)[-1] for u in urls],
         "duracion_real_seg": round(duracion, 1),
         "throughput_rps": round(total / duracion, 1) if duracion else 0,
         "enviadas": total,
@@ -194,6 +203,9 @@ def main():
     p.add_argument("--host", default="localhost")
     p.add_argument("--puerto", type=int, default=8000)
     p.add_argument("--ruta", default="api/v1/tickets/tickets/")
+    p.add_argument("--rutas", default="",
+                   help="Rutas GET separadas por coma (reparte la carga entre varios servicios). "
+                        "Sin barra inicial. Si se da, tiene prioridad sobre --ruta.")
     p.add_argument("--nodos", type=int, default=8, help="Nodos concurrentes independientes")
     p.add_argument("--bloque", type=int, default=50, help="Peticiones concurrentes por bloque, por nodo")
     p.add_argument("--duracion-seg", type=int, default=600, help="Ventana de tiempo total (segundos)")

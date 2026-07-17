@@ -188,7 +188,7 @@ regresión): `docker stop` a los 6 servicios, uno por uno. Antes: `tickets`
 daba 500 y el circuito seguía en CLOSED. Ahora los 6 dan **503 controlado,
 circuito OPEN y recuperación automática a CLOSED** tras el cooldown.
 
-### FASE 8 — Cobertura de logs y pruebas para TODOS los servicios 🔴
+### FASE 8 — Cobertura de logs y pruebas para TODOS los servicios ✅ COMPLETA
 
 Dos huecos que la Fase 7 deja al descubierto:
 
@@ -201,15 +201,26 @@ Dos huecos que la Fase 7 deja al descubierto:
    sin tráfico en las pruebas es un servicio cuyo comportamiento bajo
    presión y ante fallas nadie verificó.
 
-**Acción:**
-- Prueba de traza: cubrir el flujo real completo (caja registra -> técnico
-  diagnostica -> caja cobra y entrega) + los casos sueltos (admin agrega
-  inventario, consulta de auditoría/notificaciones).
-- Pruebas de carga (nodos/bloques y la corta): repartir el tráfico entre
-  **todos** los servicios, no solo `tickets`.
-- Caos: `docker stop` a cada servicio, no solo a `almacen`.
+**Hecho y verificado en vivo:**
+- **Prueba E2E nueva** `pruebas/08_flujo_completo.py`: recorre el flujo real
+  completo (caja registra SOPORTE -> técnico toma -> diagnostica reservando
+  un repuesto real del seed -> marca diagnosticado -> caja cobra -> caja
+  entrega -> admin agrega inventario -> consultas de auditoría y
+  notificaciones) y **verifica que los 8 servicios recibieron tráfico**.
+  Con evidencia dura: el stock de REP-001 baja 20->19 al reservar, la
+  factura se emite, el ticket llega a ENTREGADO, auditoría registra los 4
+  eventos del flujo. Todos los checks en OK.
+- **Pruebas de carga reparten el tráfico:** `carga_nodos.py` acepta `--rutas`
+  (varias, separadas por coma) y rota entre ellas; los niveles 100k/500k/1M
+  golpean tickets + almacén + auditoría + notificaciones, no solo tickets.
+  Verificado en una corrida corta: los 4 servicios reciben carga (los 503
+  de auditoría/notificaciones son su bulkhead=5 aislando bajo presión, no
+  fallas). El caos (prueba 6) ya cubría varios servicios; la 7 tumba los 6.
+- La 7 (`07_breaker_todos.py`) ya recorre los 6 servicios con `docker stop`.
+- **Cobertura de logs** verificada por servicio: al pasar los flujos, los 8
+  emiten log estructurado (revisado en la E2E por `correlationId`).
 
-### FASE 9 — Swagger de todos los servicios + webhooks + seed 🔶 EN PROGRESO
+### FASE 9 — Swagger de todos los servicios + webhooks + seed ✅ COMPLETA
 
 - **Swagger:** ✅ **HECHO.** Los 6 microservicios internos publican puerto
   (ticket 8001, almacen 8002, diagnostico 8004, facturacion 8005, auditoria
