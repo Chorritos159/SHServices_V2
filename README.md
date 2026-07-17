@@ -216,6 +216,7 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | 6 | `python pruebas/06_caos.py` | 5 fichas de falla controlada: servicio caído, latencia, cola saturada (bulkhead+shed), rate limit, evento duplicado | ~1 min |
 | 7 | `python pruebas/07_breaker_todos.py` | El circuit breaker abre para **los 6 servicios**: tumba cada uno, exige 503 (no 500) y circuito OPEN, y verifica la recuperación automática | ~3 min |
 | 8 | `python pruebas/08_flujo_completo.py` | El flujo de negocio **completo tocando los 8 servicios**: caja registra → técnico toma/diagnostica (reserva stock real) → caja cobra/entrega → admin agrega inventario → consultas de auditoría y notificaciones. Verifica que los 8 recibieron tráfico | ~15 s |
+| 9 | `python pruebas/09_asignaciones.py` | **Asignación exclusiva de tickets** y su resiliencia: un técnico toma un ticket (queda solo para él), otro recibe 409, "Mis Tickets" y la vista de admin, y con **ticket-service pausado** "Mis Tickets" sigue funcionando. Incluye el diagnóstico duplicado → 409 legible | ~20 s |
 
 **Todas las pruebas tocan todos los servicios.** La E2E (8) recorre el flujo
 completo por los 8 servicios; las de carga (3-5) reparten el tráfico entre

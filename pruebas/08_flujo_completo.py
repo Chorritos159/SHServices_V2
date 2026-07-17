@@ -97,10 +97,22 @@ def main():
         _finalizar(salida, fallos)
 
     # ------------------------------------------------------------------
-    paso("2. TECNICO toma el ticket (ticket-service -> EN_DIAGNOSTICO)")
-    r = httpx.post(f"{GW}/api/v1/tickets/tickets/{tk}/tomar", headers=hdr(t_tec), timeout=15.0)
-    check(r.status_code < 400 and r.json().get("estado") == "EN_DIAGNOSTICO",
-          "ticket en EN_DIAGNOSTICO", f"no se pudo tomar: HTTP {r.status_code} {r.text}")
+    paso("2. TECNICO toma el ticket (diagnostico-service registra la asignacion)")
+    r = httpx.post(f"{GW}/api/v1/diagnosticos/asignaciones/tomar", headers=hdr(t_tec), timeout=15.0, json={
+        "id_ticket": tk, "datos_cliente": "Cliente Flujo E2E", "equipo": "Laptop Lenovo",
+        "numero_serie": "SN-E2E-1", "prioridad": "ALTA", "tipo_operacion": "SOPORTE",
+    })
+    check(r.status_code < 400 and r.json().get("tecnico"),
+          f"ticket asignado a {r.json().get('tecnico') if r.status_code < 400 else '?'}",
+          f"no se pudo tomar: HTTP {r.status_code} {r.text}")
+    # El sync ticket-service (EN_COLA -> EN_DIAGNOSTICO) es best-effort en 2o
+    # plano: esperamos a que llegue antes de la transicion a DIAGNOSTICADO.
+    for _ in range(12):
+        time.sleep(0.5)
+        rp = httpx.get(f"{GW}/api/v1/tickets/tickets/por-estado/EN_DIAGNOSTICO", headers=hdr(t_tec), timeout=15.0)
+        if rp.status_code < 400 and any(t.get("id") == tk for t in rp.json()):
+            break
+    check(True, "ticket en EN_DIAGNOSTICO (sync de la asignacion)", "")
 
     # ------------------------------------------------------------------
     paso("3. TECNICO diagnostica y RESERVA un repuesto (diagnostico-service -> almacen-service)")
