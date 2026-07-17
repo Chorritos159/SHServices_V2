@@ -2,7 +2,7 @@
 
 > Formato exacto de la S34 (pág. 28): cada mecanismo debe observarse o
 > justificarse. La columna "Evidencia" apunta a la verificación en vivo
-> concreta (Fases 1-3 y `pruebas/05_caos.sh`), no a intención de diseño.
+> concreta (Fases 1-3 y `pruebas/06_caos.py`), no a intención de diseño.
 
 | Mecanismo | Pregunta de revisión | Respuesta | Evidencia |
 | :-- | :-- | :-- | :-- |

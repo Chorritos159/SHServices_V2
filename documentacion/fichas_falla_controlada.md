@@ -2,7 +2,8 @@
 
 > Formato exacto de la S34 (pág. 30): cada falla se diseña con hipótesis y
 > evidencia esperada, y se ejecuta con el sistema **operando** (no en frío).
-> Las 5 fichas corresponden a `pruebas/05_caos.sh`, corrida el 2026-07-16.
+> Las 5 fichas corresponden a `pruebas/06_caos.py`, corrida el 2026-07-16
+> (versión Bash original; migrado a Python puro después, mismo comportamiento).
 > Reporte completo: `pruebas/resultados/05_caos_20260716_225158.txt`.
 
 ## Ficha A — Servicio caído

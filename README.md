@@ -80,20 +80,69 @@ Roles: `ADMIN` (gestión), `CAJA`/`recepción` (registro y cobro), `TECNICO`
 (diagnóstico), por sede (`PIURA`/`TALARA`) — inyectados por el Gateway
 desde el JWT, nunca confiados del body de la petición.
 
-## Prueba de resiliencia
+## Cómo ejecutar las pruebas
 
+Todo en Python puro (`pip install httpx`), corridas **desde la raíz del
+repo** con el sistema arriba (`docker compose up -d`). Reportes en
+`pruebas/resultados/` (texto + JSON, ignorados por git). Los runners
+compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
+`carga_nodos.py`, `rafaga_async.py`).
+
+| # | Comando | Qué prueba | Duración |
+| :-- | :-- | :-- | :-- |
+| 1 | `python pruebas/01_traza_unica.py` | Una operación completa trazada de inicio a fin: auditoría + notificaciones + logs estructurados de 4 contenedores con UN correlationId | ~10 s |
+| 2 | `python pruebas/02_carga_780.py` | 780 peticiones a la vez con límites normales: rate limit (429) y bulkhead (503) rechazando de forma controlada | ~5 s |
+| 3 | `python pruebas/03_carga_100k.py` | Nivel **100k**: 6 nodos x bloques de 40, ventana de 10 min | 10 min |
+| 4 | `python pruebas/04_carga_500k.py` | Nivel **500k**: 10 nodos x bloques de 80, ventana de 15 min | 15 min |
+| 5 | `python pruebas/05_carga_1M.py` | Nivel **1M**: 15 nodos x bloques de 120, ventana de 15 min | 15 min |
+| 6 | `python pruebas/06_caos.py` | 5 fichas de falla controlada: servicio caído, latencia, cola saturada (bulkhead+shed), rate limit, evento duplicado | ~1 min |
+
+**Metodología de las pruebas 3-5 (nodos, bloques, ventana fija):**
+`carga_nodos.py` simula varios **nodos** independientes — no un solo hilo,
+no todo de golpe — que mandan **bloques** de N peticiones concurrentes,
+con **backoff escalonado 3s → 5s → 8s + jitter** entre bloques que topan
+con 429/503 (un bloque limpio baja el nivel a 0). Acotado a una **ventana
+de tiempo fija** (10-15 min): a la tasa real medida del sistema (~85-90
+rps, limitada por el Gateway de 1 worker) completar 500k/1M literalmente
+tomaría 1.5-4 horas, así que la etiqueta 100k/500k/1M representa el
+**nivel de carga ofrecida** (más nodos, bloques más grandes), no un conteo
+a cumplir — se reporta el throughput real sostenido y, si no se alcanza la
+etiqueta, se explica el cuello de botella con métricas (regla explícita de
+la S34). Las pruebas 3-5 amplían el rate limit del Gateway temporalmente
+(`RATE_LIMIT_RPS`/`RATE_LIMIT_BURST`) para medir el throughput real del
+backend y lo restauran al terminar.
+
+**Correr una prueba larga en segundo plano:**
 ```bash
-bash pruebas/06_caos.sh
+python pruebas/04_carga_500k.py > pruebas/resultados/04_consola.log 2>&1 &
+tail -f pruebas/resultados/04_consola.log
+```
+No correr dos niveles (3, 4 o 5) simultáneamente: compiten por el mismo
+bulkhead de tickets (cupo=12) y confunden la medición de cada una.
+
+**Corridas cortas de humo** (mismo mecanismo, menos volumen/tiempo):
+```bash
+NODOS=3 BLOQUE=10 DURACION=60 python pruebas/03_carga_100k.py
 ```
 
-Ejecuta 6 fichas de falla controlada con el sistema **operando**: servicio
-caído (`docker stop almacen-service`), latencia inyectada (Toxiproxy),
-cola saturada (bulkhead + shedding), backpressure (rate limit 429) y evento
-duplicado (idempotencia) — ~1 minuto, con veredicto explícito al final.
-Detalle de cada ficha (hipótesis, métrica observada, evidencia) en
-`documentacion/fichas_falla_controlada.md`. El resto de la suite
-(`pruebas/README.md`) cubre carga progresiva (100k/500k/1M) y trazabilidad
-de punta a punta.
+**Cómo leer los resultados:** HTTP 200 = atendida. 429 = rate limit
+(backpressure). 503 = bulkhead lleno / shedding / circuito abierto. 504 =
+timeout del presupuesto. Ninguno de estos tres es una falla: es el sistema
+degradando con contrato (Fases 1-2, S34). `latencia p95/p99` viene del
+runner (extremo a extremo); circuit state/retries/fallbacks/bulkhead se
+leen de `GET /metrics` o del dashboard de Grafana.
+
+**Resultados y evidencia formal:** el "Registro de carga" y la "Matriz de
+revisión de resiliencia" (formato exacto de la S34) se llenan en
+`documentacion/registro_de_carga.md` y
+`documentacion/matriz_revision_resiliencia.md`; el detalle de cada ficha
+de caos (hipótesis, métrica observada, evidencia) está en
+`documentacion/fichas_falla_controlada.md`.
+
+**Importante (Git Bash / MSYS en Windows):** cualquier `--ruta` o argumento
+que empiece con "/" se lo pases a mano a un runner se lo va a convertir en
+una ruta de Windows — los scripts ya pasan las rutas sin la barra inicial
+y la reponen internamente, ya a salvo.
 
 ## Cómo ver logs y métricas
 
@@ -110,8 +159,8 @@ de punta a punta.
   automáticamente, no se arma a mano). Circuit breaker state en vivo,
   throughput/latencia/error rate, bulkhead, rate limit, queue depth y
   consumer lag de RabbitMQ.
-- **Traza única de un ticket**: `bash pruebas/01_traza_unica.sh` — crea un
-  ticket con un `correlationId` conocido y confirma que aparece en
+- **Traza única de un ticket**: `python pruebas/01_traza_unica.py` — crea
+  un ticket con un `correlationId` conocido y confirma que aparece en
   auditoría, notificaciones y los logs de los 4 contenedores del flujo.
 
 ## Brechas conocidas
@@ -131,4 +180,3 @@ de punta a punta.
 - `matriz-resiliencia.md`, `catalogo-servicios.md`, `matriz-auditoria.md`,
   `runbook.md` — gobierno a nivel de sistema completo.
 - `PLAN_INTEGRACION.md` — plan de integración final S34, fase por fase.
-- `pruebas/README.md` — cómo correr toda la suite de pruebas.

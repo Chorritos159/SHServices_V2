@@ -1,7 +1,7 @@
 # Registro de carga — SHServices V2 (S34, Fase 5)
 
-> Formato exacto de la S34 (pág. 24). Generado con `pruebas/03_carga_100k.sh`
-> / `04_carga_500k.sh` / `05_carga_1M.sh` (runner `pruebas/lib/carga_nodos.py`).
+> Formato exacto de la S34 (pág. 24). Generado con `pruebas/03_carga_100k.py`
+> / `04_carga_500k.py` / `05_carga_1M.py` (runner `pruebas/lib/carga_nodos.py`).
 > Rate limit del Gateway ampliado temporalmente
 > (`RATE_LIMIT_RPS=100000 RATE_LIMIT_BURST=100000`) para medir el
 > throughput **real** del backend y no el techo del propio limitador — se
