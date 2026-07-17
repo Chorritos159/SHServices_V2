@@ -84,10 +84,24 @@ desde el JWT, nunca confiados del body de la petición.
 
 ## Webhooks salientes
 
-Además de las notificaciones internas (bandeja por rol), un **sistema
-externo** puede suscribirse para recibir los eventos del negocio por HTTP.
-Vive en `notificacion-service` (`app/core/webhooks.py` = entrega,
-`app/api/webhooks.py` = suscripciones).
+**Cómo se llama:** *Webhook de eventos de negocio* (webhook **saliente** —
+el sistema es quien llama hacia afuera). Vive en `notificacion-service`.
+
+**Qué hace, en una frase:** cuando ocurre un evento del flujo (se registra
+un ticket, un equipo queda listo para cobro, o se ingresa un producto),
+SHServices hace un **POST HTTP firmado** a los sistemas externos que se
+suscribieron a ese evento — así un tercero (un CRM, un Slack, un ERP, otro
+backend) se entera **en el momento**, sin tener que consultar la API una y
+otra vez (*polling*).
+
+Es distinto de las notificaciones internas: la notificación interna va a la
+bandeja de un rol dentro de la app (ADMIN/TECNICO/CAJA); el webhook sale por
+HTTP a **otro sistema, fuera de SHServices**. Ambos se disparan del mismo
+evento de RabbitMQ.
+
+**Dónde está el código:** `notificacion_service/` —
+`app/core/webhooks.py` (firma + entrega + reintentos),
+`app/api/webhooks.py` (suscripciones), `app/models/webhook.py` (tablas).
 
 **Cómo funciona, paso a paso:**
 
