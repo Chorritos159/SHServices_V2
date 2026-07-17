@@ -19,6 +19,7 @@ from app.core.resilience import CircuitBreaker
 from app.core.bulkhead import Bulkhead
 from app.core.ratelimit import TokenBucket
 from app.core import metricas
+from app.core import outbox
 from app.api import health
 
 # 1. Inicializar el Gateway
@@ -80,6 +81,11 @@ TIMEOUTS = {
     "facturas": 4.0, "auditoria": 3.0, "notificaciones": 3.0,
 }
 TIMEOUT_DEFAULT = 5.0
+
+# Métodos que MUTAN estado: son los que encolamos si el servicio está caído.
+# Las lecturas (GET/HEAD) no se encolan (basta reintentarlas en vivo) y DELETE
+# se deja fuera por ser destructivo y exclusivo de ADMIN.
+METODOS_ESCRITURA = {"POST", "PUT", "PATCH"}
 
 # Un circuit breaker por servicio destino (aísla el estado de salud de cada uno).
 BREAKERS = {svc: CircuitBreaker(svc) for svc in MICROSERVICIOS}
@@ -252,7 +258,7 @@ def _debe_loggear_rutina() -> bool:
     return False
 
 
-async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
+async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: str,
                             body: bytes, headers: dict, correlation_id: str) -> JSONResponse:
     """Cadena de protección S34: circuit breaker -> timeout -> retry seguro -> fallback.
 
@@ -284,13 +290,14 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
             extra={"campos": {"operation": "proxy_request", "event": service,
                                "result": "circuit_open", "durationMs": _duracion_ms()}},
         )
-        return JSONResponse(
+        error_503 = JSONResponse(
             status_code=503,
             content={"error": "Service Unavailable",
                      "detalle": f"El servicio '{service}' está en recuperación (circuito abierto).",
                      "circuito": "OPEN", "trace_id": correlation_id},
             headers={"Retry-After": "5"},
         )
+        return _encolar_o_error(service, path, metodo, body, headers, error_503)
 
     intento = 0
     async with httpx.AsyncClient() as client:
@@ -346,13 +353,17 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
                     extra={"campos": {"operation": "proxy_request", "event": service,
                                        "result": "timeout", "durationMs": _duracion_ms()}},
                 )
-                return JSONResponse(
+                error_504 = JSONResponse(
                     status_code=504,
                     content={"error": "Gateway Timeout",
                              "detalle": (f"El servicio '{service}' tardo mas de {timeout}s en responder. "
                                          "Vuelve a intentarlo en unos segundos."),
                              "circuito": breaker.estado, "trace_id": correlation_id},
                 )
+                # Un timeout en una escritura es ambiguo (¿llegó a procesarse?).
+                # Encolar es seguro: el reintento lleva la MISMA Idempotency-Key,
+                # así que si ya se había procesado NO se duplica.
+                return _encolar_o_error(service, path, metodo, body, headers, error_504)
 
             # TODA la familia de fallos de transporte, no solo ConnectError:
             # ReadError, WriteError, RemoteProtocolError, ProxyError, PoolTimeout...
@@ -386,13 +397,47 @@ async def _proxy_resiliente(service: str, url_destino: str, metodo: str,
                                        "result": "unreachable", "durationMs": _duracion_ms(),
                                        "errorType": type(exc).__name__}},
                 )
-                return JSONResponse(
+                error_503 = JSONResponse(
                     status_code=503,
                     content={"error": "Service Unavailable",
                              "detalle": f"El servicio '{service}' se encuentra temporalmente fuera de linea.",
                              "circuito": breaker.estado, "trace_id": correlation_id},
                     headers={"Retry-After": "5"},
                 )
+                return _encolar_o_error(service, path, metodo, body, headers, error_503)
+
+# 2.d Outbox transaccional (store-and-forward).
+# Al arrancar: creamos la tabla y lanzamos el worker que reintenta las
+# escrituras encoladas hasta que el microservicio caído vuelve. Así ninguna
+# escritura del cliente se pierde por una caída temporal.
+@app.on_event("startup")
+async def _iniciar_outbox():
+    try:
+        outbox.crear_tablas()
+    except Exception as exc:
+        logger.error(f"No se pudo preparar la tabla del outbox: {exc}",
+                     extra={"campos": {"operation": "outbox_init", "result": "error"}})
+    asyncio.create_task(outbox.bucle_drenaje(MICROSERVICIOS, BREAKERS))
+
+
+def _encolar_o_error(service: str, path: str, metodo: str, body: bytes,
+                     headers: dict, respuesta_error: JSONResponse) -> JSONResponse:
+    """Ante un fallo de INDISPONIBILIDAD (no de negocio): si es una escritura,
+    la encola y responde 202 (se enviará sola); si no, devuelve el error tal cual.
+    """
+    if metodo not in METODOS_ESCRITURA:
+        return respuesta_error
+    clave = headers.get("idempotency-key")
+    if not clave:
+        # Sin clave no podemos garantizar "no duplicar"; devolvemos el error.
+        return respuesta_error
+    resumen = outbox.encolar(
+        idempotency_key=clave, servicio=service, metodo=metodo,
+        path=path, body=body, headers=headers,
+        url_interna=f"{MICROSERVICIOS[service]}/api/v1/{path}",
+    )
+    return JSONResponse(status_code=202, content=resumen)
+
 
 # 3. Middleware de Observabilidad (Genera el Rastro)
 @app.middleware("http")
@@ -467,6 +512,13 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
     headers["x-user-rol"] = payload.get("rol", "")
     headers["x-user-sede"] = payload.get("sede", "")
 
+    # Idempotency-Key en TODA escritura: se respeta la del cliente si la envió
+    # (permite reintentos del navegador sin duplicar); si no, se genera una
+    # estable por petición. Es la clave que usa el outbox para no duplicar al
+    # reintentar una escritura encolada.
+    if request.method in METODOS_ESCRITURA and not headers.get("idempotency-key"):
+        headers["idempotency-key"] = f"gw-{correlation_id}"
+
     # Bulkhead + shedding (Fase 2, S34): aísla la capacidad de este servicio y,
     # si ya está bajo presión, descarta primero el tráfico de baja prioridad
     # para reservar cupo a lo crítico (altas: POST/PUT/PATCH/DELETE).
@@ -505,7 +557,7 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
     metricas.BULKHEAD_IN_FLIGHT.labels(service=service).set(bulkhead.en_vuelo)
     try:
         # Cadena de protección S34: circuit breaker + timeout + retry seguro + fallback.
-        return await _proxy_resiliente(service, url_destino, request.method, body, headers, correlation_id)
+        return await _proxy_resiliente(service, path, url_destino, request.method, body, headers, correlation_id)
     finally:
         bulkhead.salir()
         metricas.BULKHEAD_IN_FLIGHT.labels(service=service).set(bulkhead.en_vuelo)

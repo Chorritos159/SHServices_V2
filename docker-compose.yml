@@ -135,6 +135,9 @@ services:
       # Debe ser idéntica en auth-service y api-gateway o los tokens no validan.
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env}
       CORS_ORIGINS: ${CORS_ORIGINS:?Falta CORS_ORIGINS en .env}
+      # El Gateway persiste aquí su outbox transaccional (store-and-forward):
+      # las escrituras que no pudieron entregarse a un servicio caído.
+      DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       # Rate limit del Gateway (Fase 5, S34): se amplía temporalmente en las
       # pruebas de carga 500k/1M para medir el throughput real del backend.
       # `docker compose up -d api-gateway` no pasa el default si la var no
@@ -152,6 +155,9 @@ services:
         condition: service_started
       toxiproxy:
         condition: service_started
+      # El outbox necesita la BD; esperamos a que Postgres esté sano.
+      postgres-db:
+        condition: service_healthy
 
   # ------------------------------------------------------------------
   # AUTH SERVICE  (genera los JWT) - sin BD ni RabbitMQ

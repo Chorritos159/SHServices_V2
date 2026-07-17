@@ -1,13 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 import httpx
 import json
 import uuid
 import datetime
 from app.models.schemas import DiagnosticoCreate, DiagnosticoResponse, DiagnosticoDetalle, RepuestoDetalle
 from app.models.diagnostico import DiagnosticoDB
+from app.models.idempotencia import IdempotenciaDB
 from app.core.database import get_db
-from app.core.logger import get_logger, NO_ENCONTRADO, RECHAZADO
+from app.core.logger import get_logger, NO_ENCONTRADO, RECHAZADO, DUPLICADO
 from app.core.rabbitmq import publicar_evento
 
 router = APIRouter()
@@ -34,6 +37,21 @@ async def registrar_diagnostico(
             status_code=401,
             detail="Tu token no trae la sede. Vuelve a iniciar sesion.",
         )
+
+    # Idempotencia (S34): registrar un diagnóstico RESERVA stock, por lo que un
+    # reintento (p. ej. del outbox del Gateway tras una caída) NO debe volver a
+    # reservar ni crear otro diagnóstico. Con la misma Idempotency-Key se
+    # devuelve la MISMA respuesta sin repetir el efecto.
+    clave_idem = request.headers.get("idempotency-key")
+    if clave_idem:
+        previo = db.query(IdempotenciaDB).filter(IdempotenciaDB.clave == clave_idem).first()
+        if previo:
+            logger.info(
+                f"Idempotency-Key '{clave_idem}' ya procesada; se devuelve el diagnostico original.",
+                extra={"campos": {"operation": "registrar_diagnostico",
+                                  "event": "DiagnosticoRegistrado.v1", "result": DUPLICADO}},
+            )
+            return JSONResponse(status_code=previo.status_code, content=json.loads(previo.respuesta_json))
 
     with logger.operacion(
         "registrar_diagnostico", event="DiagnosticoRegistrado.v1",
@@ -117,7 +135,7 @@ async def registrar_diagnostico(
             mensaje=evento_payload,
         )
 
-        return DiagnosticoResponse(
+        respuesta = DiagnosticoResponse(
             idDiagnostico=id_diag,
             idTicket=diagnostico.idTicket,
             estadoReserva=estado_reserva,
@@ -126,6 +144,21 @@ async def registrar_diagnostico(
             repuestosDescontados=len(diagnostico.repuestos),
             fecha=datetime.datetime.utcnow().isoformat() + "Z",
         )
+
+        # Registro de idempotencia DESPUÉS de confirmar (para no bloquear el
+        # diagnóstico si esta escritura fallara). Un reintento con la misma
+        # clave ya no reservará stock ni creará otro diagnóstico.
+        if clave_idem:
+            db.add(IdempotenciaDB(
+                clave=clave_idem, operacion="registrar_diagnostico",
+                status_code=201, respuesta_json=respuesta.model_dump_json(),
+            ))
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()  # carrera: la misma clave llegó en paralelo
+
+        return respuesta
 
 
 @router.get("/por-ticket/{id_ticket}", response_model=DiagnosticoDetalle, tags=["Diagnóstico Técnico"])

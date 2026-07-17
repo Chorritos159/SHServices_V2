@@ -9,8 +9,9 @@ from app.core.exceptions import (
 from app.core.logger import get_logger
 from app.core.database import engine
 from app.models.diagnostico import Base
+from app.models import idempotencia  # noqa: F401 (registra la tabla de idempotencia en Base)
 
-# Crea la tabla automáticamente
+# Crea las tablas automáticamente (diagnósticos + idempotencia).
 Base.metadata.create_all(bind=engine)
 
 # Migración no destructiva: create_all NO altera tablas existentes, así que
