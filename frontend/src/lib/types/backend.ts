@@ -100,3 +100,25 @@ export interface DiagnosticoResponse {
   repuestosDescontados: number;
   fecha: string;
 }
+
+/**
+ * Asignación de un ticket a un técnico (¿quién atiende qué?).
+ * La sirve el diagnostico-service (GET /diagnosticos/asignaciones/...), NO el
+ * ticket-service: por eso "Mis Tickets" del técnico sigue funcionando aunque
+ * el ticket-service esté caído.
+ */
+export interface Asignacion {
+  id_ticket: string;
+  tecnico: string;
+  sede: string;
+  estado: string; // TOMADO | DIAGNOSTICADO
+  datos_cliente: string | null;
+  documento_cliente: string | null;
+  telefono_cliente: string | null;
+  tipo_operacion: string | null;
+  equipo: string | null;
+  numero_serie: string | null;
+  caracteristicas_falla: string | null;
+  prioridad: string | null;
+  fecha_tomado: string;
+}
