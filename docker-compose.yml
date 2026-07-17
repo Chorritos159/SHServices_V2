@@ -189,6 +189,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
+    ports:
+      - "8001:80"   # Swagger en http://localhost:8001/docs (solo demo)
     networks:
       - shservices-net
     depends_on:
@@ -210,6 +212,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       # Publica ProductoRegistrado para el servicio de notificaciones.
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
+    ports:
+      - "8002:80"   # Swagger en http://localhost:8002/docs (solo demo)
     networks:
       - shservices-net
     depends_on:
@@ -230,6 +234,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
+    ports:
+      - "8004:80"   # Swagger en http://localhost:8004/docs (solo demo)
     networks:
       - shservices-net
     depends_on:
@@ -250,6 +256,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
+    ports:
+      - "8005:80"   # Swagger en http://localhost:8005/docs (solo demo)
     networks:
       - shservices-net
     depends_on:
@@ -271,6 +279,8 @@ services:
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
       # Fase 4 (FF-DEP-07): auditoría persiste la traza de eventos en PostgreSQL.
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
+    ports:
+      - "8006:80"   # Swagger en http://localhost:8006/docs (solo demo)
     networks:
       - shservices-net
     depends_on:
@@ -299,6 +309,8 @@ services:
     # (p. ej. http://host.docker.internal:9100 para probar en local).
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    ports:
+      - "8007:80"   # Swagger en http://localhost:8007/docs (solo demo)
     networks:
       - shservices-net
     depends_on:

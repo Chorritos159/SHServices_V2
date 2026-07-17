@@ -44,7 +44,20 @@ alcanzables dentro de la red Docker `shservices-net`.
 | loki | *(sin exponer)* | Agregación de logs (búsqueda histórica), consultable desde Grafana |
 | **dozzle** | `9999` | **Logs de todos los contenedores en vivo**, sin refrescar |
 | sonarqube | `9001` | Análisis estático — solo con `--profile analisis` |
-| ticket-service, almacen-service, diagnostico-service, facturacion-service, auditoria-service, notificacion-service | *(sin exponer)* | Solo vía Gateway (`/api/v1/<servicio>/...`) |
+| ticket-service | `8001` | Swagger: `http://localhost:8001/docs` |
+| almacen-service | `8002` | Swagger: `http://localhost:8002/docs` |
+| diagnostico-service | `8004` | Swagger: `http://localhost:8004/docs` |
+| facturacion-service | `8005` | Swagger: `http://localhost:8005/docs` |
+| auditoria-service | `8006` | Swagger: `http://localhost:8006/docs` |
+| notificacion-service | `8007` | Swagger: `http://localhost:8007/docs` |
+
+> **Swagger de cada servicio (`/docs`)**: los 6 microservicios internos
+> publican su puerto **solo para inspeccionar su Swagger** en la
+> demo/sustentación. En un despliegue real esto NO debería estar abierto:
+> el tráfico de negocio pasa **siempre por el Gateway** (`:8000`), que es el
+> único que valida el JWT, aplica RBAC y la resiliencia. Golpear un servicio
+> directo por su puerto se salta todo eso (ver `seguridad/OWASP_Top10.md`,
+> hallazgo A05). Registrado como brecha en `documentacion/brechas_finales.md`.
 
 ## Variables necesarias
 

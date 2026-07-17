@@ -211,9 +211,11 @@ Dos huecos que la Fase 7 deja al descubierto:
 
 ### FASE 9 — Swagger de todos los servicios + webhooks + seed 🔶 EN PROGRESO
 
-- **Swagger:** hoy solo `api-gateway` (8000) y `auth-service` (8003)
-  publican puerto; el `/docs` de los otros 6 es inalcanzable desde el host.
-  Exponer un puerto por servicio y documentarlos. *(pendiente)*
+- **Swagger:** ✅ **HECHO.** Los 6 microservicios internos publican puerto
+  (ticket 8001, almacen 8002, diagnostico 8004, facturacion 8005, auditoria
+  8006, notificacion 8007); su `/docs` responde 200. Documentado en el README
+  (con la advertencia de que es solo demo: golpear un servicio directo se
+  salta el Gateway) y registrado como brecha #14 en `brechas_finales.md`.
 - **Webhooks salientes:** ✅ **HECHO.** Implementados en `notificacion-service`
   (`app/core/webhooks.py` entrega, `app/api/webhooks.py` suscripciones,
   `app/models/webhook.py` tablas). Un tercero se suscribe con su URL a un
