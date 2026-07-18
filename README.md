@@ -339,20 +339,50 @@ tres:
 | **Crash real del proceso** | El proceso sale solo (p. ej. `os._exit`) | ✅ **Sí, en ~2s** |
 
 Por eso, cuando **pausas** un contenedor, "no se levanta solo": está
-congelado, no caído. Para **demostrar el auto-restart** de verdad hay un
-endpoint de caos que hace que el proceso muera por su cuenta:
+congelado, no caído.
+
+### Tumbar un servicio unitario (uno por servicio)
+
+Cada microservicio tiene un endpoint de caos `POST /_chaos/crash` que hace
+que **su proceso muera de verdad** → `restart: always` lo revive solo en ~2s.
+Así demuestras el auto-restart servicio por servicio.
+
+> **PowerShell (Windows):** `curl` es un alias de `Invoke-WebRequest` y NO
+> acepta `-X`/`-s`. Usa **`curl.exe`** (el curl real, ya viene en Windows 10+)
+> o `Invoke-RestMethod`. Con `curl.exe` los comandos de abajo funcionan tal cual.
+
+| Servicio | Puerto | Comando para tumbarlo (crash real → revive solo) |
+| :-- | :-- | :-- |
+| auth-service | 8003 | `curl.exe -X POST http://localhost:8003/_chaos/crash` |
+| ticket-service | 8001 | `curl.exe -X POST http://localhost:8001/_chaos/crash` |
+| almacen-service | 8002 | `curl.exe -X POST http://localhost:8002/_chaos/crash` |
+| diagnostico-service | 8004 | `curl.exe -X POST http://localhost:8004/_chaos/crash` |
+| facturacion-service | 8005 | `curl.exe -X POST http://localhost:8005/_chaos/crash` |
+| auditoria-service | 8006 | `curl.exe -X POST http://localhost:8006/_chaos/crash` |
+| notificacion-service | 8007 | `curl.exe -X POST http://localhost:8007/_chaos/crash` |
+| api-gateway | 8000 | *(no aplica: gunicorn respawnea el worker; para tumbar el contenedor usa `docker restart api-gateway`)* |
+
+**Cómo ejecutarlo y ver que revive solo** (ejemplo con ticket-service; cambia
+el puerto y el nombre para otro servicio):
+
+```powershell
+# PowerShell (Windows) — OJO: curl.exe, no curl
+curl.exe -X POST http://localhost:8001/_chaos/crash
+
+# míralo caer y volver solo (restart: always) — se recupera en ~2s
+for ($i=0; $i -lt 6; $i++) { Start-Sleep 2; docker ps -a --filter name=ticket-service --format '{{.Status}}' }
+```
 
 ```bash
-# provoca un CRASH real de ticket-service (puerto directo 8001)
+# Git Bash / Linux / Mac
 curl -s -X POST http://localhost:8001/_chaos/crash
-
-# obsérvalo revivir solo (restart: always) en ~2s
 for i in $(seq 6); do sleep 2; docker ps -a --filter name=ticket-service --format '{{.Status}}'; done
 ```
 
-(También está en `diagnostico-service`: `POST http://localhost:8004/_chaos/crash`.)
-Para el resto, `restart: always` funciona igual ante un crash real; con
-`pause`/`stop`/`kill` usa `docker unpause`/`docker start` para levantarlos.
+Alternativa sin endpoint (para cualquier contenedor): `docker restart <servicio>`
+lo baja y lo vuelve a subir. Y recuerda: con `docker pause`/`stop`/`kill` el
+`restart: always` NO actúa (Docker lo trata como parada tuya) — levántalos con
+`docker unpause` / `docker start`.
 
 **2. `docker pause` y `docker stop` NO fallan igual** (ambos abren el
 circuito, pero por caminos distintos — verificado en vivo):
