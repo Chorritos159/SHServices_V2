@@ -1,7 +1,9 @@
 # Revisión OWASP Top 10 (2021) — SHServices V2
 
 > Revisión del código completo (8 microservicios + API Gateway + frontend
-> Next.js), 2026-07-17. Cada fila dice qué se revisó **concretamente** en
+> Next.js), revisada el **2026-07-18** tras incorporar el outbox, las
+> asignaciones, las garantías y los endpoints de caos. Cada fila dice qué se
+> revisó **concretamente** en
 > este código, no la definición genérica de la categoría. Los hallazgos
 > corregidos están verificados en vivo; los que quedan abiertos están en
 > `documentacion/brechas_finales.md`.
@@ -10,12 +12,12 @@
 
 | # | Categoría | Estado | Detalle |
 | :-- | :-- | :-- | :-- |
-| A01 | Broken Access Control | ⚠️ Parcial | RBAC en el Gateway; los microservicios confían en las cabeceras inyectadas (ver hallazgo 2) |
+| A01 | Broken Access Control | 🔴 **Hallazgo abierto** | RBAC en el Gateway; los microservicios confían en las cabeceras inyectadas (hallazgo 2). **Los endpoints `/_chaos/crash` no exigen autenticación** (hallazgo 6) |
 | A02 | Cryptographic Failures | ✅ **Corregido** | Contraseñas estaban en **texto plano** → migradas a bcrypt (ver hallazgo 1) |
 | A03 | Injection | ✅ OK | Todo el acceso a datos va por SQLAlchemy ORM (consultas parametrizadas); cero SQL crudo interpolado. React escapa el HTML por defecto; sin `dangerouslySetInnerHTML` |
 | A04 | Insecure Design | ✅ OK | Resiliencia por diseño (circuit breaker, bulkhead, rate limit, idempotencia — Fases 1-3); identidad centralizada en un solo punto |
-| A05 | Security Misconfiguration | ⚠️ Parcial | Sin `debug=True`; contenedores sin privilegios; pero Swagger y el auth-service quedan expuestos para la demo (ver hallazgo 3) |
-| A06 | Vulnerable & Outdated Components | ⚠️ Pendiente | `npm audit` reporta 2 vulnerabilidades moderadas en el frontend; sin escaneo automatizado de dependencias Python |
+| A05 | Security Misconfiguration | 🔴 **Hallazgo abierto** | Sin `debug=True`; contenedores sin privilegios; pero Swagger/auth expuestos para la demo (hallazgo 3) y **endpoints de caos activos por defecto** (hallazgo 6) |
+| A06 | Vulnerable & Outdated Components | ⚠️ Pendiente | `npm audit` (2026-07-18): **2 moderadas** en el frontend, sin exposición directa (dependencias de build). Sin escaneo automatizado de dependencias Python |
 | A07 | Identification & Auth Failures | ✅ **Mejorado** | Hash bcrypt + comparación en tiempo constante + mensaje de error único (no permite enumerar usuarios). Sin bloqueo por intentos fallidos (ver hallazgo 4) |
 | A08 | Software & Data Integrity | ✅ OK | Imágenes con tag fijo; contenedores corren como usuario sin privilegios (`USER appuser`); sin `curl \| bash` en los Dockerfiles |
 | A09 | Logging & Monitoring Failures | ✅ OK | Logs estructurados S34 con `correlationId` en los 9 servicios; **no se loguea ninguna contraseña ni token**; Prometheus + Grafana + Loki |
@@ -95,6 +97,81 @@ hay escaneo automatizado de las dependencias Python.
 **Acción recomendada:** `npm audit fix`, y agregar `pip-audit`/`safety` +
 `npm audit` al pipeline. El análisis de SonarQube (ver README) cubre la
 calidad y seguridad del **código propio**, no las dependencias de terceros.
+
+---
+
+## Hallazgo 6 — A01/A05: los endpoints de caos no exigen autenticación 🔴 ABIERTO
+
+**Qué se encontró.** Los 7 microservicios exponen `POST /_chaos/crash`, que mata
+su propio proceso (`os._exit(1)`) para demostrar el auto-restart. Verificado
+sobre el OpenAPI real de `ticket-service`:
+
+```
+/_chaos/crash  ->  expuesto en el puerto 8001: SI
+                   seguridad declarada: NINGUNA (endpoint abierto)
+```
+
+**Por qué importa.** Cualquiera con acceso de red a los puertos publicados
+(8001-8007) puede **apagar cualquier servicio del sistema**, sin token y sin
+dejar rastro de quién fue. Es una denegación de servicio trivial y, a la vez,
+una función administrativa sin control de acceso.
+
+**Riesgo aceptado hoy:** el entorno es local y de demostración (los puertos solo
+escuchan en `localhost`). En cualquier despliegue compartido sería crítico.
+
+**Acción acordada:** dejar el endpoint detrás de una variable de entorno
+(`CHAOS_ENABLED`, **apagada por defecto**), de forma que solo exista cuando se
+activa explícitamente para una demo. Registrado en `brechas_finales.md`.
+
+---
+
+## Hallazgo 7 — A01: el RBAC de lectura vive solo en el BFF ⚠️ ABIERTO
+
+**Qué se encontró.** La consulta de garantías está restringida a `CAJA`/`ADMIN`
+en el BFF de Next.js, pero llamando **directo al Gateway** con un token de
+`TECNICO` responde igualmente:
+
+```
+TECNICO -> GET /api/v1/facturas/garantias/  ->  HTTP 200
+```
+
+**Por qué pasa.** El Gateway solo aplica RBAC a los métodos destructivos
+(`DELETE` = ADMIN); para el resto valida *autenticación* pero no *autorización*
+por rol. Es la misma raíz del hallazgo 2: la autorización fina vive en los
+extremos (BFF o servicio), no en el Gateway.
+
+**Matiz importante:** no todos los endpoints están igual. Las vistas que sí
+implementaron la comprobación en el servicio se comportan bien —
+`GET /diagnosticos/asignaciones/` devuelve **403** a un técnico. La diferencia
+es que ahí el chequeo se hizo en el servicio y en garantías no.
+
+**Impacto real:** bajo. Un técnico autenticado ve datos de garantía de su propia
+empresa; no hay exposición a terceros ni escritura. Pero es una inconsistencia
+de diseño que conviene cerrar.
+
+**Acción recomendada:** declarar el rol mínimo por ruta en el Gateway (tabla
+`ruta -> roles`), en vez de repetir la comprobación en cada servicio y BFF.
+
+---
+
+## Hallazgo 8 — A02/A09: el outbox guarda identidad, NO el token ✅ CORRECTO POR DISEÑO
+
+Se revisó qué persiste la tabla `gateway_outbox`, porque almacena peticiones
+completas para reintentarlas más tarde. Contenido real de una fila:
+
+```json
+{"content-type": "application/json", "idempotency-key": "...",
+ "x-correlation-id": "...", "x-user-sub": "caja01",
+ "x-user-rol": "CAJA", "x-user-sede": "PIURA"}
+```
+
+**No se guarda la cabecera `Authorization`.** Es deliberado (ADR-0004): el JWT
+puede expirar antes de que el worker consiga entregar, y guardar tokens en base
+de datos sería una fuga esperando a ocurrir. Se persiste solo la **identidad ya
+validada**, que es lo que los servicios internos consumen.
+
+El cuerpo de la petición sí se guarda (es el dato de negocio a reenviar: ticket,
+cobro, producto). No contiene credenciales.
 
 ---
 
