@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { isAxiosError } from "axios";
 import { api } from "@/lib/api/client";
-import { extraerError } from "@/components/ui/FormControls";
+import { esEncolado, extraerError } from "@/components/ui/FormControls";
 import type { TicketPendiente, DiagnosticoDetalle } from "@/lib/types/backend";
 import type { ComprobanteData } from "@/components/print/ComprobanteModal";
 
@@ -30,6 +30,7 @@ export default function CobroModal({
   const [metodoPago, setMetodoPago] = useState("EFECTIVO");
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null); // encolado (servicio caído)
 
   // Recupera el diagnóstico del ticket y precarga los montos.
   useEffect(() => {
@@ -58,6 +59,7 @@ export default function CobroModal({
   async function cobrar() {
     setEnviando(true);
     setError(null);
+    setAviso(null);
     try {
       const { data } = await api.post<{
         idFactura: string; montoTotal: number; estadoPago: string; fechaEmision: string;
@@ -69,6 +71,14 @@ export default function CobroModal({
         metodoPago,
         sede: ticket.sede,
       });
+      // Facturación caída: el cobro quedó encolado y se emitirá solo al volver.
+      if (esEncolado(data)) {
+        setAviso(
+          (data as { mensaje?: string }).mensaje ??
+            "⏳ El servicio de facturación no está disponible ahora, pero el cobro quedó en cola y se emitirá automáticamente cuando vuelva.",
+        );
+        return;
+      }
       onDone({
         idFactura: data.idFactura,
         idTicket: ticket.id,
@@ -167,6 +177,9 @@ export default function CobroModal({
             <span className="text-xl font-bold text-emerald-300">{money(total)}</span>
           </div>
 
+          {aviso && (
+            <p className="rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">{aviso}</p>
+          )}
           {error && (
             <p className="rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-300">{error}</p>
           )}

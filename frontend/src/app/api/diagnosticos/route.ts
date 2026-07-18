@@ -30,8 +30,15 @@ export async function POST(request: NextRequest) {
 
   let data: unknown;
   try {
-    const res = await gateway.post("/diagnosticos/diagnosticos/", payload);
+    const res = await gateway.post("/diagnosticos/diagnosticos/", payload, {
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    });
     data = res.data;
+    // Si diagnóstico estaba caído, quedó ENCOLADO: avisamos y NO seguimos con
+    // la transición del ticket (el diagnóstico aún no se registró).
+    if (res.status === 202 || (data as { encolado?: boolean })?.encolado) {
+      return NextResponse.json(data, { status: 202 });
+    }
   } catch (err) {
     const e = err as { status?: number; data?: unknown };
     return NextResponse.json(e.data ?? { error: "Fallo en el Gateway." }, {

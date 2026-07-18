@@ -32,8 +32,13 @@ export async function POST(request: NextRequest) {
 
   try {
     // La barra final importa: el POST del ticket_service está montado en "/".
-    const { data } = await gateway.post("/tickets/tickets/", payload);
-    return NextResponse.json(data, { status: 201 });
+    // Idempotency-Key estable por envío: si el usuario reintenta o el outbox
+    // reenvía, el ticket NO se duplica. Se propaga el status real: 201 si se
+    // registró, 202 si el servicio estaba caído y quedó encolado.
+    const res = await gateway.post("/tickets/tickets/", payload, {
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    });
+    return NextResponse.json(res.data, { status: res.status });
   } catch (err) {
     const e = err as { status?: number; data?: unknown };
     return NextResponse.json(e.data ?? { error: "Fallo en el Gateway." }, {

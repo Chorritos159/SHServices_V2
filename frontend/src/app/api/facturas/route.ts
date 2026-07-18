@@ -24,8 +24,15 @@ export async function POST(request: NextRequest) {
 
   let data: unknown;
   try {
-    const res = await gateway.post("/facturas/facturas/", payload);
+    const res = await gateway.post("/facturas/facturas/", payload, {
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    });
     data = res.data;
+    // Si facturación estaba caída, el cobro quedó ENCOLADO: avisamos y NO
+    // seguimos con el cierre del ticket (todavía no hay comprobante).
+    if (res.status === 202 || (data as { encolado?: boolean })?.encolado) {
+      return NextResponse.json(data, { status: 202 });
+    }
   } catch (err) {
     const e = err as { status?: number; data?: unknown };
     return NextResponse.json(e.data ?? { error: "Fallo en el Gateway." }, {

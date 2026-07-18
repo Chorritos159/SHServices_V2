@@ -23,8 +23,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { data } = await gateway.post("/diagnosticos/asignaciones/tomar", body);
-    return NextResponse.json(data, { status: 201 });
+    const res = await gateway.post("/diagnosticos/asignaciones/tomar", body, {
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    });
+    return NextResponse.json(res.data, { status: res.status });
   } catch (err) {
     const e = err as { status?: number; data?: unknown };
     return NextResponse.json(e.data ?? { error: "Fallo en el Gateway." }, {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { isAxiosError } from "axios";
 import { api } from "@/lib/api/client";
 import { fechaHora } from "@/lib/fecha";
-import { Boton, Feedback, extraerError, type Estado } from "@/components/ui/FormControls";
+import { Boton, Feedback, esEncolado, extraerError, type Estado } from "@/components/ui/FormControls";
 import type { TicketPendiente, DiagnosticoResponse, ProductoInventario, Asignacion } from "@/lib/types/backend";
 
 const PRIORIDAD_COLOR: Record<string, string> = {
@@ -145,7 +145,7 @@ export default function DiagnosticoView({ sede }: { sede: string }) {
     setTomandoId(t.id);
     setAvisoTomar({ tipo: "idle" });
     try {
-      await api.post("/diagnosticos/asignaciones/tomar", {
+      const { data } = await api.post("/diagnosticos/asignaciones/tomar", {
         id_ticket: t.id,
         datos_cliente: t.datos_cliente,
         documento_cliente: t.documento_cliente,
@@ -156,6 +156,15 @@ export default function DiagnosticoView({ sede }: { sede: string }) {
         caracteristicas_falla: t.caracteristicas_falla,
         prioridad: t.prioridad,
       });
+      if (esEncolado(data)) {
+        setAvisoTomar({
+          tipo: "encolado",
+          mensaje:
+            data.mensaje ??
+            `⏳ El servicio no está disponible; tu toma de ${t.id} quedó en cola y se aplicará automáticamente cuando vuelva.`,
+        });
+        return;
+      }
       setAvisoTomar({ tipo: "ok", mensaje: `✅ Tomaste ${t.id}. Ya es tuyo y aparece en "Mis Tickets".` });
       await Promise.allSettled([cargarMisTickets(), cargarCola()]);
     } catch (err) {
@@ -204,7 +213,7 @@ export default function DiagnosticoView({ sede }: { sede: string }) {
     setEstado({ tipo: "idle" });
     const fd = new FormData(e.currentTarget);
     try {
-      const { data } = await api.post<DiagnosticoResponse>("/diagnosticos", {
+      const { data } = await api.post<DiagnosticoResponse & { encolado?: boolean; mensaje?: string }>("/diagnosticos", {
         idTicket: sel.id_ticket,
         fallaDetectada: String(fd.get("fallaDetectada")),
         mano_obra: Number(manoObra) || 0,
@@ -216,6 +225,17 @@ export default function DiagnosticoView({ sede }: { sede: string }) {
           descripcion: r.nombre,
         })),
       });
+      // Diagnóstico caído: quedó encolado, se registrará solo al volver.
+      if (esEncolado(data)) {
+        setEstado({
+          tipo: "encolado",
+          mensaje:
+            data.mensaje ??
+            "⏳ El servicio de diagnóstico no está disponible ahora, pero tu diagnóstico quedó en cola y se registrará automáticamente cuando vuelva.",
+        });
+        setEnviando(false);
+        return;
+      }
       setEstado({
         tipo: "ok",
         mensaje: `✅ ${data.idDiagnostico} · total ${money(data.precioReparacion)} · ${data.repuestosDescontados} repuesto(s) · ${data.estadoReserva}`,

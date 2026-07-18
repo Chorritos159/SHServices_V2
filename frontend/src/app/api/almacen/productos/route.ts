@@ -41,8 +41,12 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
 
   try {
-    const { data } = await gateway.post("/almacen/almacen/productos", body);
-    return NextResponse.json(data, { status: 201 });
+    // Idempotency-Key estable + status real (202 si el almacén estaba caído y
+    // el movimiento quedó encolado para reintentarse solo).
+    const res = await gateway.post("/almacen/almacen/productos", body, {
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    });
+    return NextResponse.json(res.data, { status: res.status });
   } catch (err) {
     const e = err as { status?: number; data?: unknown };
     return NextResponse.json(e.data ?? { error: "Fallo en el Gateway." }, {

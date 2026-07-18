@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api/client";
-import { Boton, Campo, Feedback, Select, extraerError, type Estado } from "@/components/ui/FormControls";
+import { Boton, Campo, Feedback, Select, esEncolado, extraerError, type Estado } from "@/components/ui/FormControls";
 import ReciboModal, { type ReciboData } from "@/components/print/ReciboModal";
 
 /**
@@ -43,6 +43,19 @@ export default function TicketForm() {
         precio_estimado: esSoporte ? Number(fd.get("precio_estimado") || 0) : null,
         prioridad: String(fd.get("prioridad")),
       });
+
+      // Servicio de tickets caído: el Gateway lo encoló y lo registrará solo.
+      if (esEncolado(data)) {
+        setEstado({
+          tipo: "encolado",
+          mensaje:
+            data.mensaje ??
+            "⏳ El servicio de tickets no está disponible ahora mismo, pero tu ticket quedó en cola y se registrará automáticamente cuando vuelva. No lo vuelvas a enviar.",
+        });
+        form.reset();
+        setTipoOperacion("SOPORTE");
+        return;
+      }
 
       if (esSoporte) {
         // Abrimos el Ticket de Recojo imprimible con los datos capturados.

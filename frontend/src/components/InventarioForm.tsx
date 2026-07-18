@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { isAxiosError } from "axios";
 import { api } from "@/lib/api/client";
+import { esEncolado } from "@/components/ui/FormControls";
 
 type Estado =
   | { tipo: "idle" }
   | { tipo: "ok"; mensaje: string }
+  | { tipo: "encolado"; mensaje: string }
   | { tipo: "error"; mensaje: string };
 
 /**
@@ -31,6 +33,17 @@ export default function InventarioForm() {
         sede: String(fd.get("sede")),
         stock_inicial: Number(fd.get("stock_inicial")),
       });
+      // Almacén caído: el alta quedó encolada y se registrará sola al volver.
+      if (esEncolado(data)) {
+        setEstado({
+          tipo: "encolado",
+          mensaje:
+            data.mensaje ??
+            "⏳ El servicio de almacén no está disponible ahora, pero el producto quedó en cola y se registrará automáticamente cuando vuelva.",
+        });
+        form.reset();
+        return;
+      }
       setEstado({
         tipo: "ok",
         mensaje: `✅ Producto ${data.codigo} · ${data.nombre} · stock ${data.stock_disponible} en ${data.sede}.`,
@@ -51,7 +64,7 @@ export default function InventarioForm() {
         <Campo name="nombre" label="Nombre" placeholder="Fuente 500W" />
         <div className="grid grid-cols-2 gap-3">
           <Select name="categoria" label="Categoría" options={["REPUESTO", "PRODUCTO_VENTA"]} />
-          <Select name="sede" label="Sede" options={["PIURA", "LIMA"]} />
+          <Select name="sede" label="Sede" options={["PIURA", "TALARA"]} />
         </div>
         <Campo name="stock_inicial" label="Stock inicial" type="number" placeholder="10" min={0} />
         <Boton cargando={cargando}>Guardar producto</Boton>
@@ -130,16 +143,14 @@ function Boton({ cargando, children }: { cargando: boolean; children: React.Reac
 
 function Feedback({ estado }: { estado: Estado }) {
   if (estado.tipo === "idle") return null;
-  const ok = estado.tipo === "ok";
+  const estilo =
+    estado.tipo === "ok"
+      ? "border-emerald-900/60 bg-emerald-950/40 text-emerald-300"
+      : estado.tipo === "encolado"
+        ? "border-amber-700/60 bg-amber-950/40 text-amber-200"
+        : "border-red-900/60 bg-red-950/40 text-red-300";
   return (
-    <p
-      role="status"
-      className={`rounded-lg border px-3 py-2 text-sm ${
-        ok
-          ? "border-emerald-900/60 bg-emerald-950/40 text-emerald-300"
-          : "border-red-900/60 bg-red-950/40 text-red-300"
-      }`}
-    >
+    <p role="status" className={`rounded-lg border px-3 py-2 text-sm ${estilo}`}>
       {estado.mensaje}
     </p>
   );

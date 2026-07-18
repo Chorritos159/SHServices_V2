@@ -6,7 +6,18 @@ import { isAxiosError } from "axios";
 export type Estado =
   | { tipo: "idle" }
   | { tipo: "ok"; mensaje: string }
+  | { tipo: "encolado"; mensaje: string }
   | { tipo: "error"; mensaje: string };
+
+/**
+ * ¿La respuesta del BFF indica que la escritura se ENCOLÓ? Cuando el servicio
+ * destino está caído, el Gateway responde `202 { encolado:true, mensaje }` y la
+ * reintenta sola con la misma Idempotency-Key (no se pierde ni se duplica). Los
+ * formularios usan esto para mostrar un aviso amable en vez de tratarlo como éxito.
+ */
+export function esEncolado(data: unknown): data is { encolado: true; mensaje?: string; operacion?: string } {
+  return !!data && typeof data === "object" && (data as { encolado?: boolean }).encolado === true;
+}
 
 /** Extrae un mensaje legible de un error de Axios (respeta { error } / { detail } del backend). */
 export function extraerError(err: unknown): string {
@@ -100,16 +111,14 @@ export function Boton({ cargando, children }: { cargando: boolean; children: Rea
 
 export function Feedback({ estado }: { estado: Estado }) {
   if (estado.tipo === "idle") return null;
-  const ok = estado.tipo === "ok";
+  const estilo =
+    estado.tipo === "ok"
+      ? "border-emerald-800/60 bg-emerald-950/40 text-emerald-200"
+      : estado.tipo === "encolado"
+        ? "border-amber-700/60 bg-amber-950/40 text-amber-200"
+        : "border-red-900/60 bg-red-950/40 text-red-300";
   return (
-    <div
-      role="status"
-      className={`rounded-lg border px-4 py-3 text-sm ${
-        ok
-          ? "border-emerald-800/60 bg-emerald-950/40 text-emerald-200"
-          : "border-red-900/60 bg-red-950/40 text-red-300"
-      }`}
-    >
+    <div role="status" className={`rounded-lg border px-4 py-3 text-sm ${estilo}`}>
       {estado.mensaje}
     </div>
   );
