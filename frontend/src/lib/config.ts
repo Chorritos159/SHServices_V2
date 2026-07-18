@@ -12,7 +12,9 @@ function required(name: string, fallback?: string): string {
 }
 
 export const config = {
-  authServiceUrl: required("AUTH_SERVICE_URL", "http://localhost:8003"),
+  // Único destino del backend: TODO pasa por el Gateway, incluido el login
+  // (antes había un `authServiceUrl` apuntando al puerto 8003 del
+  // auth-service; ese puerto ya no se publica — ver OWASP hallazgo 3).
   gatewayUrl: required("GATEWAY_URL", "http://localhost:8000"),
   jwtSecret: required("JWT_SECRET_KEY", "super_secreto_shservices_2026"),
   sessionCookieName: process.env.SESSION_COOKIE_NAME ?? "sh_session",

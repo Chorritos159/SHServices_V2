@@ -207,6 +207,42 @@ services:
         condition: service_healthy
 
   # ------------------------------------------------------------------
+  # FRONTEND (Next.js) — la aplicación web, en modo PRODUCCIÓN
+  #
+  # Cierra la brecha #9. Antes quedaba fuera del compose y había que
+  # levantarlo aparte con `npm run dev`, así que el sistema NO se levantaba
+  # con un solo comando y la web corría en modo desarrollo.
+  #
+  # Habla con el Gateway por el NOMBRE DE RED (`api-gateway:80`), no por
+  # localhost: dentro de Docker, `localhost` es el propio contenedor. Y como
+  # el navegador solo llama al BFF de Next (mismo origen), el JWT sigue sin
+  # salir nunca de la cookie HttpOnly.
+  # ------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    # `shservices-frontend` y no `frontend` a secas: el nombre `frontend` es
+    # demasiado genérico y ya lo ocupa otra copia del proyecto en esta misma
+    # máquina. Docker exige nombres únicos por host, no por proyecto.
+    container_name: shservices-frontend
+    restart: always
+    environment:
+      # Nombre de servicio en la red Docker, no localhost.
+      GATEWAY_URL: http://api-gateway:80
+      # La MISMA clave que el Gateway y el auth-service: el BFF verifica la
+      # firma del token antes de fiarse del rol que trae dentro.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-sh_session}
+    ports:
+      - "3001:3001"
+    networks:
+      - shservices-net
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+
+  # ------------------------------------------------------------------
   # TICKET SERVICE  (CRUD tickets) - BD + RabbitMQ
   # ------------------------------------------------------------------
   ticket-service:

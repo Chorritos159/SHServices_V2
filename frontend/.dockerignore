@@ -1,0 +1,13 @@
+# Lo que NO debe entrar en la imagen del frontend.
+#
+# node_modules se reinstala dentro (las dependencias nativas compiladas en
+# Windows no sirven en Alpine), y .next/.env.local llevarían artefactos y
+# secretos de la máquina de desarrollo a la imagen.
+node_modules
+.next
+out
+.env*.local
+.git
+.gitignore
+README.md
+npm-debug.log*

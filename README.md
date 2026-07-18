@@ -18,16 +18,14 @@ cp .env.example .env
 # GF_SECURITY_ADMIN_PASSWORD con valores propios (o los de la demo, ver
 # documentacion/*.md de cada servicio para las credenciales de prueba)
 
-# 2. Levantar todo
+# 2. Levantar TODO, incluida la web (un solo comando)
 docker compose up -d --build
 
 # 3. Verificar
-curl http://localhost:8000/health
+curl http://localhost:8000/health     # backend
+curl http://localhost:3001/login      # frontend
 
-# 4. Frontend (cliente web)
-cd frontend && npm install && npm run dev     # http://localhost:3001
-
-# 5. Detener
+# 4. Detener
 docker compose down          # detiene todo, CONSERVA los datos
 docker compose down -v       # detiene y BORRA los datos (destructivo)
 ```
@@ -67,6 +65,7 @@ servicio: [`catalogo-servicios.md`](catalogo-servicios.md).
 | Servicio | Puerto host | Notas |
 | :-- | :-- | :-- |
 | **api-gateway** | `8000` | Único punto de entrada para tráfico de negocio (`/api/v1/...`) |
+| **frontend** | `3001` | Aplicación web (Next.js) en **modo producción**, dentro de Docker. Contenedor `shservices-frontend` |
 | auth-service | *(sin exponer)* | Desde 2026-07-18 **ya no publica puerto**: el login pasa por el Gateway (`POST :8000/api/v1/auth/login`) y así hereda rate limit, bloqueo por intentos y circuit breaker. Su Swagger se lee en `:8000/docs-todos` (OWASP hallazgo 3) |
 | postgres-db | *(sin exponer)* | Solo alcanzable dentro de la red Docker |
 | rabbitmq | `15672` (panel admin), `15692` (métricas Prometheus) | Usuario/clave en `.env` |
