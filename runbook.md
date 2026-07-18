@@ -146,7 +146,7 @@ El owner funcional de cada área decide si un cambio procede (ver `catalogo-serv
 | **Detección** | Grafana: `gateway_circuit_state{service=…}` = 2 (OPEN); alertas de error rate; `docker compose ps` |
 | **Primeras revisiones** | `docker compose ps` (¿Exited/unhealthy?), `docker compose logs --tail=50 <servicio>`, `GET /health` del servicio |
 | **Acción** | Si crasheó: `restart: always` lo revive solo (~2 s). Si está `Exited` tras un stop manual: `docker compose up -d <servicio>`. Si está `unhealthy` (proceso colgado): `docker compose up -d --force-recreate <servicio>` |
-| **Verificación** | El circuito se cierra **solo** en ~15-20 s (sonda activa, ADR-0007). Las escrituras encoladas se entregan solas (outbox, ADR-0004) |
+| **Verificación** | El circuito se cierra **solo** en ~15-20 s (sonda activa, ADR-0014). Las escrituras encoladas se entregan solas (outbox, ADR-0011) |
 | **Escalamiento** | Soporte de TI (owner técnico). Si es pérdida de datos → Administrador |
 | **Comunicación** | Área afectada (Recepción / Técnico / Facturación) según el servicio |
 

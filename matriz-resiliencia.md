@@ -2,9 +2,9 @@
 
 > Gate **G8 · FF-DEP-08** · Estrategias de tolerancia a fallos y Chaos Engineering
 > Última actualización: 2026-07-18 (cierre S34)
-> Decisiones de diseño formalizadas en `documentacion/adr/` (ADR-0001: 1 solo
-> worker del Gateway; ADR-0002: idempotencia; ADR-0003: carga por nodos/bloques;
-> ADR-0004: outbox; ADR-0005: asignaciones; ADR-0006: garantías; ADR-0007: sonda
+> Decisiones de diseño formalizadas en `documentacion/adr/` (ADR-0008: 1 solo
+> worker del Gateway; ADR-0009: idempotencia; ADR-0010: carga por nodos/bloques;
+> ADR-0011: outbox; ADR-0012: asignaciones; ADR-0013: garantías; ADR-0014: sonda
 > activa del breaker). SLA y límites justificados en `documentacion/sla.md`. Brechas conocidas consolidadas en
 > `documentacion/brechas_finales.md`.
 

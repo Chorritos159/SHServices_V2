@@ -1,4 +1,4 @@
-# ADR-0001 — API Gateway con 1 solo worker Gunicorn
+# ADR-0008 — API Gateway con 1 solo worker Gunicorn
 
 **Estado:** Aceptada · **Fecha:** 2026-07-16 · **Fase:** S34, Fase 1
 

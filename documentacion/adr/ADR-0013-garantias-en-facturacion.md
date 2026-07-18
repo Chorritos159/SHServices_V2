@@ -1,4 +1,4 @@
-# ADR-0006 — Las garantías las gestiona facturacion-service, no ticket-service
+# ADR-0013 — Las garantías las gestiona facturacion-service, no ticket-service
 
 **Estado:** Aceptada · **Fecha:** 2026-07-18 · **Fase:** S34, Fase 8
 

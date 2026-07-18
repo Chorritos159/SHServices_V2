@@ -1,4 +1,4 @@
-# ADR-0005 — La asignación de tickets vive en diagnostico-service, no en ticket-service
+# ADR-0012 — La asignación de tickets vive en diagnostico-service, no en ticket-service
 
 **Estado:** Aceptada · **Fecha:** 2026-07-18 · **Fase:** S34, Fase 8
 

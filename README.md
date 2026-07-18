@@ -188,7 +188,7 @@ que la respalda.
 | Comprobante de la garantía | `GET /api/v1/facturas/garantias/factura-de/{idTicket}` | CAJA · ADMIN |
 
 Pruébalo: `docker pause ticket-service` -> la Consulta de Garantías del panel
-sigue cargando y el comprobante también. Decisión y motivos: `ADR-0006`.
+sigue cargando y el comprobante también. Decisión y motivos: `ADR-0013`.
 
 ## Webhooks salientes
 
@@ -616,8 +616,8 @@ demostrada; son ampliaciones funcionales.
   riesgo/acción/responsable para el dictamen).
 - `seguridad/` — `OWASP_Top10.md` (revisión de las 10 categorías sobre este
   código) y `sonarqube_resultados.md`.
-- `documentacion/adr/` — decisiones de arquitectura formalizadas (ADR-0001:
-  Gateway de 1 solo worker; ADR-0002: estrategia de idempotencia; ADR-0003:
+- `documentacion/adr/` — decisiones de arquitectura formalizadas (ADR-0008:
+  Gateway de 1 solo worker; ADR-0009: estrategia de idempotencia; ADR-0010:
   carga por nodos/bloques).
 - `documentacion/sla.md` — **SLA/SLO**: disponibilidad realista por criticidad,
   latencia medida, y el porqué del rate limiting y de cada límite.

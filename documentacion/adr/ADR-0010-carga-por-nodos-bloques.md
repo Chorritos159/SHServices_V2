@@ -1,4 +1,4 @@
-# ADR-0003 — Pruebas de carga por nodos/bloques, ventana de tiempo fija
+# ADR-0010 — Pruebas de carga por nodos/bloques, ventana de tiempo fija
 
 **Estado:** Aceptada · **Fecha:** 2026-07-16 · **Fase:** S34, Fase 5
 

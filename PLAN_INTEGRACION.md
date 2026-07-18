@@ -142,8 +142,8 @@ pedido explícito.
   prerrequisitos, nuevas entradas de troubleshooting (429/503 de
   contención), pointer a `pruebas/06_caos.py` como verificación completa.
 - `documentacion/adr/`: 3 ADRs nuevos (el proyecto no tenía ninguno) —
-  ADR-0001 (Gateway 1 worker), ADR-0002 (estrategia de idempotencia),
-  ADR-0003 (carga por nodos/bloques).
+  ADR-0008 (Gateway 1 worker), ADR-0009 (estrategia de idempotencia),
+  ADR-0010 (carga por nodos/bloques).
 - `documentacion/brechas_finales.md`: tabla consolidada de 9 brechas reales
   (riesgo/acción/responsable) para el dictamen — todas con evidencia o
   razonamiento concreto, ninguna bloquea la demostración de los mecanismos

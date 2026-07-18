@@ -1,4 +1,4 @@
-# ADR-0002 — Estrategia de idempotencia: clave natural vs. Idempotency-Key
+# ADR-0009 — Estrategia de idempotencia: clave natural vs. Idempotency-Key
 
 **Estado:** Aceptada · **Fecha:** 2026-07-16 · **Fase:** S34, Fase 3
 

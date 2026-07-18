@@ -155,7 +155,7 @@ dependencies:
   - ticket-service           # sync de estado, BEST-EFFORT (no bloquea)
 ```
 > **Dueño de las asignaciones.** "Mis Tickets" y la vista de admin las sirve este servicio, no
-> el de tickets: así el técnico sigue trabajando aunque `ticket-service` esté caído (ADR-0005).
+> el de tickets: así el técnico sigue trabajando aunque `ticket-service` esté caído (ADR-0012).
 
 ### almacen-service
 ```yaml
@@ -207,7 +207,7 @@ dependencies:
   - rabbitmq
 ```
 > **Dueño de las garantías.** La garantía de 90 días nace del COBRO, no de la entrega, y se
-> consulta desde aquí: sobrevive a una caída de `ticket-service` (ADR-0006).
+> consulta desde aquí: sobrevive a una caída de `ticket-service` (ADR-0013).
 
 ### auditoria-service
 ```yaml

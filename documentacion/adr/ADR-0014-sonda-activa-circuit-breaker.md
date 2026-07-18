@@ -1,4 +1,4 @@
-# ADR-0007 — Sonda activa del circuit breaker (recuperación sin tráfico)
+# ADR-0014 — Sonda activa del circuit breaker (recuperación sin tráfico)
 
 **Estado:** Aceptada · **Fecha:** 2026-07-18 · **Fase:** S34, Fase 8
 

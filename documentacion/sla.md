@@ -14,7 +14,7 @@ alcanzable:
 | Condicionante | Efecto sobre el SLA |
 | :-- | :-- |
 | **Un solo host** (Docker Compose, sin réplicas) | No hay tolerancia a fallo de infraestructura: si el host cae, cae todo |
-| **API Gateway con 1 worker** (ADR-0001) | Techo de throughput ~40–65 rps; es el primer cuello de botella |
+| **API Gateway con 1 worker** (ADR-0008) | Techo de throughput ~40–65 rps; es el primer cuello de botella |
 | **Sin alta disponibilidad de datos** | PostgreSQL de instancia única, sin réplica ni failover |
 
 Por eso el objetivo es **99,0 % mensual** ("dos nueves") para lo crítico y no
@@ -100,7 +100,7 @@ terminar cada corrida (ver `registro_de_carga.md`).
 
 Aunque un servicio esté **caído**, una escritura aceptada por el Gateway **no se
 pierde**: se encola en el outbox y se entrega cuando el servicio vuelve, con la
-misma `Idempotency-Key` (no se duplica). Ver ADR-0004.
+misma `Idempotency-Key` (no se duplica). Ver ADR-0011.
 
 > **Compromiso:** 0 % de pérdida de escrituras aceptadas (`202 encolado`) y 0 %
 > de duplicación, incluso durante una caída total del servicio destino.

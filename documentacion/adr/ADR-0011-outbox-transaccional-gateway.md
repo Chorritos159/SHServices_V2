@@ -1,4 +1,4 @@
-# ADR-0004 — Outbox transaccional en el Gateway: ninguna escritura se pierde ni se duplica
+# ADR-0011 — Outbox transaccional en el Gateway: ninguna escritura se pierde ni se duplica
 
 **Estado:** Aceptada · **Fecha:** 2026-07-18 · **Fase:** S34, Fase 8
 

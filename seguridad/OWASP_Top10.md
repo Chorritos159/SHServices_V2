@@ -183,7 +183,7 @@ completas para reintentarlas más tarde. Contenido real de una fila:
  "x-user-rol": "CAJA", "x-user-sede": "PIURA"}
 ```
 
-**No se guarda la cabecera `Authorization`.** Es deliberado (ADR-0004): el JWT
+**No se guarda la cabecera `Authorization`.** Es deliberado (ADR-0011): el JWT
 puede expirar antes de que el worker consiga entregar, y guardar tokens en base
 de datos sería una fuga esperando a ocurrir. Se persiste solo la **identidad ya
 validada**, que es lo que los servicios internos consumen.
