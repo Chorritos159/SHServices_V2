@@ -38,8 +38,15 @@ async def iniciar_consumidor():
                 # 3. Crear una cola exclusiva para Auditoría
                 queue = await channel.declare_queue("auditoria_tickets_queue", durable=True)
 
-                # 4. Vincular la cola al megáfono (cualquier evento "ticket.*")
+                # 4. Vincular la cola al megáfono. DOS bindings:
+                #    - "ticket.*"   -> ciclo de vida del ticket (creado, tomado,
+                #                      diagnosticado, listo, facturado)
+                #    - "producto.*" -> movimientos de inventario (alta de producto).
+                # Sin el segundo binding, `producto.registrado` se publicaba pero
+                # NUNCA se auditaba: el patrón "ticket.*" no lo matchea (brecha #3).
+                # Los bindings son aditivos: se pueden añadir a una cola ya existente.
                 await queue.bind(exchange, routing_key="ticket.*")
+                await queue.bind(exchange, routing_key="producto.*")
 
                 logger.info("Servicio de Auditoría conectado y escuchando eventos en RabbitMQ...")
 
@@ -55,9 +62,12 @@ async def iniciar_consumidor():
 
                             evento_nombre = payload.get("evento")
                             datos = payload.get("datos") or {}
+                            # La entidad depende del evento: los de ticket traen
+                            # idTicket; los de inventario, el codigo del producto.
+                            entidad = datos.get("idTicket") or datos.get("codigo") or "-"
                             logger.info(
                                 f"EXPEDIENTE AUDITADO | Evento: {evento_nombre} "
-                                f"| Sede: {datos.get('sede')} | ID: {datos.get('idTicket')}"
+                                f"| Sede: {datos.get('sede')} | ID: {entidad}"
                             )
 
                             # Guardar en el store en memoria para que el GET lo exponga.

@@ -14,10 +14,11 @@ Coreografía basada en RabbitMQ. Todos los servicios publican al mismo exchange 
 
 ## 2. Catálogo de eventos auditados
 
-El binding de la cola de auditoría es `ticket.*` — captura los 4 eventos
-del ciclo de vida del ticket. `producto.registrado` (almacen-service) **no**
-matchea el patrón y por lo tanto **no queda auditado** — ver brecha
-conocida en `matriz-resiliencia.md` / README raíz.
+La cola de auditoría tiene **dos bindings**: `ticket.*` (ciclo de vida del
+ticket) y `producto.*` (movimientos de inventario). Con esto queda auditado
+**todo** el flujo crítico, incluido `producto.registrado`, que antes se
+publicaba pero no se capturaba porque el patrón `ticket.*` no lo matchea
+(brecha #3, cerrada el 2026-07-18).
 
 | Evento | Routing key | Publicado por | Datos clave |
 |---|---|---|---|
@@ -25,6 +26,8 @@ conocida en `matriz-resiliencia.md` / README raíz.
 | `TicketListo.v1` | `ticket.listo` | ticket-service (al diagnosticar con repuesto reservado) | `idTicket`, `sede` |
 | `DiagnosticoRegistrado.v1` | `ticket.diagnosticado` | diagnostico-service | `idDiagnostico`, `idTicket`, `sede`, `estadoReserva`, `precioReparacion` |
 | `FacturaGenerada.v1` | `ticket.facturado` | facturacion-service | `idFactura`, `idTicket`, `montoTotal`, `sede` |
+| `TicketTomado.v1` | `ticket.tomado` | diagnostico-service | `idTicket`, `sede`, `tecnico` (quién lo atiende) |
+| `ProductoRegistrado.v1` | `producto.registrado` | almacen-service | `codigo`, `nombre`, `sede`, `stock_inicial` |
 
 **Idempotencia del consumidor (Fase 3, S34):** índice único
 `(trace_id, evento)` en `auditoria_eventos` — un redelivery de RabbitMQ

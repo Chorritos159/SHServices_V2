@@ -41,7 +41,7 @@ def registrar_evento(evento: str, datos: dict[str, Any], trace_id: str | None) -
         db.commit()
         logger.extra["correlation_id"] = trace_id or "N/A"
         logger.info(
-            f"Evento auditado: {evento} (ticket {datos.get('idTicket')}).",
+            f"Evento auditado: {evento} ({datos.get('idTicket') or datos.get('codigo') or 'sin entidad'}).",
             extra={"campos": {"operation": "registrar_evento", "event": evento, "result": "ok",
                                "durationMs": round((time.monotonic() - inicio) * 1000, 1)}},
         )
