@@ -180,7 +180,8 @@ def main():
         "nombre": "Cargador tipo C 100W", "categoria": "REPUESTO", "sede": "PIURA",
         "stock_inicial": 30, "precio_unitario": 110.0,
     })
-    check(r.status_code < 400, f"producto {r.json().get('codigo') if r.status_code < 400 else ''} ingresado",
+    inventario_ok = r.status_code < 400
+    check(inventario_ok, f"producto {r.json().get('codigo') if inventario_ok else ''} ingresado",
           f"no se pudo agregar inventario: HTTP {r.status_code} {r.text}")
 
     out("\n    (esperando propagacion asincrona de eventos por RabbitMQ...)")
@@ -201,8 +202,19 @@ def main():
           "el tecnico no recibio la notificacion del ticket")
 
     # ------------------------------------------------------------------
-    paso("COBERTURA: los 8 servicios recibieron trafico de este flujo?")
-    _verificar_cobertura(cid, tk, out, fallos)
+    paso("COBERTURA: los 8 servicios hicieron su trabajo en este flujo?")
+    evidencias = {
+        "auth-service":         (bool(t_caja and t_tec and t_admin), "emitio los 3 tokens"),
+        "api-gateway":          (bool(tk), "enruto todo el flujo (sin el, nada habria respondido)"),
+        "ticket-service":       (bool(tk), f"creo y movio el ticket {tk}"),
+        "diagnostico-service":  (diag_ok, "registro el diagnostico y la asignacion"),
+        "almacen-service":      (stock_despues == (stock_antes - 1) if stock_antes is not None else False,
+                                 f"reservo el repuesto (stock {stock_antes} -> {stock_despues})"),
+        "facturacion-service":  (fac_ok, "emitio la factura y la garantia"),
+        "auditoria-service":    (len(eventos_flujo) >= 1, f"registro {len(eventos_flujo)} evento(s) del flujo"),
+        "notificacion-service": (tiene_alerta, "entrego la alerta al tecnico"),
+    }
+    _verificar_cobertura(evidencias, out, fallos)
 
     _finalizar(salida, fallos)
 
@@ -220,32 +232,19 @@ def _stock(token, codigo, sede):
     return None
 
 
-def _verificar_cobertura(cid, tk, out, fallos):
-    """Confirma que cada servicio logueo algo de este flujo.
+def _verificar_cobertura(evidencias, out, fallos):
+    """Confirma que CADA servicio hizo su trabajo en este flujo.
 
-    Los 6 servicios de negocio + gateway comparten el correlationId (via
-    cabecera o via RabbitMQ). auth se verifica aparte (su login no lleva el
-    mismo correlationId, pero si respondio tokens el flujo no habria arrancado).
+    Se basa en la EVIDENCIA DE NEGOCIO que el propio flujo ya verifico (el
+    ticket existe, el stock bajo, la factura se emitio, la auditoria registro
+    el evento...), no en un grep de `docker logs`: ese grep dependia del log
+    driver de Docker y daba falsos negativos, ademas de probar menos ("logueo
+    algo" no es lo mismo que "hizo su trabajo").
     """
-    tocados = {"auth-service": True}  # si no, ningun login habria funcionado
-    for contenedor in ("api-gateway", "ticket-service", "diagnostico-service",
-                        "almacen-service", "facturacion-service",
-                        "auditoria-service", "notificacion-service"):
-        r = subprocess.run(
-            ["docker", "logs", contenedor, "--since", "120s"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
-        logs = (r.stdout or "") + (r.stderr or "")
-        # El correlationId aparece en los logs sincronos; para almacen (que
-        # tambien se toca via el reserve/confirm interno) y los consumidores
-        # basta con que aparezca el cid o el idTicket.
-        tocados[contenedor] = (cid in logs) or (tk in logs)
-
-    for servicio in SERVICIOS:
-        ok = tocados.get(servicio, False)
-        out(f"    {'OK ' if ok else 'NO '} {servicio}")
+    for servicio, (ok, detalle) in evidencias.items():
+        out(f"    {'OK ' if ok else 'NO '} {servicio}: {detalle}")
         if not ok:
-            fallos.append(f"{servicio} no recibio trafico de este flujo")
+            fallos.append(f"{servicio} no completo su parte del flujo ({detalle})")
 
 
 def _finalizar(salida, fallos):

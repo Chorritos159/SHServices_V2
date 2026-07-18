@@ -428,6 +428,20 @@ async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: s
                 )
                 return _encolar_o_error(service, path, metodo, body, headers, error_503)
 
+# Tareas de fondo (worker del outbox y sonda del breaker). Hay que GUARDAR la
+# referencia: asyncio solo mantiene una referencia débil a la tarea, así que sin
+# esto el recolector de basura puede matarla a medio camino y el worker dejaría
+# de reintentar las escrituras encoladas sin ningún aviso.
+_TAREAS_FONDO: set = set()
+
+
+def _lanzar_en_fondo(corutina):
+    tarea = asyncio.create_task(corutina)
+    _TAREAS_FONDO.add(tarea)
+    tarea.add_done_callback(_TAREAS_FONDO.discard)
+    return tarea
+
+
 # Sonda ACTIVA del circuit breaker (recuperación automática).
 # Cada cuánto el prober revisa los circuitos que no están CLOSED.
 SONDA_BREAKER_INTERVALO_S = 5
@@ -488,8 +502,8 @@ async def _iniciar_outbox():
     except Exception as exc:
         logger.error(f"No se pudo preparar la tabla del outbox: {exc}",
                      extra={"campos": {"operation": "outbox_init", "result": "error"}})
-    asyncio.create_task(outbox.bucle_drenaje(MICROSERVICIOS, BREAKERS))
-    asyncio.create_task(bucle_sonda_breakers())
+    _lanzar_en_fondo(outbox.bucle_drenaje(MICROSERVICIOS, BREAKERS))
+    _lanzar_en_fondo(bucle_sonda_breakers())
 
 
 def _encolar_o_error(service: str, path: str, metodo: str, body: bytes,

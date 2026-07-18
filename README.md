@@ -23,12 +23,44 @@ docker compose up -d --build
 
 # 3. Verificar
 curl http://localhost:8000/health
+
+# 4. Frontend (cliente web)
+cd frontend && npm install && npm run dev     # http://localhost:3001
+
+# 5. Detener
+docker compose down          # detiene todo, CONSERVA los datos
+docker compose down -v       # detiene y BORRA los datos (destructivo)
 ```
 
-Todos los servicios usan `restart: always` y health checks — si algo se
-cae, se reinicia solo. El Gateway es el **único** punto de entrada público
-para tráfico de negocio (`8000`); el resto de microservicios solo son
-alcanzables dentro de la red Docker `shservices-net`.
+Todos los servicios usan `restart: always` y health checks — si el proceso
+**crashea**, se reinicia solo (~2 s). El Gateway es el **único** punto de
+entrada público para tráfico de negocio (`8000`); el resto de microservicios
+solo son alcanzables dentro de la red Docker `shservices-net`.
+
+**Prueba en 30 segundos** (flujo completo por los 8 servicios):
+```bash
+python pruebas/08_flujo_completo.py
+```
+
+## Ownership (quién decide, mantiene y opera)
+
+El negocio tiene cinco áreas: **Recepción**, **Técnico**, **Administrador**,
+**Área de facturación** y **Soporte de TI**. Cada servicio tiene un owner
+funcional (decide qué hace) y un owner técnico (lo mantiene y opera). Un
+"equipo backend" genérico no es owner suficiente ante un incidente.
+
+| Servicio | Owner funcional | Owner técnico / operativo |
+| :-- | :-- | :-- |
+| ticket-service | Recepción | Soporte de TI |
+| diagnostico-service | Técnico | Soporte de TI |
+| almacen-service | Administrador | Soporte de TI |
+| facturacion-service | Área de facturación | Soporte de TI |
+| auditoria-service | Administrador | Soporte de TI |
+| notificacion-service | Recepción | Soporte de TI |
+| auth-service / api-gateway | Administrador / Soporte de TI | Soporte de TI |
+
+Matriz completa (decide · mantiene · consume · opera) y fichas de catálogo por
+servicio: [`catalogo-servicios.md`](catalogo-servicios.md).
 
 ## Servicios y puertos
 
@@ -140,6 +172,23 @@ pierde ni se duplica.**
 Pruébalo: `docker pause ticket-service`, crea un ticket → `202 encolado`;
 `docker unpause ticket-service` → el worker lo registra solo, una sola vez.
 Ver `api_gateway/app/core/outbox.py`.
+
+## Garantías (las emite y consulta Facturación)
+
+La **garantía de 90 días** nace del **cobro**, no de la entrega: la emite
+`facturacion-service` junto con el comprobante y se consulta desde ahí. Así la
+Consulta de Garantías **sigue disponible aunque `ticket-service` esté caído**
+(antes desaparecía). Al hacer **clic en una garantía** se abre el comprobante
+que la respalda.
+
+| Acción | Endpoint | Rol |
+| :-- | :-- | :-- |
+| Listado con vigencia | `GET /api/v1/facturas/garantias/` | CAJA · ADMIN |
+| Buscar por DNI/RUC | `GET /api/v1/facturas/garantias/por-documento/{doc}` | CAJA · ADMIN |
+| Comprobante de la garantía | `GET /api/v1/facturas/garantias/factura-de/{idTicket}` | CAJA · ADMIN |
+
+Pruébalo: `docker pause ticket-service` -> la Consulta de Garantías del panel
+sigue cargando y el comprobante también. Decisión y motivos: `ADR-0006`.
 
 ## Webhooks salientes
 
@@ -446,8 +495,8 @@ SonarQube va en el perfil `analisis`: **no arranca** con el sistema normal
 docker compose --profile analisis up -d sonarqube
 curl -s http://localhost:9001/api/system/status     # -> {"status":"UP"}
 
-# 2. Generar un token de análisis (admin/admin)
-TOKEN=$(curl -s -u admin:admin -X POST \
+# 2. Generar un token (usuario admin; SONAR_PASS = tu contraseña de SonarQube)
+TOKEN=$(curl -s -u admin:"$SONAR_PASS" -X POST \
   "http://localhost:9001/api/user_tokens/generate?name=analisis-$(date +%s)" \
   | python -c "import sys,json;print(json.load(sys.stdin)['token'])")
 
@@ -460,7 +509,7 @@ docker cp . sonar-scan:/usr/src/
 docker start -a sonar-scan          # ~45 s
 ```
 
-Resultados: **http://localhost:9001** (`admin` / `admin`) → proyecto
+Resultados: **http://localhost:9001** (usuario `admin`) → proyecto
 *SHServices V2*. Estado actual: **0 bugs, Quality Gate OK**, 15
 vulnerabilidades MINOR aceptadas (HTTP/AMQP interno entre contenedores) —
 detalle y justificación en `seguridad/sonarqube_resultados.md`.
