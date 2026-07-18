@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, Request, BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from datetime import datetime, timedelta
 import uuid
 import json
 from app.models.schemas import FacturaCreate, FacturaResponse
 from app.models.factura import FacturaDB
+from app.models.garantia import GarantiaDB
 from app.core.database import get_db
 from app.core.logger import get_logger, DUPLICADO
 from app.core.rabbitmq import publicar_evento
@@ -12,8 +14,41 @@ from app.core.rabbitmq import publicar_evento
 router = APIRouter()
 logger = get_logger("facturacion-service")
 
+DIAS_GARANTIA = 90
 
-def _respuesta_desde_db(f: FacturaDB) -> FacturaResponse:
+
+def _crear_garantia(db: Session, factura: FacturaCreate, monto_total: float):
+    """Emite la GARANTÍA de 90 días junto con el cobro (solo SOPORTE).
+
+    Vive aquí (y no en ticket-service) porque la garantía respalda lo COBRADO.
+    Idempotente: si el ticket ya tenía garantía, no crea otra.
+    """
+    if (factura.tipoOperacion or "").upper() != "SOPORTE":
+        return None
+    ya = db.query(GarantiaDB).filter(GarantiaDB.id_ticket == factura.idTicket).first()
+    if ya:
+        return ya
+    ahora = datetime.utcnow()
+    garantia = GarantiaDB(
+        id=f"GAR-{factura.sede[:3].upper()}-{uuid.uuid4().hex[:6].upper()}",
+        id_ticket=factura.idTicket,
+        documento_cliente=factura.documentoCliente,
+        equipo=factura.equipo,
+        numero_serie=factura.numeroSerie,
+        descripcion=factura.descripcion,
+        fecha_entrega=ahora,
+        fecha_vencimiento=ahora + timedelta(days=DIAS_GARANTIA),
+        dias=DIAS_GARANTIA,
+        monto_total=monto_total,
+    )
+    db.add(garantia)
+    return garantia
+
+
+def _respuesta_desde_db(f: FacturaDB, db: Session = None) -> FacturaResponse:
+    garantia = None
+    if db is not None:
+        garantia = db.query(GarantiaDB).filter(GarantiaDB.id_ticket == f.id_ticket).first()
     return FacturaResponse(
         idFactura=f.id,
         idTicket=f.id_ticket,
@@ -24,6 +59,8 @@ def _respuesta_desde_db(f: FacturaDB) -> FacturaResponse:
         lineas=json.loads(f.detalle_json or "[]"),
         fechaEmision=f.fecha_emision.isoformat() + "Z",
         estadoPago="PAGADO",
+        idGarantia=garantia.id if garantia else None,
+        garantiaVence=garantia.fecha_vencimiento.isoformat() + "Z" if garantia else None,
     )
 
 
@@ -53,7 +90,7 @@ async def emitir_comprobante(
             op.campos["idFactura"] = existente.id
             op.mensaje = (f"Factura ya existia para el ticket {factura.idTicket} ({existente.id}); "
                           "se devuelve la existente (idempotencia).")
-            return _respuesta_desde_db(existente)
+            return _respuesta_desde_db(existente, db)
 
         # 1. Detalle de lineas (POS): calcula subtotales y su total.
         lineas_out = []
@@ -92,9 +129,16 @@ async def emitir_comprobante(
             op.campos["idFactura"] = existente.id
             op.mensaje = (f"Carrera de idempotencia resuelta para el ticket {factura.idTicket}; "
                           f"se devuelve {existente.id}.")
-            return _respuesta_desde_db(existente)
+            return _respuesta_desde_db(existente, db)
 
         db.refresh(nueva_factura)
+
+        # Garantia de 90 dias emitida junto con el cobro (solo SOPORTE).
+        garantia = _crear_garantia(db, factura, total_calculado)
+        if garantia is not None:
+            db.commit()
+            db.refresh(garantia)
+
         op.campos.update({"idFactura": id_factura, "montoTotal": total_calculado,
                           "lineas": len(lineas_out), "metodoPago": factura.metodoPago.upper()})
         op.mensaje = (f"Comprobante {id_factura} emitido por S/.{total_calculado} "
@@ -128,4 +172,6 @@ async def emitir_comprobante(
             lineas=lineas_out,
             fechaEmision=nueva_factura.fecha_emision.isoformat() + "Z",
             estadoPago="PAGADO",
+            idGarantia=garantia.id if garantia is not None else None,
+            garantiaVence=(garantia.fecha_vencimiento.isoformat() + "Z") if garantia is not None else None,
         )

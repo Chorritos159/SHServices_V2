@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { isAxiosError } from "axios";
 import { api } from "@/lib/api/client";
 import { soloFecha } from "@/lib/fecha";
+import ComprobanteModal, { type ComprobanteData } from "@/components/print/ComprobanteModal";
 import type { Garantia } from "@/lib/types/backend";
 
 /**
@@ -16,6 +17,9 @@ export default function GarantiasView() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  // Comprobante que respalda la garantia (se abre al hacer clic en una tarjeta).
+  const [comprobante, setComprobante] = useState<ComprobanteData | null>(null);
+  const [cargandoComp, setCargandoComp] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -37,6 +41,41 @@ export default function GarantiasView() {
   useEffect(() => {
     cargar();
   }, [cargar]);
+
+  async function verComprobante(g: Garantia) {
+    setCargandoComp(g.id);
+    setError(null);
+    try {
+      const { data } = await api.get<{
+        idFactura: string; montoManoObra: number; montoRepuestos: number;
+        montoTotal: number; fechaEmision: string; estadoPago: string;
+        metodoPago?: string; garantiaVence?: string | null;
+      }>(`/garantias/factura/${encodeURIComponent(g.id_ticket)}`);
+      setComprobante({
+        idFactura: data.idFactura,
+        idTicket: g.id_ticket,
+        cliente: g.documento_cliente ?? "—",
+        documento: g.documento_cliente ?? "—",
+        manoObra: data.montoManoObra ?? 0,
+        repuestos: data.montoRepuestos ?? 0,
+        total: data.montoTotal ?? (g.monto_total ?? 0),
+        metodoPago: data.metodoPago ?? "—",
+        estadoPago: data.estadoPago ?? "PAGADO",
+        fecha: data.fechaEmision,
+        garantiaVence: data.garantiaVence ?? g.fecha_vencimiento,
+      });
+    } catch (err) {
+      setError(
+        isAxiosError(err)
+          ? (err.response?.data as { error?: string; detalle?: string })?.detalle ??
+            (err.response?.data as { error?: string })?.error ??
+            "No se pudo cargar el comprobante."
+          : "No se pudo cargar el comprobante.",
+      );
+    } finally {
+      setCargandoComp(null);
+    }
+  }
 
   const filtradas = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -83,15 +122,32 @@ export default function GarantiasView() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {filtradas.map((g) => (
-            <TarjetaGarantia key={g.id} g={g} />
+            <TarjetaGarantia
+              key={g.id}
+              g={g}
+              onVerComprobante={() => verComprobante(g)}
+              cargando={cargandoComp === g.id}
+            />
           ))}
         </div>
+      )}
+
+      {comprobante && (
+        <ComprobanteModal data={comprobante} onClose={() => setComprobante(null)} />
       )}
     </div>
   );
 }
 
-function TarjetaGarantia({ g }: { g: Garantia }) {
+function TarjetaGarantia({
+  g,
+  onVerComprobante,
+  cargando,
+}: {
+  g: Garantia;
+  onVerComprobante: () => void;
+  cargando: boolean;
+}) {
   const color = g.vigente
     ? "border-emerald-800/60 bg-emerald-950/20"
     : "border-red-900/60 bg-red-950/20";
@@ -100,7 +156,14 @@ function TarjetaGarantia({ g }: { g: Garantia }) {
     : "bg-red-500/15 text-red-300";
 
   return (
-    <article className={`rounded-xl border p-5 ${color}`}>
+    <article
+      onClick={onVerComprobante}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter") onVerComprobante(); }}
+      title="Ver el comprobante de esta garantía"
+      className={`cursor-pointer rounded-xl border p-5 transition hover:brightness-125 ${color}`}
+    >
       <div className="mb-3 flex items-center justify-between">
         <span className="font-mono text-xs text-slate-400">{g.id}</span>
         <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide ${badge}`}>
@@ -134,6 +197,9 @@ function TarjetaGarantia({ g }: { g: Garantia }) {
         <Fila k="Entrega" v={soloFecha(g.fecha_entrega)} />
         <Fila k="Vence" v={soloFecha(g.fecha_vencimiento)} />
       </dl>
+      <p className="mt-3 border-t border-slate-800 pt-2 text-center text-xs text-slate-500">
+        {cargando ? "Cargando comprobante…" : "Clic para ver el comprobante"}
+      </p>
     </article>
   );
 }

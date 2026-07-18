@@ -63,13 +63,19 @@ export default function CobroModal({
     try {
       const { data } = await api.post<{
         idFactura: string; montoTotal: number; estadoPago: string; fechaEmision: string;
-        garantia?: { fecha_vencimiento?: string } | null;
+        garantiaVence?: string | null;
       }>("/facturas", {
         idTicket: ticket.id,
         montoManoObra: Number(manoObra),
         montoRepuestos: Number(repuestos),
         metodoPago,
         sede: ticket.sede,
+        // Datos del equipo: facturacion emite la garantia con el cobro.
+        tipoOperacion: ticket.tipo_operacion,
+        documentoCliente: ticket.documento_cliente,
+        equipo: ticket.equipo ?? ticket.datos_equipo,
+        numeroSerie: ticket.numero_serie,
+        descripcion: ticket.caracteristicas_falla,
       });
       // Facturación caída: el cobro quedó encolado y se emitirá solo al volver.
       if (esEncolado(data)) {
@@ -90,7 +96,7 @@ export default function CobroModal({
         metodoPago,
         estadoPago: data.estadoPago ?? "PAGADO",
         fecha: data.fechaEmision ?? new Date().toISOString(),
-        garantiaVence: data.garantia?.fecha_vencimiento ?? null,
+        garantiaVence: data.garantiaVence ?? null,
       });
     } catch (err) {
       setError(isAxiosError(err) ? extraerError(err) : "Error inesperado.");

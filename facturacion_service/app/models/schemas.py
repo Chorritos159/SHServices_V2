@@ -1,5 +1,6 @@
+from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 
 class LineaDetalle(BaseModel):
@@ -22,6 +23,30 @@ class FacturaCreate(BaseModel):
     metodoPago: str = Field("EFECTIVO", description="EFECTIVO, TARJETA o YAPE")
     sede: str = Field(..., description="Sede donde se realiza el cobro")
 
+    # Datos del equipo para emitir la GARANTÍA junto con el cobro. Los manda
+    # quien cobra (ya los tiene en pantalla), así facturacion-service NO
+    # depende del ticket-service para generarla.
+    tipoOperacion: str = Field("SOPORTE", description="SOPORTE genera garantía; VENTA no")
+    documentoCliente: Optional[str] = Field(None, description="DNI/RUC del cliente")
+    equipo: Optional[str] = Field(None, description="Equipo reparado")
+    numeroSerie: Optional[str] = Field(None, description="N° de serie del equipo")
+    descripcion: Optional[str] = Field(None, description="Qué reparación cubre la garantía")
+
+
+class GarantiaOut(BaseModel):
+    id: str
+    id_ticket: str
+    documento_cliente: Optional[str] = None
+    equipo: Optional[str] = None
+    numero_serie: Optional[str] = None
+    descripcion: Optional[str] = None
+    fecha_entrega: datetime
+    fecha_vencimiento: datetime
+    dias: int
+    monto_total: Optional[float] = None
+    vigente: bool
+    dias_restantes: int
+
 
 class FacturaResponse(BaseModel):
     idFactura: str
@@ -33,3 +58,7 @@ class FacturaResponse(BaseModel):
     lineas: List[LineaDetalleOut] = []
     fechaEmision: str
     estadoPago: str
+    # Garantía emitida junto con el cobro (solo SOPORTE). La UI la imprime
+    # en el comprobante sin tener que consultar al ticket-service.
+    idGarantia: Optional[str] = None
+    garantiaVence: Optional[str] = None

@@ -71,17 +71,5 @@ class EntregarRequest(BaseModel):
     """Datos del cobro al entregar (el BFF pasa el monto ya facturado)."""
     monto_total: float = Field(0.0, ge=0)
 
-
-class GarantiaOut(BaseModel):
-    id: str
-    id_ticket: str
-    documento_cliente: Optional[str] = None
-    equipo: Optional[str] = None
-    numero_serie: Optional[str] = None
-    descripcion: Optional[str] = None
-    fecha_entrega: datetime
-    fecha_vencimiento: datetime
-    dias: int
-    monto_total: Optional[float] = None
-    vigente: bool
-    dias_restantes: int
+# GarantiaOut se movio a facturacion-service (models/schemas.py): la garantia
+# la emite y consulta facturacion, no tickets.

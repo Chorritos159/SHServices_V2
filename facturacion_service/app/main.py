@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from sqlalchemy import text
-from app.api import health, facturacion
+from app.api import health, facturacion, garantias
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.exceptions import (
@@ -9,6 +9,7 @@ from app.core.exceptions import (
 from app.core.logger import get_logger
 from app.core.database import engine
 from app.models.factura import Base
+from app.models import garantia  # noqa: F401 (registra la tabla garantias)
 
 # Crear la tabla de facturas en PostgreSQL automáticamente
 Base.metadata.create_all(bind=engine)
@@ -32,6 +33,9 @@ app.add_exception_handler(Exception, global_exception_handler)
 
 app.include_router(health.router)
 app.include_router(facturacion.router, prefix="/api/v1/facturas", tags=["Facturación"])
+# Garantias: se montan en /api/v1/garantias (sin doblar "facturas") para que el
+# Gateway las exponga como /api/v1/facturas/garantias.
+app.include_router(garantias.router, prefix="/api/v1/garantias", tags=["Garantías"])
 
 @app.on_event("startup")
 async def startup_event():

@@ -4,9 +4,16 @@ import datetime
 
 
 class GarantiaDB(Base):
-    """
-    Garantía generada automáticamente al ENTREGAR una reparación (SOPORTE).
-    Regla de negocio estricta: 90 días exactos desde la entrega.
+    """Garantía de 90 días de una reparación.
+
+    Vive en **facturacion-service** porque la garantía es parte del ciclo
+    ECONÓMICO de la operación (nace con el cobro, respalda lo facturado), no
+    del ciclo del ticket. Además así la consulta de garantías sigue disponible
+    aunque el ticket-service esté caído.
+
+    Misma tabla `garantias` de siempre (todos los servicios comparten la BD),
+    así que no hace falta migrar datos: las garantías existentes se siguen
+    viendo igual.
     """
     __tablename__ = "garantias"
 
@@ -19,4 +26,4 @@ class GarantiaDB(Base):
     fecha_entrega = Column(DateTime, default=datetime.datetime.utcnow)
     fecha_vencimiento = Column(DateTime, nullable=False)        # fecha_entrega + 90 días
     dias = Column(Integer, default=90, nullable=False)
-    monto_total = Column(Float, nullable=True)                 # cuánto se cobró por la reparación
+    monto_total = Column(Float, nullable=True)                  # cuánto se cobró

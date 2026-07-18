@@ -144,10 +144,28 @@ def main():
     r = httpx.post(f"{GW}/api/v1/facturas/facturas/", headers=hdr(t_caja), timeout=15.0, json={
         "idTicket": tk, "sede": "PIURA", "montoManoObra": 80.0, "montoRepuestos": 45.0,
         "metodoPago": "EFECTIVO", "lineas": [],
+        # Datos del equipo: facturacion emite la GARANTIA junto con el cobro.
+        "tipoOperacion": "SOPORTE", "documentoCliente": "70605040",
+        "equipo": "Laptop Lenovo", "numeroSerie": "SN-E2E-1",
+        "descripcion": "No enciende, huele a quemado",
     })
     fac_ok = r.status_code < 400
     check(fac_ok, f"factura {r.json().get('idFactura') if fac_ok else ''} por S/.{r.json().get('montoTotal') if fac_ok else '?'}",
           f"no se pudo cobrar: HTTP {r.status_code} {r.text}")
+
+    # ------------------------------------------------------------------
+    paso("5b. La GARANTIA la emitio facturacion-service (ya no ticket-service)")
+    gid = r.json().get("idGarantia") if fac_ok else None
+    check(bool(gid), f"garantia {gid} emitida con el cobro",
+          "la factura no devolvio garantia (deberia emitirla facturacion)")
+    rg = httpx.get(f"{GW}/api/v1/facturas/garantias/", headers=hdr(t_caja), timeout=15.0)
+    en_lista = rg.status_code < 400 and any(g.get("id_ticket") == tk for g in rg.json())
+    check(en_lista, "la garantia se consulta desde facturacion-service",
+          f"no aparece en /facturas/garantias: HTTP {rg.status_code}")
+    rc = httpx.get(f"{GW}/api/v1/facturas/garantias/factura-de/{tk}", headers=hdr(t_caja), timeout=15.0)
+    check(rc.status_code < 400 and rc.json().get("idFactura"),
+          "al abrir la garantia se obtiene su comprobante",
+          f"no se pudo traer el comprobante: HTTP {rc.status_code}")
 
     # ------------------------------------------------------------------
     paso("6. CAJA entrega (ticket-service -> ENTREGADO, almacen confirma stock)")

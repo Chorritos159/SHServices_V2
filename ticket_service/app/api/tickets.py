@@ -4,10 +4,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.models.schemas import (
     TicketCreate, TicketResponse, TicketPendiente, EstadoUpdate,
-    DiagnosticarRequest, EntregarRequest, GarantiaOut,
+    DiagnosticarRequest, EntregarRequest,
 )
 from app.models.ticket import TicketDB
-from app.models.garantia import GarantiaDB
 from app.models.idempotencia import IdempotenciaDB
 from app.core.database import get_db
 from app.core.logger import get_logger
@@ -23,7 +22,6 @@ logger = get_logger("ticket-service")   # con guion, como los otros 8 servicios
 
 # URL interna del almacén (red Docker). El ticket_service orquesta el stock aquí.
 ALMACEN_URL = "http://almacen-service:80/api/v1/almacen"
-DIAS_GARANTIA = 90  # regla de negocio estricta: 90 días exactos
 
 # Transiciones legales de la máquina de estados (centralizada en el backend).
 TRANSICIONES = {
@@ -348,62 +346,14 @@ async def entregar_ticket(
     await _mover_stock("confirmar", repuestos, ticket.sede, correlation_id)
 
     ticket.estado = "ENTREGADO"
-
-    garantia_out = None
-    if ticket.tipo_operacion == "SOPORTE":
-        ahora = datetime.utcnow()
-        garantia = GarantiaDB(
-            id=f"GAR-{ticket.sede[:3]}-{str(uuid.uuid4())[:4].upper()}",
-            id_ticket=ticket.id,
-            documento_cliente=ticket.documento_cliente,
-            equipo=ticket.equipo,
-            numero_serie=ticket.numero_serie,
-            descripcion=ticket.caracteristicas_falla,
-            fecha_entrega=ahora,
-            fecha_vencimiento=ahora + timedelta(days=DIAS_GARANTIA),
-            dias=DIAS_GARANTIA,
-            monto_total=datos.monto_total,
-        )
-        db.add(garantia)
-        garantia_out = {"id": garantia.id, "fecha_vencimiento": garantia.fecha_vencimiento.isoformat() + "Z", "dias": DIAS_GARANTIA}
-
     db.commit()
-    logger.info(f"Ticket {ticket_id} -> ENTREGADO. Stock confirmado. Garantía: {garantia_out}")
-    return {"id": ticket.id, "estado": "ENTREGADO", "garantia": garantia_out}
+
+    # La GARANTIA ya NO se emite aqui: la emite facturacion-service junto con el
+    # cobro (es parte del ciclo economico y asi sobrevive si tickets cae).
+    logger.info(f"Ticket {ticket_id} -> ENTREGADO. Stock confirmado.")
+    return {"id": ticket.id, "estado": "ENTREGADO"}
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# CONSULTA DE GARANTÍAS (Recepción / Admin)
-# ─────────────────────────────────────────────────────────────────────────
-
-def _garantia_out(g: GarantiaDB) -> dict:
-    ahora = datetime.utcnow()
-    restantes = (g.fecha_vencimiento - ahora).days
-    return {
-        "id": g.id, "id_ticket": g.id_ticket, "documento_cliente": g.documento_cliente,
-        "equipo": g.equipo, "numero_serie": g.numero_serie, "descripcion": g.descripcion,
-        "fecha_entrega": g.fecha_entrega, "fecha_vencimiento": g.fecha_vencimiento, "dias": g.dias,
-        "monto_total": g.monto_total,
-        "vigente": g.fecha_vencimiento >= ahora, "dias_restantes": max(restantes, 0),
-    }
-
-
-@router.get("/garantias", response_model=list[GarantiaOut], tags=["Garantías"])
-async def listar_garantias(request: Request, db: Session = Depends(get_db)):
-    """Lista todas las garantías con su vigencia (para Recepción y Admin)."""
-    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
-    garantias = db.query(GarantiaDB).order_by(GarantiaDB.fecha_entrega.desc()).all()
-    return [_garantia_out(g) for g in garantias]
-
-
-@router.get("/garantias/por-documento/{documento}", response_model=list[GarantiaOut], tags=["Garantías"])
-async def garantias_por_documento(documento: str, request: Request, db: Session = Depends(get_db)):
-    """Busca garantías por DNI/RUC del cliente (para verificar si un equipo vuelve en garantía)."""
-    logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
-    garantias = (
-        db.query(GarantiaDB)
-        .filter(GarantiaDB.documento_cliente == documento)
-        .order_by(GarantiaDB.fecha_entrega.desc())
-        .all()
-    )
-    return [_garantia_out(g) for g in garantias]
+# La CONSULTA DE GARANTIAS se movio a facturacion-service
+# (GET /api/v1/facturas/garantias). Motivo: la garantia nace del cobro y asi
+# sigue disponible aunque el ticket-service este caido.

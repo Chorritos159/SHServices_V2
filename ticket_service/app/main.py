@@ -1,6 +1,5 @@
 from app.core.database import engine
 from app.models.ticket import Base
-from app.models.garantia import GarantiaDB  # noqa: F401 (registra la tabla 'garantias' en Base)
 from app.models.idempotencia import IdempotenciaDB  # noqa: F401 (registra la tabla 'idempotencia')
 from fastapi import FastAPI
 from sqlalchemy import text
@@ -18,7 +17,8 @@ app = FastAPI(
     description="Microservicio gobernado para ciclo de vida de atenciones",
     version="1.0.0"
 )
-# Crea tablas 'tickets' y 'garantias' si no existen.
+# Crea la tabla 'tickets' si no existe. ('garantias' ya no es de este
+# servicio: la gestiona facturacion-service junto con el cobro.)
 Base.metadata.create_all(bind=engine)
 
 # Migración NO destructiva: create_all no altera tablas existentes, así que
@@ -32,7 +32,6 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS caracteristicas_falla TEXT"))
     conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS precio_estimado DOUBLE PRECISION"))
     conn.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS repuestos_reservados TEXT"))
-    conn.execute(text("ALTER TABLE garantias ADD COLUMN IF NOT EXISTS monto_total DOUBLE PRECISION"))
 
 logger = get_logger("ticket-service")
 # Errores legibles y trazables (ver app/core/exceptions.py):

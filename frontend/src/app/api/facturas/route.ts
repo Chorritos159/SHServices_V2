@@ -14,12 +14,19 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json();
 
+  // Los datos del equipo viajan con el cobro para que facturacion-service
+  // emita la GARANTIA sin depender del ticket-service.
   const payload = {
     idTicket: body.idTicket,
     montoManoObra: Number(body.montoManoObra),
     montoRepuestos: Number(body.montoRepuestos ?? 0),
     metodoPago: body.metodoPago,
     sede: body.sede,
+    tipoOperacion: body.tipoOperacion ?? "SOPORTE",
+    documentoCliente: body.documentoCliente ?? null,
+    equipo: body.equipo ?? null,
+    numeroSerie: body.numeroSerie ?? null,
+    descripcion: body.descripcion ?? null,
   };
 
   let data: unknown;
@@ -40,19 +47,18 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Transición gobernada → ENTREGADO: el ticket_service CONFIRMA (consume) el stock
-  // reservado y genera la GARANTÍA de 90 días. Devolvemos la garantía al comprobante.
-  let garantia: unknown = null;
+  // Transición gobernada → ENTREGADO: el ticket_service CONFIRMA (consume) el
+  // stock reservado y cierra el ticket. La GARANTÍA ya la emitió facturación
+  // junto con el cobro, así que si esto falla el comprobante sigue completo.
   try {
     const montoTotal = (data as { montoTotal?: number })?.montoTotal ?? 0;
-    const res = await gateway.post(
+    await gateway.post(
       `/tickets/tickets/${encodeURIComponent(payload.idTicket)}/entregar`,
       { monto_total: montoTotal },
     );
-    garantia = (res.data as { garantia?: unknown })?.garantia ?? null;
   } catch {
-    // La factura ya se emitió; no bloqueamos el éxito por el cierre del ticket.
+    // La factura y la garantía ya existen; no bloqueamos el éxito por el cierre.
   }
 
-  return NextResponse.json({ ...(data as Record<string, unknown>), garantia }, { status: 201 });
+  return NextResponse.json(data as Record<string, unknown>, { status: 201 });
 }
