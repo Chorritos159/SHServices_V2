@@ -39,6 +39,12 @@ services:
   # ------------------------------------------------------------------
   postgres-db:
     image: postgres:16-alpine
+    # max_connections=200 (de fábrica son 100). Con 8 servicios a 20 conexiones
+    # de pool cada uno hacen falta 160, más margen para psql/administración.
+    # Con los 100 por defecto el sistema tenía un techo que no era la CPU ni la
+    # red: se quedaba sin conexiones y devolvía HTTP 500. Lo destapó la corrida
+    # de carga de 500k (ver documentacion/registro_de_carga.md).
+    command: ["postgres", "-c", "max_connections=200"]
     container_name: postgres-db
     restart: always
     environment:

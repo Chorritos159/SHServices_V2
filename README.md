@@ -67,7 +67,7 @@ servicio: [`catalogo-servicios.md`](catalogo-servicios.md).
 | Servicio | Puerto host | Notas |
 | :-- | :-- | :-- |
 | **api-gateway** | `8000` | Único punto de entrada para tráfico de negocio (`/api/v1/...`) |
-| auth-service | `8003` | Expuesto solo para generar tokens vía Swagger en demo/sustentación (`/docs`) — el Gateway bloquea `/api/v1/auth/*` |
+| auth-service | *(sin exponer)* | Desde 2026-07-18 **ya no publica puerto**: el login pasa por el Gateway (`POST :8000/api/v1/auth/login`) y así hereda rate limit, bloqueo por intentos y circuit breaker. Su Swagger se lee en `:8000/docs-todos` (OWASP hallazgo 3) |
 | postgres-db | *(sin exponer)* | Solo alcanzable dentro de la red Docker |
 | rabbitmq | `15672` (panel admin), `15692` (métricas Prometheus) | Usuario/clave en `.env` |
 | toxiproxy | `8474` (API de control) | Inyecta fallas en `ticket-service` (Chaos Engineering) |
@@ -278,13 +278,14 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | # | Comando | Qué prueba | Duración |
 | :-- | :-- | :-- | :-- |
 | 1 | *(absorbida)* | La antigua "traza única" es ahora parte de la prueba 8 (pasos 10 y 12). Se fusionaron para no mantener dos pruebas que creaban el mismo ticket y acababan divergiendo | — |
-| 2 | `python pruebas/02_carga_780.py` | 780 peticiones a la vez con límites normales: rate limit (429) y bulkhead (503) rechazando de forma controlada | ~5 s |
-| 3 | `python pruebas/03_carga_100k.py` | Nivel **100k**: 6 nodos x bloques de 40, ventana de 10 min | 10 min |
-| 4 | `python pruebas/04_carga_500k.py` | Nivel **500k**: 10 nodos x bloques de 80, ventana de 15 min | 15 min |
-| 5 | `python pruebas/05_carga_1M.py` | Nivel **1M**: 15 nodos x bloques de 120, ventana de 15 min | 15 min |
+| 2 | `python pruebas/02_carga_780.py` | **Línea base ~780 peticiones**: 2 nodos x bloques de 8, ventana 25 s. Misma metodología que 3/4/5, así las cuatro filas de la tabla se comparan entre sí | ~40 s |
+| 3 | `python pruebas/03_carga_100k.py` | Nivel **100k**: 4 nodos x bloques de 16, ventana 2 min | ~2.5 min |
+| 4 | `python pruebas/04_carga_500k.py` | Nivel **500k**: 6 nodos x bloques de 20, ventana 5 min | ~5.5 min |
+| 5 | `python pruebas/05_carga_1M.py` | Nivel **1M**: 8 nodos x bloques de 24, ventana 10 min | ~10.5 min |
 | 11 | `python pruebas/11_caos_bajo_carga.py [--nivel 100k\|500k\|1M]` | **Caos BAJO CARGA sostenida**: lanza la carga real y va tumbando servicios sin parar el tráfico. Mide contención (cero 500), continuidad (% atendido) y recuperación automática, con línea de tiempo | ~3 min (100k) |
+| 12 | `python pruebas/12_autorecuperacion.py [--servicio X]` | **¿Cuánto tarda en curarse solo?** Mata el proceso (`os._exit(1)`) de 5 servicios y NO vuelve a tocar nada: mide los segundos hasta que Docker lo revive, `/health` responde y el circuito vuelve a CLOSED. Da el número que sostiene el SLA | ~2 min |
 | 6 | `python pruebas/06_caos.py` | 6 fichas de falla controlada: servicio caído, latencia, cola saturada (bulkhead+shed), rate limit, evento duplicado y **degradación funcional** (cae ticket-service y la VENTA se completa igual) | ~1.5 min |
-| 7 | `python pruebas/07_breaker_todos.py` | El circuit breaker abre para **los 6 servicios**: tumba cada uno, exige 503 (no 500) y circuito OPEN, y verifica la recuperación automática | ~3 min |
+| 7 | `python pruebas/07_breaker_todos.py` | El circuit breaker abre para **los 7 servicios (auth incluido)**: tumba cada uno, exige 503 (no 500) y circuito OPEN, y verifica la recuperación automática | ~3 min |
 | 8 | `python pruebas/08_flujo_completo.py` | El flujo de negocio **completo tocando los 8 servicios**: caja registra → técnico toma/diagnostica (reserva stock real) → caja cobra/entrega → admin agrega inventario → consultas de auditoría y notificaciones. Verifica que los 8 recibieron tráfico | ~15 s |
 | 9 | `python pruebas/09_asignaciones.py` | **Asignación exclusiva de tickets** y su resiliencia: un técnico toma un ticket (queda solo para él), otro recibe 409, "Mis Tickets" y la vista de admin, y con **ticket-service pausado** "Mis Tickets" sigue funcionando. Incluye el diagnóstico duplicado → 409 legible | ~20 s |
 | 10 | `python pruebas/10_demo_breaker.py <servicio>` | **DEMO VISIBLE del circuit breaker** para un servicio (`almacen`, `tickets`, `diagnosticos`, `facturas`, `auditoria`, `notificaciones`): pausa el contenedor, le manda tráfico hasta abrir el circuito (CLOSED→OPEN con fail-fast), lo deja OPEN 15 s para verlo en Grafana, y al reanudar el servicio el circuito **se cierra solo** (sonda activa). Ideal para la sustentación | ~1.5 min |

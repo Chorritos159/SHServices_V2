@@ -117,3 +117,52 @@ cola. Durante las corridas de carga sobre `GET /tickets` (una lectura
 síncrona, no pasa por RabbitMQ) la cola no crece — la publicación de
 eventos (`ticket.creado`, etc.) solo ocurre en las escrituras (`POST
 /tickets`), que no son el foco de esta corrida de throughput.
+
+---
+
+## El cuello de botella real: el pool de conexiones (2026-07-18)
+
+La corrida de **500k** destapó algo que ninguna prueba anterior había visto:
+
+```
+codigos: HTTP 200: 8818  HTTP 201: 4906  HTTP 500: 4  HTTP ERR: 34
+```
+
+Cuatro **HTTP 500**. Un 500 significa "falló algo que nadie previó", así que
+se fue a buscar al log del servicio:
+
+```
+QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00
+```
+
+**No era carga: era configuración.** Tres problemas encadenados:
+
+1. **Pool por defecto de SQLAlchemy**: `pool_size=5, max_overflow=10` = 15
+   conexiones por servicio. Nadie lo había tocado nunca.
+2. **`pool_timeout=30s`**, que es *peor* que no tener conexiones: el Gateway
+   corta a los 8 s, así que el cliente ya se había ido y el worker seguía 22
+   segundos más esperando un hueco, ocupando un hilo para nadie.
+3. **PostgreSQL con `max_connections=100`** (el valor de fábrica), mientras 8
+   servicios × 15 conexiones = **120 potenciales**. El techo del sistema no era
+   la CPU ni la red: era la base de datos quedándose sin sitio.
+
+### Qué se cambió
+
+| Antes | Ahora | Por qué |
+| :-- | :-- | :-- |
+| `pool_size=5, max_overflow=10` | `10 + 10` = 20 por servicio | Cubre la concurrencia real medida |
+| `pool_timeout=30s` | `5s` | Si en 5 s no hay conexión, el servicio está saturado: mejor decirlo rápido |
+| `max_connections=100` | `200` | 8 × 20 = 160, más margen para administración |
+| Pool agotado → **HTTP 500** | → **HTTP 503** + `Retry-After` | Saturación no es avería |
+
+El último punto es el que más importa. Un pool agotado significa **el servicio
+está saturado**, que es un estado transitorio y reintentable — exactamente lo
+que expresa un 503. Devolver 500 impedía al circuit breaker y al cliente
+distinguir "está sobrecargado" de "está roto", y son dos cosas que se atienden
+de forma distinta.
+
+### Lección
+
+Las pruebas de carga sirvieron para lo que tienen que servir: **encontraron un
+límite que nadie había puesto a propósito**. El sistema no aguantaba menos de
+lo esperado por diseño, sino por un valor por defecto que nadie había mirado.

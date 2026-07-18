@@ -16,6 +16,7 @@ import traceback
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import TimeoutError as SQLAlchemyPoolTimeout
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.logger import get_logger, ERROR, RECHAZADO
@@ -30,6 +31,30 @@ def _correlation_id(request: Request) -> str:
 def global_exception_handler(request: Request, exc: Exception):
     """Ultimo recurso: algo reviento y nadie lo previo. 500 honesto."""
     correlation_id = _correlation_id(request)
+
+    # Pool de conexiones agotado: el servicio esta SATURADO, no roto. Merece un
+    # 503 con Retry-After (degradacion con contrato, reintentable) y no un 500,
+    # que significa "fallo algo que nadie previo" e impide al circuit breaker y
+    # al cliente distinguir sobrecarga de averia. Lo destapo la carga de 500k.
+    if isinstance(exc, SQLAlchemyPoolTimeout):
+        logger.error(
+            f"Pool de conexiones agotado en {request.method} {request.url.path}: "
+            "el servicio no pudo obtener una conexion a la base de datos.",
+            extra={"campos": {
+                "operation": f"{request.method} {request.url.path}",
+                "result": ERROR, "errorType": "PoolTimeout", "httpStatus": 503,
+            }},
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "Servicio saturado",
+                "detalle": ("El servicio esta atendiendo mas solicitudes de las que puede "
+                            "en este momento. Vuelve a intentarlo en unos segundos."),
+                "trace_id": correlation_id,
+            },
+            headers={"Retry-After": "5"},
+        )
     logger.extra["correlation_id"] = correlation_id
     logger.error(
         f"Error no controlado en {request.method} {request.url.path}: {exc}",

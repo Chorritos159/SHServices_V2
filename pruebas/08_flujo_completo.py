@@ -127,25 +127,34 @@ def main():
 
     # ------------------------------------------------------------------
     paso("3. TECNICO diagnostica y RESERVA un repuesto (diagnostico -> almacen)")
-    # REP-001 existe en PIURA por el seed (tecnico01 es de PIURA).
-    stock_antes = _stock(t_admin, "REP-001", "PIURA")
+    # Se ELIGE un repuesto con stock en vez de fijar REP-001. Antes estaba
+    # fijo y la prueba empezo a fallar sola: las corridas de carga consumen
+    # repuestos, dejaron REP-001 en 0 y el diagnostico devolvia 409. Un test
+    # que falla porque OTRO test le gasto los datos no prueba nada.
+    rep = _repuesto_con_stock(t_admin, "PIURA")
+    check(rep is not None, f"repuesto disponible para la prueba: {rep}",
+          "no hay ningun REPUESTO con stock en PIURA (corre pruebas/limpiar_datos_carga.py --borrar)")
+    if rep is None:
+        _finalizar(salida, fallos)
+
+    stock_antes = _stock(t_admin, rep, "PIURA")
     r = httpx.post(f"{GW}/api/v1/diagnosticos/diagnosticos/", headers=hdr(t_tec), timeout=15.0, json={
         "idTicket": tk, "fallaDetectada": "Placa madre danada, requiere ventilador",
         "mano_obra": 80.0, "precio_reparacion": 125.0,
-        "repuestos": [{"codigo_repuesto": "REP-001", "descripcion": "Ventilador", "cantidad": 1, "precio_unitario": 45.0}],
+        "repuestos": [{"codigo_repuesto": rep, "descripcion": "Repuesto", "cantidad": 1, "precio_unitario": 45.0}],
     })
     diag_ok = r.status_code < 400
-    stock_despues = _stock(t_admin, "REP-001", "PIURA")
+    stock_despues = _stock(t_admin, rep, "PIURA")
     check(diag_ok, f"diagnostico registrado ({r.json().get('idDiagnostico') if diag_ok else ''})",
           f"no se registro el diagnostico: HTTP {r.status_code} {r.text}")
     check(stock_antes is not None and stock_despues == stock_antes - 1,
-          f"almacen reservo el repuesto (stock REP-001 PIURA: {stock_antes} -> {stock_despues})",
+          f"almacen reservo el repuesto (stock {rep} PIURA: {stock_antes} -> {stock_despues})",
           f"el stock no bajo como se esperaba ({stock_antes} -> {stock_despues})")
 
     # ------------------------------------------------------------------
     paso("4. TECNICO marca DIAGNOSTICADO (ticket-service, emite ticket.listo)")
     r = httpx.post(f"{GW}/api/v1/tickets/tickets/{tk}/diagnosticar", headers=hdr(t_tec), timeout=15.0, json={
-        "repuestos": [{"codigo_producto": "REP-001", "cantidad": 1}],
+        "repuestos": [{"codigo_producto": rep, "cantidad": 1}],
     })
     check(r.status_code < 400 and r.json().get("estado") == "DIAGNOSTICADO",
           "ticket en DIAGNOSTICADO", f"no se pudo diagnosticar: HTTP {r.status_code} {r.text}")
@@ -313,6 +322,24 @@ def main():
     _verificar_cobertura(evidencias, out, fallos)
 
     _finalizar(salida, fallos)
+
+
+def _repuesto_con_stock(token, sede, minimo=1):
+    """Codigo de un REPUESTO de esa sede con stock suficiente, o None.
+
+    Se elige en tiempo de ejecucion para que la prueba no dependa de que el
+    seed siga intacto: las corridas de carga consumen repuestos.
+    """
+    try:
+        r = httpx.get(f"{GW}/api/v1/almacen/almacen/productos",
+                      headers={"Authorization": f"Bearer {token}"}, timeout=15.0)
+        for p in r.json():
+            if (p.get("sede") == sede and p.get("categoria") == "REPUESTO"
+                    and p.get("stock_disponible", 0) >= minimo):
+                return p["codigo"]
+    except Exception:
+        return None
+    return None
 
 
 def _stock(token, codigo, sede):

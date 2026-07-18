@@ -184,3 +184,53 @@ El resultado era un diccionario vacío y el criterio de recuperación pasaba
 siempre: un falso OK. Ahora la lectura se toma antes del reinicio, y si no se
 puede leer se marca como **fallo** en vez de darlo por bueno — un criterio que
 no se puede verificar no es un criterio aprobado.
+
+---
+
+## Ficha H — Auto-recuperación: ¿cuánto tarda en curarse solo?
+
+**Añadida el 2026-07-18.** `pruebas/12_autorecuperacion.py`
+
+### Por qué existe
+
+Las fichas anteriores mantienen el servicio caído un tiempo fijo para observar
+la degradación. Esta hace lo contrario: **mata el proceso y no vuelve a tocar
+nada**. Solo mide tiempos.
+
+Es la pregunta de quien opera el sistema: *si se cae a las 3 de la mañana y
+nadie lo mira, ¿en cuánto vuelve?* Decir "se recupera automáticamente" no es
+una respuesta; un número sí.
+
+Se usa `POST /_chaos/crash` y no `docker stop` **a propósito**: `docker stop`
+es una parada ordenada y Docker NO dispara `restart: always` (entiende que se
+lo pediste tú). El endpoint mata el proceso con `os._exit(1)`, que es una caída
+de verdad.
+
+### Resultado medido (2026-07-18)
+
+| Servicio | Docker lo revive | `/health` responde | Circuito a CLOSED | **Total** |
+| :-- | --: | --: | --: | --: |
+| almacen | 0.1 s | 1.1 s | 0.3 s | **6.1 s** |
+| tickets | 0.1 s | 1.1 s | 0.3 s | **6.0 s** |
+| diagnosticos | 0.1 s | 1.2 s | 0.3 s | **6.2 s** |
+| facturas | 0.1 s | 1.1 s | 0.3 s | **6.0 s** |
+| auditoria | 0.1 s | 1.1 s | 0.3 s | **6.0 s** |
+
+**Peor caso 6.2 s. Promedio 6.1 s.** Los cinco, sin que nadie ejecutara un
+solo comando.
+
+### Cómo leer esos 6 segundos
+
+El desglose importa más que el total:
+
+- **0.1 s** — Docker detecta la muerte y relanza el contenedor. Es
+  `restart: always` haciendo su trabajo.
+- **1.1 s** — el proceso arranca, conecta a PostgreSQL y responde `/health`.
+- **0.3 s** — el circuito vuelve a CLOSED en cuanto la sonda activa confirma
+  que el servicio responde (ADR-0014).
+- El resto hasta los 6 s es el margen de la propia prueba entre comprobaciones.
+
+**Este es el número que sostiene el objetivo de disponibilidad de
+`documentacion/sla.md`.** Sin él, ese 99% sería una cifra inventada: con
+~6 s por caída, harían falta unas 87 caídas al mes para agotar el presupuesto
+de error del nivel alto.

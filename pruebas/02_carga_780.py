@@ -1,70 +1,55 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""PRUEBA 2 (Fase 5, S34): 780 peticiones A LA VEZ con los límites
-NORMALES del gateway (rate limit 20/40, bulkhead tickets=12): se observa
-el backpressure (429) y el bulkhead (503) rechazando de forma controlada,
-sin que el gateway se caiga.
+"""PRUEBA 2 (S34): LÍNEA BASE de ~780 peticiones, por nodos y bloques.
+
+Es el escalón más bajo de la serie 780 / 100k / 500k / 1M, y usa **la misma
+metodología** que los otros tres: nodos concurrentes mandando bloques
+sucesivos dentro de una ventana de tiempo, repartidos entre TODOS los
+servicios y mezclando lecturas con escrituras.
+
+POR QUÉ CAMBIÓ (2026-07-18)
+La versión anterior disparaba las 780 peticiones **a la vez, con 20 hilos y
+todas al MISMO endpoint de escritura** (`POST /tickets/`). Resultado medido:
+3 exitosas de 780 (0.4%), con 757 respuestas 503 y 20 timeouts. Y no era un
+fallo del sistema, sino de la prueba:
+
+  - 20 escrituras simultáneas sostenidas contra un Gateway de 1 worker
+    saturaban al ticket-service hasta el timeout;
+  - esos timeouts abrían el circuito, y entonces TODO lo demás hacía
+    fail-fast con 503 — que es exactamente lo que el breaker debe hacer.
+
+Es decir: la prueba medía la reacción del breaker a una ráfaga mal repartida
+y la presentaba como si fuese "capacidad del sistema", mientras su propio
+texto decía "casi todo debe ser HTTP 200". Ese número no significaba nada y
+además no era comparable con los otros tres niveles, que sí usan nodos.
+
+Ahora comparte metodología con ellos, así que las cuatro filas de la tabla de
+`documentacion/registro_de_carga.md` se pueden leer una al lado de la otra.
+
+(La demostración de rate limit y bulkhead RECHAZANDO de forma controlada vive
+en la prueba 06 de caos, fichas C y D, que es donde corresponde.)
 
 Uso:  python pruebas/02_carga_780.py
-Variables opcionales de entorno: TOTAL, HILOS
+Variables opcionales de entorno: NODOS, BLOQUE, DURACION
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from comun import (GW, RESULTADOS, ampliar_rate_limit, banner, correr_runner,  # noqa: E402
-                   login, metrica_gateway, restaurar_rate_limit, verificar_sistema)
-
-import httpx  # noqa: E402
+from comun import nivel_carga  # noqa: E402
 
 
 def main():
-    verificar_sistema()
-    total = int(os.environ.get("TOTAL", "780"))
-    hilos = int(os.environ.get("HILOS", "20"))
-
-    banner(f"PRUEBA 2 (baseline): {total} PETICIONES ({hilos} trabajadores) — atender TODAS")
-    token = login("admin", "admin123")
-
-    # Baseline de throughput: se amplían rate limit y bulkhead para que se
-    # atiendan TODAS las peticiones (sin 429/503 artificiales) y se mida el
-    # throughput real del backend. (La demostración de rate limit/bulkhead
-    # rechazando bajo presión vive en la prueba 06 de caos.)
-    print("Ampliando rate limit y bulkhead para atender todas...")
-    ampliar_rate_limit()
-    try:
-        correr_runner(
-            "carga.py",
-            "--total", total, "--hilos", hilos,
-            "--ruta", "api/v1/tickets/tickets/",
-            "--token", token, "--nombre", "02_carga780", "--salida", RESULTADOS,
-        )
-    finally:
-        restaurar_rate_limit()
-
-    print()
-    print("--- Interpretación ---")
-    print("Con límites ampliados se atienden TODAS: casi todo debe ser HTTP 200.")
-    print("Si aparece algún 504, es timeout del backend bajo presión (no rate")
-    print("limiting) — señal de capacidad, no de rechazo controlado.")
-
-    print()
-    print("--- El Gateway sigue sano tras la ráfaga ---")
-    try:
-        r = httpx.get(f"{GW}/health", timeout=5.0)
-        print(f"HTTP {r.status_code}")
-    except Exception as e:
-        print(f"error: {e}")
-
-    circuit_tickets = metrica_gateway('gateway_circuit_state{service="tickets"}')
-    bulkhead_tickets = metrica_gateway('gateway_bulkhead_rejects_total{razon="saturado",service="tickets"}')
-    rate_limit = metrica_gateway('gateway_rate_limit_rejects_total')
-
-    print()
-    print("--- Señales del Gateway (/metrics) ---")
-    print(f"  circuit_state tickets: {circuit_tickets}  (0=CLOSED)")
-    print(f"  bulkhead rejects tickets: {bulkhead_tickets}")
-    print(f"  rate limit rejects: {rate_limit}")
+    # ~780 peticiones: 2 nodos x bloques de 8 durante 25s a ~32 rps.
+    # Concurrencia baja a propósito: es la línea BASE con la que se compara
+    # el resto, así que tiene que medir el sistema descansado.
+    nivel_carga(
+        nombre="02_carga780",
+        objetivo="780",
+        nodos=int(os.environ.get("NODOS", "2")),
+        bloque=int(os.environ.get("BLOQUE", "8")),
+        duracion_seg=int(os.environ.get("DURACION", "25")),
+    )
 
 
 if __name__ == "__main__":
