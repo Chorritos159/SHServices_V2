@@ -76,6 +76,7 @@ servicio: [`catalogo-servicios.md`](catalogo-servicios.md).
 | loki | *(sin exponer)* | Agregación de logs (búsqueda histórica), consultable desde Grafana |
 | **dozzle** | `9999` | **Logs de todos los contenedores en vivo**, sin refrescar |
 | sonarqube | `9001` | Análisis estático — solo con `--profile analisis` |
+| **API completa** | `8000` | **`http://localhost:8000/docs-todos` — un solo Swagger con los 8 contratos del sistema en un desplegable.** Es el punto por el que conviene empezar |
 | ticket-service | `8001` | Swagger: `http://localhost:8001/docs` |
 | almacen-service | `8002` | Swagger: `http://localhost:8002/docs` |
 | diagnostico-service | `8004` | Swagger: `http://localhost:8004/docs` |

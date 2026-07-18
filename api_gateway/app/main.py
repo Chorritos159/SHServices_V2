@@ -5,7 +5,7 @@ import time
 import uuid
 import httpx
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.core.security import validar_token
@@ -573,6 +573,105 @@ async def correlation_id_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Correlation-ID"] = correlation_id
     return response
+
+# 3.b Swagger UNIFICADO de todo el proyecto.
+#
+# Cada servicio publica su propio /docs, lo que obliga a abrir 8 pestañas para
+# ver la API completa. Aquí se sirve UN solo Swagger UI con un desplegable que
+# lista los 8 contratos.
+#
+# Los OpenAPI se piden a través del Gateway (`/servicios/openapi/{n}.json`) y no
+# directo a `localhost:800X` a propósito: así la página funciona aunque los
+# puertos de los servicios no estén publicados al host, y el navegador habla
+# siempre con un solo origen (sin CORS de por medio).
+
+# Orden de presentación: primero por dónde entra todo, luego el ciclo del
+# negocio, y al final lo transversal.
+_ORDEN_SERVICIOS = [
+    ("auth", "Auth · identidad, roles y sedes"),
+    ("tickets", "Tickets · ciclo de vida del equipo"),
+    ("diagnosticos", "Diagnóstico · asignación y diagnóstico técnico"),
+    ("almacen", "Almacén · inventario, reservas y ventas"),
+    ("facturas", "Facturación · cobros y garantías"),
+    ("auditoria", "Auditoría · traza de eventos"),
+    ("notificaciones", "Notificaciones · alertas y webhooks"),
+]
+
+
+@app.get("/servicios/openapi/{servicio}.json", include_in_schema=False)
+async def openapi_de_servicio(servicio: str):
+    """Devuelve el OpenAPI de un microservicio, pedido por el Gateway."""
+    base = MICROSERVICIOS.get(servicio)
+    if not base:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "No encontrado",
+                     "detalle": f"No existe un servicio llamado '{servicio}'."},
+        )
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{base}/openapi.json", timeout=5.0)
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except httpx.HTTPError as exc:
+        # Un servicio caído no debe romper la página entera: se devuelve un
+        # OpenAPI mínimo y válido, para que el resto del desplegable siga usable.
+        return JSONResponse(
+            status_code=200,
+            content={
+                "openapi": "3.1.0",
+                "info": {"title": f"{servicio} (no disponible)", "version": "0.0.0",
+                         "description": f"El servicio no respondió: {type(exc).__name__}."},
+                "paths": {},
+            },
+        )
+
+
+@app.get("/docs-todos", include_in_schema=False, response_class=HTMLResponse)
+async def swagger_unificado():
+    """Un solo Swagger UI con los 8 contratos del sistema en un desplegable."""
+    urls = ",".join(
+        f'{{url:"/servicios/openapi/{clave}.json",name:"{nombre}"}}'
+        for clave, nombre in _ORDEN_SERVICIOS
+    )
+    return HTMLResponse(f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SHServices · API completa</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body {{ margin:0; }}
+    .cabecera {{ background:#0f172a; color:#e2e8f0; padding:14px 22px;
+                 font-family:system-ui,sans-serif; }}
+    .cabecera h1 {{ margin:0; font-size:17px; }}
+    .cabecera p  {{ margin:4px 0 0; font-size:13px; color:#94a3b8; }}
+  </style>
+</head>
+<body>
+  <div class="cabecera">
+    <h1>SHServices V2 — API completa</h1>
+    <p>Los 8 contratos del sistema (API Gateway + 7 microservicios).
+       Elige uno en el desplegable de arriba a la derecha.</p>
+  </div>
+  <div id="swagger"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+  <script>
+    // El desplegable de contratos (`urls`) lo dibuja el StandaloneLayout: sin
+    // el preset standalone, Swagger UI ignora `urls` y muestra "No API
+    // definition provided".
+    SwaggerUIBundle({{
+      dom_id: "#swagger",
+      urls: [{{url:"/openapi.json",name:"API Gateway · entrada única del sistema"}},{urls}],
+      "urls.primaryName": "API Gateway · entrada única del sistema",
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+      layout: "StandaloneLayout",
+      deepLinking: true
+    }});
+  </script>
+</body>
+</html>""")
+
 
 # 4. Enrutador Dinámico y Circuit Breaker (¡AHORA CON SEGURIDAD JWT!)
 @app.api_route(
