@@ -63,13 +63,21 @@ peticiones (0% de rechazos) y el resultado mida capacidad, no el limitador.
 > (backpressure + bulkhead), NO fallos. Las 100k/500k/1M corren con el rate
 > limit ampliado para medir el throughput real del backend.
 >
-> **Para llenar la tabla automáticamente:** tras correr las pruebas 2/3/4/5,
-> ejecuta `python pruebas/resumen_carga.py` — imprime y GUARDA la tabla con
-> Throughput/p95/p99/Error rate ya calculados en
-> `pruebas/resultados/tabla_registro_carga.md`. Copia esos valores aquí y
-> completa a mano CPU/Mem (`docker stats api-gateway`), Queue depth
-> (`docker exec rabbitmq rabbitmqctl list_queues name messages`, ~0 en lecturas)
-> y Resultado (regla S34: explica el primer cuello de botella con métricas).
+> **Cómo se llena esta tabla.** Ninguna columna se inventa:
+>
+> | Columna | De dónde sale |
+> | :-- | :-- |
+> | Throughput, p95, p99, Error rate | `python pruebas/resumen_carga.py` (los lee del JSON de cada corrida) |
+> | CPU/Mem, Queue depth | `python pruebas/monitor_recursos.py` en una segunda terminal, EN PARALELO a la carga |
+> | Resultado | A mano: explica el primer cuello de botella con las métricas de arriba (regla S34) |
+>
+> `resumen_carga.py` deja la tabla lista para pegar en
+> `pruebas/resultados/tabla_registro_carga.md`.
+>
+> `monitor_recursos.py` muestrea cada 5 s y al final da el **pico** y el
+> promedio. Se hace así y no mirando `docker stats` a ojo porque una lectura
+> manual da el valor del instante en que miraste, que casi nunca es el pico —
+> y el pico es justamente el dato que dice si el Gateway se quedó sin CPU.
 
 ## Cuello de botella identificado (corridas previas, diseño anterior)
 
