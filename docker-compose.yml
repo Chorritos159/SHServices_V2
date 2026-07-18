@@ -180,6 +180,10 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env}
       # Persistencia de usuarios en PostgreSQL (seed automático si la tabla está vacía).
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
+      # Demo de auto-healing (S34). Apagado por defecto en el codigo;
+      # se enciende AQUI a proposito para la sustentacion. En produccion
+      # esta linea no existiria y /_chaos/crash devolveria 404.
+      CHAOS_ENABLED: "true"
     networks:
       - shservices-net
     # Expuesto para generar tokens desde su Swagger local (http://localhost:8003/docs).
@@ -202,6 +206,10 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
+      # Demo de auto-healing (S34). Apagado por defecto en el codigo;
+      # se enciende AQUI a proposito para la sustentacion. En produccion
+      # esta linea no existiria y /_chaos/crash devolveria 404.
+      CHAOS_ENABLED: "true"
     ports:
       - "8001:80"   # Swagger en http://localhost:8001/docs (solo demo)
     networks:
@@ -225,6 +233,10 @@ services:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       # Publica ProductoRegistrado para el servicio de notificaciones.
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
+      # Demo de auto-healing (S34). Apagado por defecto en el codigo;
+      # se enciende AQUI a proposito para la sustentacion. En produccion
+      # esta linea no existiria y /_chaos/crash devolveria 404.
+      CHAOS_ENABLED: "true"
     ports:
       - "8002:80"   # Swagger en http://localhost:8002/docs (solo demo)
     networks:
@@ -247,6 +259,10 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
+      # Demo de auto-healing (S34). Apagado por defecto en el codigo;
+      # se enciende AQUI a proposito para la sustentacion. En produccion
+      # esta linea no existiria y /_chaos/crash devolveria 404.
+      CHAOS_ENABLED: "true"
     ports:
       - "8004:80"   # Swagger en http://localhost:8004/docs (solo demo)
     networks:
@@ -269,6 +285,10 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
+      # Demo de auto-healing (S34). Apagado por defecto en el codigo;
+      # se enciende AQUI a proposito para la sustentacion. En produccion
+      # esta linea no existiria y /_chaos/crash devolveria 404.
+      CHAOS_ENABLED: "true"
     ports:
       - "8005:80"   # Swagger en http://localhost:8005/docs (solo demo)
     networks:
@@ -292,6 +312,10 @@ services:
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
       # Fase 4 (FF-DEP-07): auditoría persiste la traza de eventos en PostgreSQL.
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
+      # Demo de auto-healing (S34). Apagado por defecto en el codigo;
+      # se enciende AQUI a proposito para la sustentacion. En produccion
+      # esta linea no existiria y /_chaos/crash devolveria 404.
+      CHAOS_ENABLED: "true"
     ports:
       - "8006:80"   # Swagger en http://localhost:8006/docs (solo demo)
     networks:
@@ -318,6 +342,10 @@ services:
       # Secreto para firmar los webhooks salientes (HMAC-SHA256). El receptor
       # recalcula la firma con este mismo valor para verificar autenticidad.
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-webhook_secreto_demo_shservices}
+      # Demo de auto-healing (S34). Apagado por defecto en el codigo;
+      # se enciende AQUI a proposito para la sustentacion. En produccion
+      # esta linea no existiria y /_chaos/crash devolveria 404.
+      CHAOS_ENABLED: "true"
     # Permite que los webhooks lleguen a un receptor corriendo en el HOST
     # (p. ej. http://host.docker.internal:9100 para probar en local).
     extra_hosts:

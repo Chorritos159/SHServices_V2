@@ -1,6 +1,6 @@
 import asyncio
 import os
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
 from app.core.database import engine
 from app.core.logger import get_logger
@@ -31,7 +31,14 @@ async def health_check():
     }
 
 
-@router.post("/_chaos/crash", tags=["Chaos"])
+# Interruptor del endpoint de caos (Hallazgo 6 de la auditoria OWASP).
+# APAGADO por defecto: si nadie lo enciende explicitamente, el endpoint no
+# existe. En ESTE proyecto docker-compose lo enciende a proposito para poder
+# demostrar el auto-healing de la S34; en un despliegue real iria apagado.
+CHAOS_ENABLED = os.getenv("CHAOS_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+
+
+@router.post("/_chaos/crash", tags=["Chaos"], include_in_schema=CHAOS_ENABLED)
 async def chaos_crash():
     """DEMO de auto-healing (S34): simula un CRASH REAL del servicio.
 
@@ -42,6 +49,10 @@ async def chaos_crash():
     contenedor automáticamente en ~2s. Sirve para demostrar el auto-restart sin
     depender de que la máquina o el daemon se reinicien.
     """
+    if not CHAOS_ENABLED:
+        # 404 y no 403: apagado, ni siquiera revelamos que el endpoint existe.
+        raise HTTPException(status_code=404, detail="Not Found")
+
     logger.error(
         "CHAOS: crash provocado por /_chaos/crash; el proceso saldra con os._exit(1). "
         "restart:always deberia revivir el contenedor en unos segundos.",

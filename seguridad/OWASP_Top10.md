@@ -12,11 +12,11 @@
 
 | # | Categoría | Estado | Detalle |
 | :-- | :-- | :-- | :-- |
-| A01 | Broken Access Control | 🔴 **Hallazgo abierto** | RBAC en el Gateway; los microservicios confían en las cabeceras inyectadas (hallazgo 2). **Los endpoints `/_chaos/crash` no exigen autenticación** (hallazgo 6) |
+| A01 | Broken Access Control | ⚠️ **Hallazgo abierto** | RBAC en el Gateway; los microservicios confían en las cabeceras inyectadas (hallazgo 2) y el RBAC de lectura vive solo en el BFF (hallazgo 7). Los `/_chaos/crash` **ya están cerrados** tras `CHAOS_ENABLED` (hallazgo 6) |
 | A02 | Cryptographic Failures | ✅ **Corregido** | Contraseñas estaban en **texto plano** → migradas a bcrypt (ver hallazgo 1) |
 | A03 | Injection | ✅ OK | Todo el acceso a datos va por SQLAlchemy ORM (consultas parametrizadas); cero SQL crudo interpolado. React escapa el HTML por defecto; sin `dangerouslySetInnerHTML` |
 | A04 | Insecure Design | ✅ OK | Resiliencia por diseño (circuit breaker, bulkhead, rate limit, idempotencia — Fases 1-3); identidad centralizada en un solo punto |
-| A05 | Security Misconfiguration | 🔴 **Hallazgo abierto** | Sin `debug=True`; contenedores sin privilegios; pero Swagger/auth expuestos para la demo (hallazgo 3) y **endpoints de caos activos por defecto** (hallazgo 6) |
+| A05 | Security Misconfiguration | ⚠️ **Aceptado** | Sin `debug=True`; contenedores sin privilegios. Swagger/auth expuestos para la demo (hallazgo 3, aceptado). Los endpoints de caos ya nacen **apagados** y devuelven 404 salvo que se encienda `CHAOS_ENABLED` (hallazgo 6, **corregido**) |
 | A06 | Vulnerable & Outdated Components | ⚠️ Pendiente | `npm audit` (2026-07-18): **2 moderadas** en el frontend, sin exposición directa (dependencias de build). Sin escaneo automatizado de dependencias Python |
 | A07 | Identification & Auth Failures | ✅ **Mejorado** | Hash bcrypt + comparación en tiempo constante + mensaje de error único (no permite enumerar usuarios). Sin bloqueo por intentos fallidos (ver hallazgo 4) |
 | A08 | Software & Data Integrity | ✅ OK | Imágenes con tag fijo; contenedores corren como usuario sin privilegios (`USER appuser`); sin `curl \| bash` en los Dockerfiles |
@@ -100,7 +100,7 @@ calidad y seguridad del **código propio**, no las dependencias de terceros.
 
 ---
 
-## Hallazgo 6 — A01/A05: los endpoints de caos no exigen autenticación 🔴 ABIERTO
+## Hallazgo 6 — A01/A05: los endpoints de caos no exigen autenticación 🟢 CERRADO
 
 **Qué se encontró.** Los 7 microservicios exponen `POST /_chaos/crash`, que mata
 su propio proceso (`os._exit(1)`) para demostrar el auto-restart. Verificado
@@ -119,9 +119,27 @@ una función administrativa sin control de acceso.
 **Riesgo aceptado hoy:** el entorno es local y de demostración (los puertos solo
 escuchan en `localhost`). En cualquier despliegue compartido sería crítico.
 
-**Acción acordada:** dejar el endpoint detrás de una variable de entorno
-(`CHAOS_ENABLED`, **apagada por defecto**), de forma que solo exista cuando se
-activa explícitamente para una demo. Registrado en `brechas_finales.md`.
+**Cómo se corrigió.** El endpoint quedó detrás de `CHAOS_ENABLED`, **apagada por
+defecto en el código** (`app/api/health.py` de los 7 servicios):
+
+- Si la variable no está encendida, el endpoint responde **404** —no 403— para no
+  revelar siquiera que existe, y se oculta del OpenAPI (`include_in_schema`).
+- `docker-compose.yml` la enciende explícitamente en los 7 servicios, con un
+  comentario que dice por qué: se necesita para demostrar el auto-healing de la
+  S34. En un despliegue real esa línea no existiría.
+
+**Verificado en los dos estados** (18/07/2026):
+
+```
+CHAOS_ENABLED=true   POST /_chaos/crash -> 200, el proceso muere y
+                     restart:always lo revive  -> /health 200
+CHAOS_ENABLED=false  POST /_chaos/crash -> 404 {"error":"No encontrado"}
+                     /health -> 200 (el servicio NO se cayó)
+                     openapi.json -> rutas con _chaos: NINGUNA
+```
+
+El riesgo real —que cualquiera apague un servicio sin token— desaparece en
+cuanto la variable no se enciende, que es el estado por defecto.
 
 ---
 
@@ -193,3 +211,36 @@ cobro, producto). No contiene credenciales.
   destino jamás se arma con texto que venga del usuario.
 - **Secretos:** fuera del código desde la Fase 1 (`.env` gitignored, con
   `${VAR:?mensaje}` en el compose para fallar ruidosamente si falta).
+
+---
+
+## Hallazgo 9 — A02: SonarQube marca 16 usos de `http://` ⚠️ ACEPTADO CON JUSTIFICACIÓN
+
+**Qué se encontró.** El análisis estático reporta 16 issues de seguridad, todas
+de la misma regla `python:S5332` ("Using HTTP protocol is insecure. Use HTTPS
+instead"), repartidas por el Gateway, los consumidores de RabbitMQ y las
+llamadas entre servicios.
+
+**Por qué NO se "corrigen".** Se revisaron las 16 una por una: **todas** son
+URLs de la red interna de Docker, resueltas por el DNS del bridge y que nunca
+salen del host:
+
+```
+http://ticket-service:80      http://almacen-service:80
+http://diagnostico-service:80 amqp://rabbitmq:5672
+...
+```
+
+Cambiarlas a `https://` no las haría más seguras: no hay ningún certificado
+que presentar para el nombre `ticket-service`, y el resultado sería que el
+sistema deja de arrancar. Es un falso positivo *de contexto*: la regla no
+distingue una URL pública de un nombre de servicio interno.
+
+**Lo que sí sería la solución real** (fuera del alcance de este proyecto):
+terminar TLS en el borde —ya se hace, el único punto de entrada es el
+Gateway— y cifrar el tráfico este-oeste con **mTLS** vía un service mesh
+(Istio/Linkerd) o certificados internos. Eso se decide a nivel de plataforma,
+no cambiando un literal en el código.
+
+**Estado:** riesgo aceptado y documentado. El borde (lo que un atacante puede
+alcanzar) no viaja en claro; el tráfico interno sí, dentro de la red del host.
