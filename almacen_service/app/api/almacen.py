@@ -1,3 +1,4 @@
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.models.schemas import (
@@ -20,7 +21,7 @@ def _trazar(request: Request) -> str:
 
 
 @router.get("/productos", response_model=list[ProductoInventario], tags=["Inventario"])
-async def listar_productos(request: Request, db: Session = Depends(get_db)):
+async def listar_productos(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Devuelve TODO el inventario (para que el Admin no este 'a ciegas')."""
     _trazar(request)
     with logger.operacion("listar_inventario") as op:
@@ -31,7 +32,7 @@ async def listar_productos(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/productos/venta", response_model=list[ProductoInventario], tags=["Inventario"])
-async def listar_productos_venta(request: Request, db: Session = Depends(get_db)):
+async def listar_productos_venta(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Catálogo vendible para el POS de Caja: lo que ESTA sede puede vender hoy.
 
     Se diferencia de `GET /productos` (que devuelve todo el inventario, para el
@@ -84,7 +85,7 @@ async def crear_producto(
     producto: ProductoCreate,
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Ingresa un producto nuevo al almacen. El codigo se autogenera (REP-001, REP-002...)."""
     correlation_id = _trazar(request)
@@ -125,7 +126,7 @@ async def crear_producto(
 
 
 @router.post("/reservar", tags=["Operaciones Tecnicas"])
-async def reservar_stock(reserva: ReservaRequest, request: Request, db: Session = Depends(get_db)):
+async def reservar_stock(reserva: ReservaRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
     """Reserva un repuesto para una Orden de Servicio en una sede especifica."""
     _trazar(request)
 
@@ -194,7 +195,7 @@ def _estado_stock(status: str, item: ProductoDB) -> dict:
 
 
 @router.post("/confirmar", tags=["Operaciones de Stock"])
-async def confirmar_stock(mov: ReservaRequest, request: Request, db: Session = Depends(get_db)):
+async def confirmar_stock(mov: ReservaRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
     """FASE 2 del stock: CONSUME lo reservado (el repuesto sale fisicamente al entregar).
 
     Resta definitivamente de `stock_reservado`. No vuelve a `disponible`.
@@ -225,7 +226,7 @@ async def confirmar_stock(mov: ReservaRequest, request: Request, db: Session = D
 
 
 @router.post("/liberar", tags=["Operaciones de Stock"])
-async def liberar_stock(mov: ReservaRequest, request: Request, db: Session = Depends(get_db)):
+async def liberar_stock(mov: ReservaRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
     """Devuelve lo reservado a disponible (el cliente RECHAZO el presupuesto).
 
     Mueve `reservado -> disponible`.
@@ -257,7 +258,7 @@ async def liberar_stock(mov: ReservaRequest, request: Request, db: Session = Dep
 
 
 @router.post("/descontar", tags=["Operaciones de Stock"])
-async def descontar_stock(mov: ReservaRequest, request: Request, db: Session = Depends(get_db)):
+async def descontar_stock(mov: ReservaRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
     """VENTA DIRECTA de UNA línea: descuenta de golpe de `disponible`.
 
     No pasa por reserva. Para una venta de mostrador con varias líneas usa
@@ -289,7 +290,7 @@ async def descontar_stock(mov: ReservaRequest, request: Request, db: Session = D
 
 
 @router.post("/venta", tags=["Operaciones de Stock"])
-async def descontar_venta(venta: VentaRequest, request: Request, db: Session = Depends(get_db)):
+async def descontar_venta(venta: VentaRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
     """VENTA DE MOSTRADOR: descuenta TODAS las líneas del carrito, o ninguna.
 
     Es el endpoint que usa el POS de Caja. Frente a llamar N veces a

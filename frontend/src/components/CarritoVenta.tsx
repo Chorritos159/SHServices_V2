@@ -31,7 +31,7 @@ interface Props {
   onCambio: (lineas: LineaCarrito[]) => void;
 }
 
-export default function CarritoVenta({ lineas, onCambio }: Props) {
+export default function CarritoVenta({ lineas, onCambio }: Readonly<Props>) {
   const [catalogo, setCatalogo] = useState<ProductoVenta[]>([]);
   const [aviso, setAviso] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);

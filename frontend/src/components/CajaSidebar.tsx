@@ -34,7 +34,7 @@ const NAV = [
   },
 ];
 
-export default function CajaSidebar({ usuario, sede }: { usuario: string; sede: string }) {
+export default function CajaSidebar({ usuario, sede }: Readonly<{ usuario: string; sede: string }>) {
   const pathname = usePathname();
 
   return (

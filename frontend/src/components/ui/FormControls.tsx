@@ -37,7 +37,7 @@ export function Campo({
   min,
   step,
   required = true,
-}: {
+}: Readonly<{
   name: string;
   label: string;
   type?: string;
@@ -46,7 +46,7 @@ export function Campo({
   min?: number;
   step?: string;
   required?: boolean;
-}) {
+}>) {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="font-medium text-slate-300">{label}</span>
@@ -70,13 +70,13 @@ export function Select({
   options,
   defaultValue,
   onChange,
-}: {
+}: Readonly<{
   name: string;
   label: string;
   options: string[];
   defaultValue?: string;
   onChange?: (value: string) => void;
-}) {
+}>) {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="font-medium text-slate-300">{label}</span>
@@ -97,7 +97,7 @@ export function Select({
   );
 }
 
-export function Boton({ cargando, children }: { cargando: boolean; children: React.ReactNode }) {
+export function Boton({ cargando, children }: Readonly<{ cargando: boolean; children: React.ReactNode }>) {
   return (
     <button
       type="submit"
@@ -109,7 +109,7 @@ export function Boton({ cargando, children }: { cargando: boolean; children: Rea
   );
 }
 
-export function Feedback({ estado }: { estado: Estado }) {
+export function Feedback({ estado }: Readonly<{ estado: Estado }>) {
   if (estado.tipo === "idle") return null;
   const estilo =
     estado.tipo === "ok"

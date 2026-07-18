@@ -6,6 +6,7 @@ import { authClient } from "@/lib/api/auth";
 import { createSession, destroySession } from "@/lib/auth/session";
 import { verifyToken } from "@/lib/auth/jwt";
 import type { LoginState, TokenResponse } from "@/lib/types/auth";
+import { campoTexto } from "@/lib/form";
 
 /**
  * Server Action del login.
@@ -27,8 +28,8 @@ export async function loginAction(
   _prev: LoginState,
   formData: FormData,
 ): Promise<LoginState> {
-  const usuario = String(formData.get("usuario") ?? "").trim();
-  const password = String(formData.get("password") ?? "");
+  const usuario = campoTexto(formData, "usuario").trim();
+  const password = campoTexto(formData, "password");
 
   if (!usuario || !password) {
     return { error: "Ingresa usuario y contraseña." };

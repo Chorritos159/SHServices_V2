@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { isAxiosError } from "axios";
 import { api } from "@/lib/api/client";
 import type { Usuario } from "@/lib/types/backend";
+import { campoTexto } from "@/lib/form";
 
 type Estado = { tipo: "idle" } | { tipo: "ok"; mensaje: string } | { tipo: "error"; mensaje: string };
 
@@ -49,10 +50,10 @@ export default function UsuariosView() {
     const fd = new FormData(form);
     try {
       const { data } = await api.post<Usuario>("/usuarios", {
-        usuario: String(fd.get("usuario")).trim(),
-        password: String(fd.get("password")),
-        rol: String(fd.get("rol")),
-        sede: String(fd.get("sede")).trim(),
+        usuario: campoTexto(fd, "usuario").trim(),
+        password: campoTexto(fd, "password"),
+        rol: campoTexto(fd, "rol"),
+        sede: campoTexto(fd, "sede").trim(),
       });
       setEstado({ tipo: "ok", mensaje: `✅ Usuario ${data.usuario} creado (${data.rol} · ${data.sede}).` });
       form.reset();
@@ -165,12 +166,12 @@ function Campo({
   label,
   type = "text",
   placeholder,
-}: {
+}: Readonly<{
   name: string;
   label: string;
   type?: string;
   placeholder?: string;
-}) {
+}>) {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="font-medium text-slate-300">{label}</span>

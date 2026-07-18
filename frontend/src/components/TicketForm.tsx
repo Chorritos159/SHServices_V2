@@ -5,6 +5,7 @@ import { api } from "@/lib/api/client";
 import { Boton, Campo, Feedback, Select, esEncolado, extraerError, type Estado } from "@/components/ui/FormControls";
 import ReciboModal, { type ReciboData } from "@/components/print/ReciboModal";
 import CarritoVenta, { type LineaCarrito } from "@/components/CarritoVenta";
+import { campoNumero, campoTexto } from "@/lib/form";
 
 /**
  * Registro de tickets y ventas (rol CAJA) — estilo Help Desk.
@@ -32,12 +33,12 @@ export default function TicketForm() {
     setEstado({ tipo: "idle" });
 
     const fd = new FormData(form);
-    const datosCliente = String(fd.get("datosCliente"));
-    const documento = String(fd.get("documento_cliente"));
-    const telefono = String(fd.get("telefono_cliente"));
-    const equipo = String(fd.get("equipo") ?? "");
-    const serie = String(fd.get("numero_serie") ?? "");
-    const falla = String(fd.get("caracteristicas_falla") ?? "");
+    const datosCliente = campoTexto(fd, "datosCliente");
+    const documento = campoTexto(fd, "documento_cliente");
+    const telefono = campoTexto(fd, "telefono_cliente");
+    const equipo = campoTexto(fd, "equipo");
+    const serie = campoTexto(fd, "numero_serie");
+    const falla = campoTexto(fd, "caracteristicas_falla");
 
     // ── VENTA de mostrador: carrito + cobro en un solo paso ──────────────
     if (!esSoporte) {
@@ -51,8 +52,8 @@ export default function TicketForm() {
           datosCliente,
           documento_cliente: documento,
           telefono_cliente: telefono,
-          prioridad: String(fd.get("prioridad")),
-          metodoPago: String(fd.get("metodoPago") ?? "EFECTIVO"),
+          prioridad: campoTexto(fd, "prioridad"),
+          metodoPago: campoTexto(fd, "metodoPago", "EFECTIVO"),
           lineas,
         });
 
@@ -85,12 +86,12 @@ export default function TicketForm() {
         datosCliente,
         documento_cliente: documento,
         telefono_cliente: telefono,
-        tipoOperacion: String(fd.get("tipoOperacion")),
+        tipoOperacion: campoTexto(fd, "tipoOperacion"),
         equipo,
         numero_serie: serie || null,
         caracteristicas_falla: falla,
-        precio_estimado: Number(fd.get("precio_estimado") || 0),
-        prioridad: String(fd.get("prioridad")),
+        precio_estimado: campoNumero(fd, "precio_estimado"),
+        prioridad: campoTexto(fd, "prioridad"),
       });
 
       // Servicio de tickets caído: el Gateway lo encoló y lo registrará solo.

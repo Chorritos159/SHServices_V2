@@ -1,3 +1,4 @@
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -26,7 +27,7 @@ async def registrar_diagnostico(
     diagnostico: DiagnosticoCreate,
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
@@ -200,7 +201,7 @@ async def registrar_diagnostico(
 
 
 @router.get("/por-ticket/{id_ticket}", response_model=DiagnosticoDetalle, tags=["Diagnóstico Técnico"])
-async def diagnostico_por_ticket(id_ticket: str, request: Request, db: Session = Depends(get_db)):
+async def diagnostico_por_ticket(id_ticket: str, request: Request, db: Annotated[Session, Depends(get_db)]):
     """Devuelve el desglose del diagnóstico de un ticket (para que Caja vea qué cobra)."""
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
 

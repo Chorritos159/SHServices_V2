@@ -143,11 +143,11 @@ function TarjetaGarantia({
   g,
   onVerComprobante,
   cargando,
-}: {
+}: Readonly<{
   g: Garantia;
   onVerComprobante: () => void;
   cargando: boolean;
-}) {
+}>) {
   const color = g.vigente
     ? "border-emerald-800/60 bg-emerald-950/20"
     : "border-red-900/60 bg-red-950/20";
@@ -212,7 +212,7 @@ function TarjetaGarantia({
   );
 }
 
-function Fila({ k, v, mono = false }: { k: string; v: string; mono?: boolean }) {
+function Fila({ k, v, mono = false }: Readonly<{ k: string; v: string; mono?: boolean }>) {
   return (
     <div className="flex justify-between gap-3">
       <dt className="text-slate-500">{k}</dt>

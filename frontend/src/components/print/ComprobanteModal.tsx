@@ -20,7 +20,7 @@ export interface ComprobanteData {
 const money = (n: number) => `S/. ${n.toFixed(2)}`;
 
 /** Boleta/Factura final tras el cobro. Imprimible (A4 o ticketera). */
-export default function ComprobanteModal({ data, onClose }: { data: ComprobanteData; onClose: () => void }) {
+export default function ComprobanteModal({ data, onClose }: Readonly<{ data: ComprobanteData; onClose: () => void }>) {
   return (
     <PrintableModal onClose={onClose} anchoTicket>
       <EncabezadoEmpresa titulo="Comprobante de Pago" />

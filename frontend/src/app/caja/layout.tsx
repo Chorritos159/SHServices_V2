@@ -4,7 +4,7 @@ import CajaSidebar from "@/components/CajaSidebar";
 import NotificationBell from "@/components/NotificationBell";
 
 /** Área CAJA (recepción/ventas). Guard de servidor: solo rol CAJA. */
-export default async function CajaLayout({ children }: { children: React.ReactNode }) {
+export default async function CajaLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const session = await getSession();
   if (!session) redirect("/login");
   if (session.rol !== "CAJA") redirect("/"); // el middleware reencamina a su panel

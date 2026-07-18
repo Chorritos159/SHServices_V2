@@ -18,11 +18,11 @@ export default function CobroModal({
   ticket,
   onDone,
   onClose,
-}: {
+}: Readonly<{
   ticket: TicketPendiente;
   onDone: (comprobante: ComprobanteData) => void;
   onClose: () => void;
-}) {
+}>) {
   const [detalle, setDetalle] = useState<DiagnosticoDetalle | null>(null);
   const [cargandoDet, setCargandoDet] = useState(true);
   const [manoObra, setManoObra] = useState<number>(ticket.precio_estimado ?? 0);
@@ -212,7 +212,7 @@ export default function CobroModal({
   );
 }
 
-function Num({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
+function Num({ label, value, onChange }: Readonly<{ label: string; value: number; onChange: (n: number) => void }>) {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="font-medium text-slate-300">{label}</span>

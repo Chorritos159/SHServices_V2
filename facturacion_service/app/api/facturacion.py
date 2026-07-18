@@ -1,3 +1,4 @@
+from typing import Annotated
 from fastapi import APIRouter, Depends, Request, BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -69,7 +70,7 @@ async def emitir_comprobante(
     factura: FacturaCreate,
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Annotated[Session, Depends(get_db)]
 ):
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id

@@ -6,6 +6,7 @@ import { api } from "@/lib/api/client";
 import { fechaHora } from "@/lib/fecha";
 import { Boton, Feedback, esEncolado, extraerError, type Estado } from "@/components/ui/FormControls";
 import type { TicketPendiente, DiagnosticoResponse, ProductoInventario, Asignacion } from "@/lib/types/backend";
+import { campoTexto } from "@/lib/form";
 
 const PRIORIDAD_COLOR: Record<string, string> = {
   ALTA: "bg-red-500/15 text-red-300",
@@ -38,7 +39,7 @@ interface RepuestoSel {
  *    así que siguen visibles aunque el ticket-service esté caído (resiliencia).
  * Solo se puede diagnosticar un ticket que YA tomaste (queda solo para ti).
  */
-export default function DiagnosticoView({ sede }: { sede: string }) {
+export default function DiagnosticoView({ sede }: Readonly<{ sede: string }>) {
   const [disponibles, setDisponibles] = useState<TicketPendiente[]>([]);
   const [misTickets, setMisTickets] = useState<Asignacion[]>([]);
   const [productos, setProductos] = useState<ProductoInventario[]>([]);
@@ -215,7 +216,7 @@ export default function DiagnosticoView({ sede }: { sede: string }) {
     try {
       const { data } = await api.post<DiagnosticoResponse & { encolado?: boolean; mensaje?: string }>("/diagnosticos", {
         idTicket: sel.id_ticket,
-        fallaDetectada: String(fd.get("fallaDetectada")),
+        fallaDetectada: campoTexto(fd, "fallaDetectada"),
         mano_obra: Number(manoObra) || 0,
         precio_reparacion: precioReparacion,
         repuestos: repuestos.map((r) => ({

@@ -4,6 +4,7 @@ Un tercero se registra aqui con su URL para recibir eventos del negocio por
 HTTP. La ENTREGA de los eventos la hace el consumidor (app/core/webhooks.py);
 esto es solo el ABM de a quien avisar.
 """
+from typing import Annotated
 from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy.orm import Session
@@ -47,7 +48,7 @@ def _trazar(request: Request):
 
 
 @router.post("/webhooks/suscripciones", response_model=SuscripcionOut, status_code=201, tags=["Webhooks"])
-async def crear_suscripcion(sub: SuscripcionCreate, request: Request, db: Session = Depends(get_db)):
+async def crear_suscripcion(sub: SuscripcionCreate, request: Request, db: Annotated[Session, Depends(get_db)]):
     """Registra una URL para recibir un evento del negocio por webhook."""
     _trazar(request)
     with logger.operacion("crear_suscripcion_webhook", url=str(sub.url), eventoSuscrito=sub.evento) as op:
@@ -70,14 +71,14 @@ async def crear_suscripcion(sub: SuscripcionCreate, request: Request, db: Sessio
 
 
 @router.get("/webhooks/suscripciones", response_model=list[SuscripcionOut], tags=["Webhooks"])
-async def listar_suscripciones(request: Request, db: Session = Depends(get_db)):
+async def listar_suscripciones(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Lista las suscripciones registradas."""
     _trazar(request)
     return db.query(WebhookSuscripcionDB).order_by(WebhookSuscripcionDB.id).all()
 
 
 @router.delete("/webhooks/suscripciones/{sub_id}", status_code=200, tags=["Webhooks"])
-async def borrar_suscripcion(sub_id: int, request: Request, db: Session = Depends(get_db)):
+async def borrar_suscripcion(sub_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
     """Da de baja una suscripcion (deja de recibir webhooks)."""
     _trazar(request)
     with logger.operacion("borrar_suscripcion_webhook", suscripcionId=sub_id) as op:
@@ -93,7 +94,7 @@ async def borrar_suscripcion(sub_id: int, request: Request, db: Session = Depend
 
 
 @router.get("/webhooks/entregas", response_model=list[EntregaOut], tags=["Webhooks"])
-async def listar_entregas(request: Request, db: Session = Depends(get_db)):
+async def listar_entregas(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Bitacora de las ultimas entregas de webhooks (auditoria)."""
     _trazar(request)
     return (

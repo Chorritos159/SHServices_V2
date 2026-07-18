@@ -1,3 +1,4 @@
+from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from app.models.schemas import NotificacionOut
@@ -15,7 +16,7 @@ def _rol_del_token(request: Request) -> str:
 
 
 @router.get("/mis-alertas", response_model=list[NotificacionOut], tags=["Notificaciones"])
-async def mis_alertas(request: Request, db: Session = Depends(get_db)):
+async def mis_alertas(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Devuelve las notificaciones NO leídas del rol del usuario (según el JWT)."""
     rol = _rol_del_token(request)
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
@@ -31,7 +32,7 @@ async def mis_alertas(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/marcar-leidas", tags=["Notificaciones"])
-async def marcar_leidas(request: Request, db: Session = Depends(get_db)):
+async def marcar_leidas(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Marca como leídas todas las notificaciones del rol (al abrir la campanita)."""
     rol = _rol_del_token(request)
     if not rol:

@@ -4,7 +4,7 @@ import TecnicoSidebar from "@/components/TecnicoSidebar";
 import NotificationBell from "@/components/NotificationBell";
 
 /** Área TECNICO (taller/diagnóstico). Guard de servidor: solo rol TECNICO. */
-export default async function TecnicoLayout({ children }: { children: React.ReactNode }) {
+export default async function TecnicoLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const session = await getSession();
   if (!session) redirect("/login");
   if (session.rol !== "TECNICO") redirect("/"); // el middleware reencamina a su panel

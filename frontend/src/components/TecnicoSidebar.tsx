@@ -16,7 +16,7 @@ const NAV = [
   },
 ];
 
-export default function TecnicoSidebar({ usuario, sede }: { usuario: string; sede: string }) {
+export default function TecnicoSidebar({ usuario, sede }: Readonly<{ usuario: string; sede: string }>) {
   const pathname = usePathname();
 
   return (

@@ -10,9 +10,9 @@ import NotificationBell from "@/components/NotificationBell";
  */
 export default async function AdminLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   const session = await getSession();
   if (!session) redirect("/login");
   if (session.rol !== "ADMIN") redirect("/");

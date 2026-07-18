@@ -15,7 +15,7 @@ export interface ReciboData {
 }
 
 /** Ticket de Recojo (recepción de un equipo en SOPORTE). Imprimible. */
-export default function ReciboModal({ data, onClose }: { data: ReciboData; onClose: () => void }) {
+export default function ReciboModal({ data, onClose }: Readonly<{ data: ReciboData; onClose: () => void }>) {
   return (
     <PrintableModal onClose={onClose} anchoTicket>
       <EncabezadoEmpresa titulo="Ticket de Recepción" />

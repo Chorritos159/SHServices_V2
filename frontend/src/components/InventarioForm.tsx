@@ -4,6 +4,7 @@ import { useState } from "react";
 import { isAxiosError } from "axios";
 import { api } from "@/lib/api/client";
 import { esEncolado } from "@/components/ui/FormControls";
+import { campoNumero, campoTexto } from "@/lib/form";
 
 type Estado =
   | { tipo: "idle" }
@@ -28,10 +29,10 @@ export default function InventarioForm() {
     const fd = new FormData(form);
     try {
       const { data } = await api.post("/almacen/productos", {
-        nombre: String(fd.get("nombre")),
-        categoria: String(fd.get("categoria")),
-        sede: String(fd.get("sede")),
-        stock_inicial: Number(fd.get("stock_inicial")),
+        nombre: campoTexto(fd, "nombre"),
+        categoria: campoTexto(fd, "categoria"),
+        sede: campoTexto(fd, "sede"),
+        stock_inicial: campoNumero(fd, "stock_inicial"),
       });
       // Almacén caído: el alta quedó encolada y se registrará sola al volver.
       if (esEncolado(data)) {
@@ -88,13 +89,13 @@ function Campo({
   type = "text",
   placeholder,
   min,
-}: {
+}: Readonly<{
   name: string;
   label: string;
   type?: string;
   placeholder?: string;
   min?: number;
-}) {
+}>) {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="font-medium text-slate-300">{label}</span>
@@ -110,7 +111,7 @@ function Campo({
   );
 }
 
-function Select({ name, label, options }: { name: string; label: string; options: string[] }) {
+function Select({ name, label, options }: Readonly<{ name: string; label: string; options: string[] }>) {
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="font-medium text-slate-300">{label}</span>
@@ -129,7 +130,7 @@ function Select({ name, label, options }: { name: string; label: string; options
   );
 }
 
-function Boton({ cargando, children }: { cargando: boolean; children: React.ReactNode }) {
+function Boton({ cargando, children }: Readonly<{ cargando: boolean; children: React.ReactNode }>) {
   return (
     <button
       type="submit"
@@ -141,7 +142,7 @@ function Boton({ cargando, children }: { cargando: boolean; children: React.Reac
   );
 }
 
-function Feedback({ estado }: { estado: Estado }) {
+function Feedback({ estado }: Readonly<{ estado: Estado }>) {
   if (estado.tipo === "idle") return null;
   const estilo =
     estado.tipo === "ok"

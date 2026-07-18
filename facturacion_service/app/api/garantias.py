@@ -7,6 +7,7 @@ el ticket-service esté caído.
 Se monta en `/api/v1/garantias` (sin doblar "facturas") para que el Gateway lo
 exponga como `/api/v1/facturas/garantias`.
 """
+from typing import Annotated
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -36,7 +37,7 @@ def _garantia_out(g: GarantiaDB) -> dict:
 
 
 @router.get("/", response_model=list[GarantiaOut], tags=["Garantías"])
-async def listar_garantias(request: Request, db: Session = Depends(get_db)):
+async def listar_garantias(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Todas las garantías con su vigencia (Recepción y Admin)."""
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
     garantias = db.query(GarantiaDB).order_by(GarantiaDB.fecha_entrega.desc()).all()
@@ -44,7 +45,7 @@ async def listar_garantias(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/por-documento/{documento}", response_model=list[GarantiaOut], tags=["Garantías"])
-async def garantias_por_documento(documento: str, request: Request, db: Session = Depends(get_db)):
+async def garantias_por_documento(documento: str, request: Request, db: Annotated[Session, Depends(get_db)]):
     """Garantías por DNI/RUC (para verificar si un equipo vuelve en garantía)."""
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
     garantias = (
@@ -57,7 +58,7 @@ async def garantias_por_documento(documento: str, request: Request, db: Session 
 
 
 @router.get("/factura-de/{id_ticket}", tags=["Garantías"])
-async def factura_de_garantia(id_ticket: str, request: Request, db: Session = Depends(get_db)):
+async def factura_de_garantia(id_ticket: str, request: Request, db: Annotated[Session, Depends(get_db)]):
     """Comprobante asociado a un ticket: al hacer clic en una garantía, la UI
     muestra la factura que la respalda. Todo dentro de facturacion-service."""
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")

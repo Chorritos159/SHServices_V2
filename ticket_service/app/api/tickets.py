@@ -1,3 +1,4 @@
+from typing import Annotated
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
@@ -61,7 +62,7 @@ async def crear_ticket(
     ticket: TicketCreate, 
     request: Request, 
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)  # Inyectamos la base de datos aquí
+    db: Annotated[Session, Depends(get_db)]  # Inyectamos la base de datos aquí
 ):
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
@@ -180,7 +181,7 @@ async def crear_ticket(
 
 
 @router.get("/pendientes", response_model=list[TicketPendiente], tags=["Tickets"])
-async def listar_pendientes(request: Request, db: Session = Depends(get_db)):
+async def listar_pendientes(request: Request, db: Annotated[Session, Depends(get_db)]):
     """
     Lista los tickets EN_COLA (la bandeja del técnico).
 
@@ -201,7 +202,7 @@ async def listar_pendientes(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=list[TicketPendiente], tags=["Tickets"])
-async def listar_tickets(request: Request, db: Session = Depends(get_db)):
+async def listar_tickets(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Lista TODOS los tickets (más recientes primero)."""
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
@@ -210,7 +211,7 @@ async def listar_tickets(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/por-estado/{estado}", response_model=list[TicketPendiente], tags=["Tickets"])
-async def listar_por_estado(estado: str, request: Request, db: Session = Depends(get_db)):
+async def listar_por_estado(estado: str, request: Request, db: Annotated[Session, Depends(get_db)]):
     """
     Filtra tickets por estado (ej. DIAGNOSTICADO para la bandeja de Entregas y Cobros).
     Filtro por RUTA (no ?query) porque el Gateway descarta los query strings.
@@ -232,7 +233,7 @@ async def actualizar_estado(
     ticket_id: str,
     cambio: EstadoUpdate,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Actualiza el estado de un ticket (ej. tras el diagnóstico: EN_COLA -> DIAGNOSTICADO)."""
     correlation_id = request.headers.get("x-correlation-id", "N/A")
@@ -262,7 +263,7 @@ def _obtener_ticket(db: Session, ticket_id: str) -> TicketDB:
 
 
 @router.post("/{ticket_id}/tomar", response_model=TicketPendiente, tags=["Máquina de Estados"])
-async def tomar_ticket(ticket_id: str, request: Request, db: Session = Depends(get_db)):
+async def tomar_ticket(ticket_id: str, request: Request, db: Annotated[Session, Depends(get_db)]):
     """EN_COLA -> EN_DIAGNOSTICO (el técnico toma la atención)."""
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
     ticket = _obtener_ticket(db, ticket_id)
@@ -278,7 +279,7 @@ async def diagnosticar_ticket(
     datos: DiagnosticarRequest,
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     -> DIAGNOSTICADO. Registra en el ticket los repuestos reservados (el stock ya
@@ -308,7 +309,7 @@ async def diagnosticar_ticket(
 
 
 @router.post("/{ticket_id}/rechazar", response_model=TicketPendiente, tags=["Máquina de Estados"])
-async def rechazar_ticket(ticket_id: str, request: Request, db: Session = Depends(get_db)):
+async def rechazar_ticket(ticket_id: str, request: Request, db: Annotated[Session, Depends(get_db)]):
     """-> RECHAZADO. El cliente no aceptó: LIBERA el stock reservado (vuelve a disponible)."""
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
@@ -329,7 +330,7 @@ async def entregar_ticket(
     ticket_id: str,
     datos: EntregarRequest,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     -> ENTREGADO. Se cobró y se entrega: CONFIRMA (consume) el stock reservado y,

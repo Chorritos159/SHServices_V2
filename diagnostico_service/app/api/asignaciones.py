@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_serializer
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import Optional
+from typing import Annotated, Optional
 from datetime import datetime, timezone
 import httpx
 
@@ -95,7 +95,7 @@ async def tomar_ticket(
     datos: TomarTicketRequest,
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """El técnico TOMA un ticket de la cola y queda asignado solo a él.
 
@@ -189,7 +189,7 @@ async def tomar_ticket(
 
 
 @router.get("/mias", response_model=list[AsignacionOut], tags=["Asignaciones"])
-async def mis_asignaciones(request: Request, db: Session = Depends(get_db)):
+async def mis_asignaciones(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Bandeja 'Mis Tickets' del técnico. Se sirve SOLO desde diagnostico-service,
     sin depender del ticket-service (resiliencia)."""
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
@@ -208,7 +208,7 @@ async def mis_asignaciones(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=list[AsignacionOut], tags=["Asignaciones"])
-async def todas_las_asignaciones(request: Request, db: Session = Depends(get_db)):
+async def todas_las_asignaciones(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Vista de ADMIN: todos los tickets tomados y quién los atiende."""
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
     rol = request.headers.get("x-user-rol", "").upper()

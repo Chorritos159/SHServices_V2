@@ -69,7 +69,7 @@ const NAV: NavItem[] = [
   },
 ];
 
-export default function Sidebar({ usuario }: { usuario: string }) {
+export default function Sidebar({ usuario }: Readonly<{ usuario: string }>) {
   const pathname = usePathname();
 
   return (

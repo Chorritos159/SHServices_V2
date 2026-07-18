@@ -9,11 +9,11 @@ export default function PrintableModal({
   onClose,
   children,
   anchoTicket = false,
-}: {
+}: Readonly<{
   onClose: () => void;
   children: React.ReactNode;
   anchoTicket?: boolean; // true = ancho angosto tipo ticketera térmica
-}) {
+}>) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div className={anchoTicket ? "w-full max-w-xs" : "w-full max-w-md"}>
@@ -40,7 +40,7 @@ export default function PrintableModal({
 }
 
 /** Encabezado común de los comprobantes (logo/nombre de la empresa). */
-export function EncabezadoEmpresa({ titulo }: { titulo: string }) {
+export function EncabezadoEmpresa({ titulo }: Readonly<{ titulo: string }>) {
   return (
     <div className="border-b border-dashed border-slate-400 pb-3 text-center">
       <div className="mx-auto mb-1 flex h-10 w-10 items-center justify-center rounded bg-slate-900 text-sm font-bold text-white">
@@ -54,7 +54,7 @@ export function EncabezadoEmpresa({ titulo }: { titulo: string }) {
 }
 
 /** Fila etiqueta/valor reutilizable en los comprobantes. */
-export function Fila({ label, value }: { label: string; value: React.ReactNode }) {
+export function Fila({ label, value }: Readonly<{ label: string; value: React.ReactNode }>) {
   return (
     <div className="flex justify-between gap-3 py-0.5 text-sm">
       <span className="text-slate-500">{label}</span>

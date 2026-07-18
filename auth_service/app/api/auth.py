@@ -1,3 +1,4 @@
+from typing import Annotated
 from fastapi import APIRouter, HTTPException, Request, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -67,7 +68,7 @@ def _exigir_admin(credentials: HTTPAuthorizationCredentials | None) -> dict:
 
 
 @router.post("/login", response_model=TokenResponse, tags=["Seguridad"])
-async def login(credenciales: LoginRequest, request: Request, db: Session = Depends(get_db)):
+async def login(credenciales: LoginRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
 
     # NUNCA se loguea la contraseña ni el token emitido (OWASP A09).
@@ -105,7 +106,7 @@ async def login(credenciales: LoginRequest, request: Request, db: Session = Depe
 
 @router.get("/usuarios", response_model=list[UsuarioOut], tags=["Seguridad"])
 async def listar_usuarios(
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
     credentials: HTTPAuthorizationCredentials = Security(security_scheme),
 ):
     """Lista los empleados (sin contraseñas). Solo ADMIN."""
@@ -120,7 +121,7 @@ async def listar_usuarios(
 @router.post("/usuarios", response_model=UsuarioOut, status_code=201, tags=["Seguridad"])
 async def registrar_usuario(
     nuevo: UsuarioCreate,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
     credentials: HTTPAuthorizationCredentials = Security(security_scheme),
 ):
     """Da de alta un empleado con su rol y sede en PostgreSQL. Solo ADMIN."""
