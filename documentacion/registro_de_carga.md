@@ -199,3 +199,57 @@ real (`exc.orig`) queda en el log para quien opera.
 Los dos hallazgos comparten patrón: **código que asumía el camino feliz y solo
 falla bajo concurrencia**. Ninguna prueba funcional los habría encontrado; hizo
 falta carga real.
+
+---
+
+## Corte por CONTEO, no por ventana (2026-07-18)
+
+Las corridas pasan de "lo que quepa en N segundos" a **completar un número
+exacto de peticiones**. El runner acepta `--total` y termina al alcanzarlo;
+la ventana de tiempo queda solo como tope de seguridad.
+
+El motivo es de fiabilidad del dato: con ventana fija, el total depende de
+cómo esté de ocupada la máquina ese día, así que dos corridas del "mismo"
+nivel no son comparables. Con conteo, la cifra es la misma siempre y lo que
+varía es el tiempo — que es justo la variable que se quiere medir.
+
+| Nivel | Peticiones | Concurrencia | Duración aprox. |
+| :-- | --: | :-- | --: |
+| 780 (base) | ~580 | 2 nodos × 8 | ~40 s |
+| 100k | **8.000** | 4 nodos × 16 | ~3.5 min |
+| 500k | **20.000** | 5 nodos × 18 | ~8.5 min |
+| 1M | **25.000** | 6 nodos × 20 | ~10.5 min |
+
+Medido en la 100k tras el cambio: **8.004 exitosas de 8.069 (99.2%)**,
+37.2 rps, p95 1.495 ms, **cero errores 500**.
+
+## La corrida de 100.000 REALES (`13_carga_100k_real.py`)
+
+Las etiquetas 100k/500k/1M nombran el **escalón de carga**, no el conteo — y
+esa distinción, por bien explicada que esté, siempre deja la duda de "¿y
+cuántas mandaste de verdad?".
+
+`pruebas/13_carga_100k_real.py` la responde sin discusión: **completa 100.000
+peticiones reales**, contadas una a una, y no para hasta llegar. A ~40 rps son
+unos **40-45 minutos**, así que está pensada para dejarla corriendo y volver.
+Cada 5 s imprime el avance con porcentaje y minutos restantes:
+
+```
+… 34120/100000 (34.1%) ~41 rps  [832s, faltan 65880 -> ~26.8 min]
+```
+
+**Qué aporta más allá del conteo.** Es la única corrida lo bastante larga para
+enseñar cosas que una ventana de 3 minutos no puede ver:
+
+- si el throughput **se degrada con el tiempo** — una fuga de memoria o de
+  conexiones se nota a los 20 minutos, no a los 2 (de hecho así apareció el
+  agotamiento del pool);
+- si el outbox y los consumidores de RabbitMQ van al día en una sesión larga;
+- si la latencia p99 aguanta o se deteriora.
+
+> **Importante antes de lanzarla:** correr
+> `python pruebas/limpiar_datos_carga.py --borrar`. En modo mixto, 100.000
+> peticiones crean muchísimos tickets y productos, y los listados devuelven
+> todo sin paginar. Si se arranca con la base ya llena, la corrida se degrada
+> por el VOLUMEN DE DATOS y no por la carga — que es justo lo que no se quiere
+> medir.

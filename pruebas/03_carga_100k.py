@@ -21,5 +21,6 @@ if __name__ == "__main__":
         nombre="03_carga100k", objetivo="100k",
         nodos=int(os.environ.get("NODOS", "4")),
         bloque=int(os.environ.get("BLOQUE", "16")),
-        duracion_seg=int(os.environ.get("DURACION", "120")),  # 2 min
+        duracion_seg=int(os.environ.get("DURACION", "500")),
+        total=int(os.environ.get("TOTAL", "8000")),  # 2 min
     )

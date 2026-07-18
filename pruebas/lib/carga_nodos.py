@@ -190,9 +190,14 @@ def construir_mezcla():
 
 
 async def nodo(indice, urls, headers, bloque, fin_ts, resultados, latencias, candado,
-               bloques_enviados, mezcla=None, base=""):
+               bloques_enviados, mezcla=None, base="", total_objetivo=0):
     """Un nodo: manda bloques sucesivos (concurrentes DENTRO del bloque,
     secuenciales ENTRE bloques) hasta que se acaba el tiempo de la corrida.
+
+    Con `total_objetivo` > 0 la corrida termina al alcanzar ESE NUMERO de
+    peticiones, y la ventana de tiempo pasa a ser solo un tope de seguridad.
+    Es el modo que usa la prueba de 100k REALES: ahi lo que importa es
+    completar el conteo, no llenar un tiempo.
 
     Si hay `mezcla` (modo mixto), cada hueco del bloque ejecuta una operacion
     de la mezcla (lecturas Y escrituras, todos los servicios). Si no, rota por
@@ -202,6 +207,10 @@ async def nodo(indice, urls, headers, bloque, fin_ts, resultados, latencias, can
     limits = httpx.Limits(max_connections=bloque + 5, max_keepalive_connections=bloque + 5)
     async with httpx.AsyncClient(limits=limits) as client:
         while time.monotonic() < fin_ts:
+            if total_objetivo:
+                async with candado:
+                    if sum(resultados.values()) >= total_objetivo:
+                        break
             if mezcla:
                 tareas = [random.choice(mezcla)[1](client, headers, base) for _ in range(bloque)]
             else:
@@ -237,7 +246,8 @@ async def nodo(indice, urls, headers, bloque, fin_ts, resultados, latencias, can
             await asyncio.sleep(min(espera, restante))
 
 
-async def progreso(resultados, candado, fin_ts, bloques_enviados, inicio, nodos, bloque):
+async def progreso(resultados, candado, fin_ts, bloques_enviados, inicio, nodos, bloque,
+                   total_objetivo=0):
     ultimo = 0
     while time.monotonic() < fin_ts:
         await asyncio.sleep(5)
@@ -246,10 +256,23 @@ async def progreso(resultados, candado, fin_ts, bloques_enviados, inicio, nodos,
             b = bloques_enviados[0]
         rps = (total - ultimo) / 5
         ultimo = total
-        restante = max(0, fin_ts - time.monotonic())
-        print(f"  … {total} enviadas, {b} bloques ({nodos} nodos x {bloque}/bloque) "
-              f"~{rps:.0f} rps  [{time.monotonic()-inicio:.0f}s, quedan ~{restante:.0f}s]",
-              file=sys.stderr, flush=True)
+        if total_objetivo:
+            # Modo conteo: lo util es cuanto falta y a que hora acaba, no los
+            # segundos de ventana. Una corrida de 100k dura ~37 min y hay que
+            # poder dejarla sola sabiendo cuando volver.
+            faltan = max(0, total_objetivo - total)
+            eta = faltan / rps if rps > 0 else 0
+            pct = total / total_objetivo * 100
+            print(f"  … {total}/{total_objetivo} ({pct:.1f}%) ~{rps:.0f} rps  "
+                  f"[{time.monotonic()-inicio:.0f}s, faltan {faltan} -> ~{eta/60:.1f} min]",
+                  file=sys.stderr, flush=True)
+            if total >= total_objetivo:
+                return
+        else:
+            restante = max(0, fin_ts - time.monotonic())
+            print(f"  … {total} enviadas, {b} bloques ({nodos} nodos x {bloque}/bloque) "
+                  f"~{rps:.0f} rps  [{time.monotonic()-inicio:.0f}s, quedan ~{restante:.0f}s]",
+                  file=sys.stderr, flush=True)
 
 
 async def correr(args):
@@ -284,12 +307,13 @@ async def correr(args):
 
     tareas_nodos = [
         nodo(i, urls, headers, args.bloque, fin_ts, resultados, latencias, candado,
-             bloques_enviados, mezcla, base)
+             bloques_enviados, mezcla, base, args.total)
         for i in range(args.nodos)
     ]
     await asyncio.gather(
         *tareas_nodos,
-        progreso(resultados, candado, fin_ts, bloques_enviados, inicio, args.nodos, args.bloque),
+        progreso(resultados, candado, fin_ts, bloques_enviados, inicio, args.nodos,
+                 args.bloque, args.total),
     )
 
     duracion = time.monotonic() - inicio
@@ -301,6 +325,8 @@ async def correr(args):
         "prueba": args.nombre,
         "fecha": datetime.now().isoformat(timespec="seconds"),
         "objetivo_etiqueta": args.objetivo,
+        "total_objetivo": args.total or None,
+        "modo_corte": "conteo" if args.total else "ventana de tiempo",
         "modo": "mixto (lecturas + escrituras, todos los servicios)" if mezcla else "solo lecturas",
         "nodos": args.nodos,
         "bloque": args.bloque,
@@ -362,6 +388,9 @@ def main():
     p.add_argument("--password", default="admin123")
     p.add_argument("--nombre", default="carga_nodos")
     p.add_argument("--salida", default="pruebas/resultados")
+    p.add_argument("--total", type=int, default=0,
+                   help="Peticiones a completar. Si se indica, la corrida acaba al "
+                        "llegar a ese numero y --duracion-seg pasa a ser solo un tope.")
     p.add_argument("--mixto", type=int, default=0,
                    help="1 = mezcla lecturas Y ESCRITURAS tocando TODOS los servicios "
                         "(incluye una cadena crear->tomar->diagnosticar->cobrar).")

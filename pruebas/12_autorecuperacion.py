@@ -65,9 +65,9 @@ SERVICIOS = {
 # ventanas dan de sobra para los 5 ciclos de crash + recuperacion.
 NIVELES = {
     "reposo": None,
-    "100k": {"nodos": 4, "bloque": 16, "duracion": 180},
-    "500k": {"nodos": 6, "bloque": 20, "duracion": 300},
-    "1M":   {"nodos": 8, "bloque": 24, "duracion": 420},
+    "100k": {"nodos": 4, "bloque": 16, "duracion": 300},
+    "500k": {"nodos": 5, "bloque": 18, "duracion": 600},
+    "1M":   {"nodos": 6, "bloque": 20, "duracion": 900},
 }
 
 LIMITE_ESPERA_S = 120     # si en 2 min no volvió solo, es un fallo

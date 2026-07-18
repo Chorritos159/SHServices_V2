@@ -49,9 +49,9 @@ from comun import (GW, LIB, RAIZ, RESULTADOS, ampliar_rate_limit, banner,  # noq
 # Mismos parámetros que las pruebas 03/04/05, para que los números sean
 # comparables con las corridas sin caos.
 NIVELES = {
-    "100k": {"nodos": 3, "bloque": 12, "duracion": 180},
-    "500k": {"nodos": 4, "bloque": 16, "duracion": 360},
-    "1M":   {"nodos": 5, "bloque": 16, "duracion": 660},
+    "100k": {"nodos": 4, "bloque": 16, "duracion": 300},
+    "500k": {"nodos": 5, "bloque": 18, "duracion": 600},
+    "1M":   {"nodos": 6, "bloque": 20, "duracion": 900},
 }
 
 # Servicios que se van tumbando, en orden de "dolor" creciente:

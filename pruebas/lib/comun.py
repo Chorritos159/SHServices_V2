@@ -133,22 +133,31 @@ RUTAS_TODOS_SERVICIOS = ",".join([
 ])
 
 
-def nivel_carga(nombre: str, objetivo: str, nodos: int, bloque: int, duracion_seg: int):
-    """Corre un nivel de carga (100k/500k/1M) por nodos/bloques (S34,
-    Fase 5): amplía el rate limit del gateway temporalmente, corre
-    `carga_nodos.py` con los parámetros del nivel, restaura los límites
-    (siempre, incluso si algo falla) e imprime las señales finales del
-    gateway. La carga se reparte entre VARIOS servicios (Fase 8), no solo
-    tickets.
+def nivel_carga(nombre: str, objetivo: str, nodos: int, bloque: int, duracion_seg: int,
+                total: int = 0):
+    """Corre un nivel de carga por nodos/bloques (S34, Fase 5): amplía el rate
+    limit del gateway temporalmente, corre `carga_nodos.py`, restaura los
+    límites (siempre, incluso si algo falla) e imprime las señales finales.
+    La carga se reparte entre VARIOS servicios, no solo tickets.
+
+    Con `total` > 0 la corrida termina al COMPLETAR ese número de peticiones y
+    `duracion_seg` pasa a ser solo un tope de seguridad. Es lo preferible para
+    la tabla del registro de carga: da un número exacto y repetible en vez de
+    "lo que cupo en la ventana", que varía con la carga de la máquina.
     """
     verificar_sistema()
-    banner(f"{nombre.upper()} — nivel {objetivo}: {nodos} nodos x bloques de {bloque}, ventana {duracion_seg}s")
+    if total:
+        banner(f"{nombre.upper()} — nivel {objetivo}: {total} peticiones "
+               f"({nodos} nodos x bloques de {bloque}, tope {duracion_seg}s)")
+    else:
+        banner(f"{nombre.upper()} — nivel {objetivo}: {nodos} nodos x bloques de {bloque}, ventana {duracion_seg}s")
     print("Ampliando el rate limit del gateway para la prueba...")
     ampliar_rate_limit()
     try:
         correr_runner(
             "carga_nodos.py",
             "--nodos", nodos, "--bloque", bloque, "--duracion-seg", duracion_seg,
+            "--total", total,
             "--rutas", RUTAS_TODOS_SERVICIOS, "--objetivo", objetivo,
             "--usuario", "admin", "--password", "admin123",
             "--nombre", nombre, "--salida", RESULTADOS,

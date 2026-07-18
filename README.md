@@ -278,9 +278,9 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | :-- | :-- | :-- | :-- |
 | 1 | *(absorbida)* | La antigua "traza única" es ahora parte de la prueba 8 (pasos 10 y 12). Se fusionaron para no mantener dos pruebas que creaban el mismo ticket y acababan divergiendo | — |
 | 2 | `python pruebas/02_carga_780.py` | **Línea base ~780 peticiones**: 2 nodos x bloques de 8, ventana 25 s. Misma metodología que 3/4/5, así las cuatro filas de la tabla se comparan entre sí | ~40 s |
-| 3 | `python pruebas/03_carga_100k.py` | Nivel **100k**: 4 nodos x bloques de 16, ventana 2 min | ~2.5 min |
-| 4 | `python pruebas/04_carga_500k.py` | Nivel **500k**: 6 nodos x bloques de 20, ventana 5 min | ~5.5 min |
-| 5 | `python pruebas/05_carga_1M.py` | Nivel **1M**: 8 nodos x bloques de 24, ventana 10 min | ~10.5 min |
+| 3 | `python pruebas/03_carga_100k.py` | Nivel **100k**: **8.000 peticiones** contadas (4 nodos x bloques de 16). Medido: 99.2% de éxito, p95 1495 ms | ~3.5 min |
+| 4 | `python pruebas/04_carga_500k.py` | Nivel **500k**: **20.000 peticiones** contadas (5 nodos x bloques de 18) | ~8.5 min |
+| 5 | `python pruebas/05_carga_1M.py` | Nivel **1M**: **25.000 peticiones** contadas (6 nodos x bloques de 20) | ~10.5 min |
 | 6 | `python pruebas/06_caos.py` | 6 fichas de falla controlada: servicio caído, latencia, cola saturada (bulkhead+shed), rate limit, evento duplicado y **degradación funcional** (cae ticket-service y la VENTA se completa igual) | ~1.5 min |
 | 7 | `python pruebas/07_breaker_todos.py` | El circuit breaker abre para **los 7 servicios (auth incluido)**: tumba cada uno, exige 503 (no 500) y circuito OPEN, y verifica la recuperación automática | ~3 min |
 | 8 | `python pruebas/08_flujo_completo.py` | El flujo de negocio **completo tocando los 8 servicios**: caja registra → técnico toma/diagnostica (reserva stock real) → caja cobra/entrega → admin agrega inventario → consultas de auditoría y notificaciones. Verifica que los 8 recibieron tráfico | ~15 s |
@@ -288,6 +288,7 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | 10 | `python pruebas/10_demo_breaker.py <servicio>` | **DEMO VISIBLE del circuit breaker** para un servicio (`almacen`, `tickets`, `diagnosticos`, `facturas`, `auditoria`, `notificaciones`): pausa el contenedor, le manda tráfico hasta abrir el circuito (CLOSED→OPEN con fail-fast), lo deja OPEN 15 s para verlo en Grafana, y al reanudar el servicio el circuito **se cierra solo** (sonda activa). Ideal para la sustentación | ~1.5 min |
 | 11 | `python pruebas/11_caos_bajo_carga.py [--nivel 100k\|500k\|1M]` | **Caos BAJO CARGA sostenida**: lanza la carga real y va tumbando servicios **sin parar el tráfico**. Mide contención (cero 500), continuidad (% atendido) y recuperación, con línea de tiempo de los circuitos. Medido: 97.4% atendido y 0 errores 500 con 3 servicios cayendo | 3 / 6.5 / 12 min |
 | 12 | `python pruebas/12_autorecuperacion.py [--nivel reposo\|100k\|500k\|1M] [--servicio X]` | **¿Cuánto tarda en curarse solo?** Mata el proceso (`os._exit(1)`) de 5 servicios y **no vuelve a tocar nada**: cronometra Docker → `/health` → circuito CLOSED. Con `--nivel` se cura **mientras atiende tráfico**, que es el número honesto. Medido: **6 s en reposo, 19 s bajo carga** | 2 / 4 / 6.5 / 8.5 min |
+| 13 | `python pruebas/13_carga_100k_real.py` | **100.000 peticiones REALES**, contadas una a una — no es una etiqueta ni una extrapolación, es el contador. Imprime avance con % y minutos restantes para poder dejarla sola. Sirve además para ver si el throughput se degrada en una sesión larga | **~45 min** |
 
 **Todas las pruebas tocan todos los servicios.** La E2E (8) recorre el flujo
 completo por los 8 servicios; las de carga (3-5) reparten el tráfico entre
