@@ -46,22 +46,41 @@ def fila(nivel: str, patron: str) -> str:
 
 
 def main():
-    print("\n=== Filas para documentacion/registro_de_carga.md ===\n")
-    print("| Fase | Throughput | p95 | p99 | Error rate | CPU/Mem (api-gateway) | Queue depth | Resultado |")
-    print("| :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |")
+    lineas = [
+        "# Registro de carga — resultados",
+        "",
+        "> Generado por `pruebas/resumen_carga.py`. Throughput/p95/p99/Error rate salen",
+        "> del JSON de cada corrida; CPU/Mem y Queue depth se completan a mano.",
+        "",
+        "| Fase | Throughput | p95 | p99 | Error rate | CPU/Mem | Queue depth | Resultado |",
+        "| :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |",
+    ]
     for nivel, patron in NIVELES:
-        print(fila(nivel, patron))
-    print("\nNotas:")
-    print("  - Error rate = 1 - tasa_exito (del JSON).")
-    print("  - CPU/Mem: mira 'docker stats api-gateway' durante la corrida (anota el pico).")
-    print("  - Queue depth: RabbitMQ (http://localhost:15672) o")
-    print("    'docker exec rabbitmq rabbitmqctl list_queues name messages'. En carga de")
-    print("    LECTURA suele ser 0 (no se encolan eventos).")
-    print("  - Resultado: OK / degradado / cuello de botella (explica el 1er limite con metricas).")
+        lineas.append(fila(nivel, patron))
+    lineas += [
+        "",
+        "**Cómo completar las columnas manuales:**",
+        "- **CPU/Mem**: `docker stats api-gateway` durante la corrida (anota el pico de %CPU y MEM).",
+        "- **Queue depth**: `docker exec rabbitmq rabbitmqctl list_queues name messages`",
+        "  (o el panel http://localhost:15672). En carga de LECTURA suele ser 0.",
+        "- **Resultado**: OK / degradado / cuello de botella. La regla S34: si el sistema",
+        "  llega a su límite, explica el primer cuello de botella con métricas (el Gateway",
+        "  de 1 worker satura ~85-90 rps; ahí el throughput se aplana y suben 429/503 y p95/p99).",
+        "",
+        "Archivos JSON usados:",
+    ]
     for nivel, patron in NIVELES:
         r = ultimo(patron)
-        if r:
-            print(f"  - {nivel}: {os.path.basename(r)}")
+        lineas.append(f"- {nivel}: {os.path.basename(r) if r else '(sin corrida)'}")
+
+    texto = "\n".join(lineas)
+    print("\n" + texto)
+
+    # Se guarda para que lo copies/pegues (o lo entregues tal cual).
+    destino = os.path.join(RESULTADOS, "tabla_registro_carga.md")
+    with open(destino, "w", encoding="utf-8") as f:
+        f.write(texto + "\n")
+    print(f"\n>>> Tabla guardada en: {destino}")
 
 
 if __name__ == "__main__":
