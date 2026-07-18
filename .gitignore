@@ -28,3 +28,7 @@ pruebas/resultados/
 *.njsproj
 *.sln
 *.swp
+# Cobertura de tests (se regenera con pytest --cov)
+coverage.xml
+.coverage
+.pytest_cache/

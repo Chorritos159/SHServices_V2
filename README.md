@@ -247,6 +247,25 @@ Endpoints de gestión (todos bajo `/api/v1/notificaciones/notificaciones/webhook
 `POST /suscripciones`, `GET /suscripciones`, `DELETE /suscripciones/{id}`,
 `GET /entregas`.
 
+## Tests unitarios (pytest)
+
+Los mecanismos de resiliencia del Gateway son **Python puro** (sin BD ni red),
+así que se prueban de forma aislada y en menos de 2 segundos:
+
+```bash
+python -m pip install pytest pytest-cov sqlalchemy      # una sola vez
+python -m pytest tests/ -q                              # 26 tests
+python -m pytest tests/ --cov=api_gateway/app/core --cov-report=xml   # + cobertura para SonarQube
+```
+
+| Archivo | Qué verifica |
+| :-- | :-- |
+| `tests/test_circuit_breaker.py` | Máquina de estados CLOSED → OPEN → HALF_OPEN → CLOSED: apertura por fallos consecutivos y por tasa de error, fail-fast, una sola sonda en HALF_OPEN, reapertura si la sonda falla, contador de aperturas |
+| `tests/test_bulkhead_ratelimit.py` | Bulkhead: cupo, liberación y **aislamiento entre servicios** (saturar tickets no consume el cupo de almacén). Rate limit: ráfaga, reposición de tokens, tope de capacidad y `Retry-After` |
+| `tests/test_backoff_outbox.py` | Backoff **3s / 5s / 8s** exigido por la S34, crecimiento posterior con tope de 30s, presencia de jitter y mensajes de "encolado" al usuario |
+
+Cobertura: **100 %** en `resilience.py` y `bulkhead.py`, **96 %** en `ratelimit.py`.
+
 ## Cómo ejecutar las pruebas
 
 Todo en Python puro (`pip install httpx`), corridas **desde la raíz del
