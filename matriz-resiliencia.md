@@ -1,10 +1,11 @@
 # Matriz de Resiliencia — SHServices V2
 
 > Gate **G8 · FF-DEP-08** · Estrategias de tolerancia a fallos y Chaos Engineering
-> Última actualización: 2026-07-16 (Fase 6 del plan de integración S34)
+> Última actualización: 2026-07-18 (cierre S34)
 > Decisiones de diseño formalizadas en `documentacion/adr/` (ADR-0001: 1 solo
-> worker del Gateway; ADR-0002: estrategia de idempotencia; ADR-0003: carga
-> por nodos/bloques). Brechas conocidas consolidadas en
+> worker del Gateway; ADR-0002: idempotencia; ADR-0003: carga por nodos/bloques;
+> ADR-0004: outbox; ADR-0005: asignaciones; ADR-0006: garantías; ADR-0007: sonda
+> activa del breaker). SLA y límites justificados en `documentacion/sla.md`. Brechas conocidas consolidadas en
 > `documentacion/brechas_finales.md`.
 
 ## 1. Resumen de mecanismos
@@ -14,7 +15,7 @@
 | **Circuit Breaker formal** (CLOSED/OPEN/HALF_OPEN) | API Gateway (`app/core/resilience.py`) | Aísla un microservicio caído o lento con fail-fast |
 | **Sonda activa del breaker** (recuperación automática) | API Gateway (`bucle_sonda_breakers`, cada 5s) | Cierra el circuito SOLO cuando el servicio revive, sin necesidad de tráfico del cliente (no es "lazy") |
 | **Timeouts por operación** | API Gateway (3–5 s según servicio) | Corta la espera ante dependencias lentas |
-| **Retry + backoff + jitter** | API Gateway (máx. 1 reintento, solo lecturas) | Absorbe fallos transitorios sin duplicar escrituras |
+| **Retry + backoff escalonado + jitter** | API Gateway (solo lecturas) | Absorbe fallos transitorios sin duplicar escrituras. Backoff **3s → 5s → 8s** + jitter (misma política en el outbox, que sigue hasta 30s) |
 | **Fallback honesto** | API Gateway (503/504 + `circuito` + `Retry-After`) | Respuesta degradada semántica, nunca 500 opaco |
 | **Bulkhead por servicio** | API Gateway (`app/core/bulkhead.py`) | Una dependencia lenta no agota la capacidad de las demás |
 | **Shedding por prioridad** | API Gateway (umbral 70% de ocupación) | Protege escrituras críticas descartando lecturas de baja prioridad primero |
@@ -59,7 +60,11 @@ Cadena de protección por request: `circuit breaker → timeout por operación �
 **Regla de retry responsable (S34):** un POST con timeout tiene efecto incierto — reintentarlo
 puede duplicar el ticket/la factura. Por eso solo se reintentan lecturas (GET/HEAD) ante
 timeout/5xx; un `ConnectError` sí se reintenta con cualquier método (el request nunca llegó).
-Backoff: `0.2·intento + jitter U(0, 0.15)` para desincronizar clientes.
+Backoff **escalonado 3s → 5s → 8s** + jitter `U(0, 1s)` para desincronizar clientes
+(política del sistema, S34). La misma secuencia la usan el worker del outbox —que
+a partir de 8s sigue creciendo hasta un tope de 30s— y el generador de carga.
+En la práctica el breaker corta antes: tras 3 fallos seguidos abre y el reintento
+deja de permitirse, así que una dependencia caída no implica esperar los 16s.
 
 **Métricas expuestas en `/metrics`** (las scrapea el Prometheus ya configurado):
 `gateway_circuit_state` (0=CLOSED, 1=HALF_OPEN, 2=OPEN), `gateway_circuit_opens_total`,

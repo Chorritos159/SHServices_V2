@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import json
+import random
 
 import httpx
 from sqlalchemy.exc import IntegrityError
@@ -13,9 +14,15 @@ logger = get_logger("api-gateway")
 
 # Ritmo del worker y política de reintentos.
 INTERVALO_DRENAJE_S = 3          # cada cuánto revisa el worker si hay pendientes vencidos
-BACKOFF_BASE_S = 2              # espera = min(BACKOFF_BASE * 2**(intentos-1), BACKOFF_MAX)
-BACKOFF_MAX_S = 30
-TIMEOUT_ENTREGA_S = 8.0        # timeout por intento de entrega interna
+TIMEOUT_ENTREGA_S = 8.0          # timeout por intento de entrega interna
+
+# Política de backoff del sistema (S34): 3s -> 5s -> 8s y, a partir de ahí,
+# crecimiento exponencial con TOPE de 30s (8 -> 16 -> 30 -> 30...).
+# Los tres primeros escalones son los que exige la S34; el crecimiento posterior
+# evita martillar cada 8s a un servicio que lleva horas caído, sin llegar nunca
+# a descartar la escritura (no hay tope de intentos: se reintenta hasta entregar).
+BACKOFF_SEQ = (3.0, 5.0, 8.0)
+BACKOFF_MAX_S = 30.0
 
 # Descripción legible por (servicio, método) para el mensaje al usuario.
 _OPERACIONES = {
@@ -115,7 +122,20 @@ def _resumen(registro: OutboxDB) -> dict:
 
 
 def _backoff(intentos: int) -> float:
-    return min(BACKOFF_BASE_S * (2 ** max(0, intentos - 1)), BACKOFF_MAX_S)
+    """Espera antes del siguiente reintento: 3s, 5s, 8s y de ahi exponencial
+    hasta un tope de 30s (8 -> 16 -> 30 -> 30...), mas JITTER (hasta 1s).
+
+    El jitter es clave aqui: si hay varias escrituras encoladas y el servicio
+    vuelve, sin el todas reintentarian en el MISMO instante y lo volverian a
+    tumbar justo al recuperarse (tormenta de reintentos).
+    """
+    n = max(intentos, 1)
+    if n <= len(BACKOFF_SEQ):
+        base = BACKOFF_SEQ[n - 1]
+    else:
+        # A partir del ultimo escalon (8s) se duplica, con tope en 30s.
+        base = min(BACKOFF_SEQ[-1] * (2 ** (n - len(BACKOFF_SEQ))), BACKOFF_MAX_S)
+    return base + random.uniform(0, 1.0)
 
 
 def _url_interna(servicio: str, path: str, microservicios: dict) -> str | None:

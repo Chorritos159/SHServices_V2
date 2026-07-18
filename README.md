@@ -600,6 +600,8 @@ demostrada; son ampliaciones funcionales.
 - `documentacion/adr/` — decisiones de arquitectura formalizadas (ADR-0001:
   Gateway de 1 solo worker; ADR-0002: estrategia de idempotencia; ADR-0003:
   carga por nodos/bloques).
+- `documentacion/sla.md` — **SLA/SLO**: disponibilidad realista por criticidad,
+  latencia medida, y el porqué del rate limiting y de cada límite.
 - `matriz-resiliencia.md`, `catalogo-servicios.md`, `matriz-auditoria.md`,
   `runbook.md` — gobierno a nivel de sistema completo.
 - `PLAN_INTEGRACION.md` — plan de integración final S34, fase por fase.

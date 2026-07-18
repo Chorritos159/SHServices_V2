@@ -179,13 +179,28 @@ def _sincronizar_metricas_breaker(service: str, breaker: CircuitBreaker):
                 }},
             )
 
-# Retry responsable (S34): reintentar NO es insistir ciegamente. Presupuesto de
-# 1 reintento corto, solo para errores transitorios, con backoff + JITTER
-# (el jitter evita que muchos clientes reintenten sincronizados).
-MAX_INTENTOS = 2
+# Retry responsable (S34): reintentar NO es insistir ciegamente. Solo errores
+# transitorios, solo lecturas (un POST con timeout tiene efecto incierto), y con
+# BACKOFF ESCALONADO + JITTER.
+#
+# Politica de backoff del sistema (S34): 3s -> 5s -> 8s. Escalona la espera para
+# no seguir golpeando una dependencia enferma, y el JITTER (hasta 1s extra)
+# evita que muchos clientes reintenten sincronizados y la ahoguen justo cuando
+# esta intentando recuperarse. La misma secuencia se usa en el worker del outbox
+# (app/core/outbox.py) y en el generador de carga (pruebas/lib/carga_nodos.py).
+BACKOFF_SEQ = (3.0, 5.0, 8.0)
+MAX_INTENTOS = len(BACKOFF_SEQ) + 1   # 4 intentos = 3 esperas (3s, 5s, 8s)
+
 
 def _backoff_jitter(intento: int) -> float:
-    return 0.2 * intento + random.uniform(0, 0.15)
+    """Espera antes del reintento numero `intento`: 3s, 5s, 8s (+ jitter).
+
+    En la practica el circuit breaker corta antes: tras 3 fallos seguidos abre y
+    el reintento deja de permitirse (la condicion exige `estado == CLOSED`), asi
+    que una dependencia caida NO se traduce en esperar los 16s completos.
+    """
+    base = BACKOFF_SEQ[min(intento - 1, len(BACKOFF_SEQ) - 1)]
+    return base + random.uniform(0, 1.0)
 
 
 def _log_retry(service: str, intento: int, motivo: str, espera: float):
