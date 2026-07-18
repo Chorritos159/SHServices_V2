@@ -217,6 +217,7 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | 7 | `python pruebas/07_breaker_todos.py` | El circuit breaker abre para **los 6 servicios**: tumba cada uno, exige 503 (no 500) y circuito OPEN, y verifica la recuperación automática | ~3 min |
 | 8 | `python pruebas/08_flujo_completo.py` | El flujo de negocio **completo tocando los 8 servicios**: caja registra → técnico toma/diagnostica (reserva stock real) → caja cobra/entrega → admin agrega inventario → consultas de auditoría y notificaciones. Verifica que los 8 recibieron tráfico | ~15 s |
 | 9 | `python pruebas/09_asignaciones.py` | **Asignación exclusiva de tickets** y su resiliencia: un técnico toma un ticket (queda solo para él), otro recibe 409, "Mis Tickets" y la vista de admin, y con **ticket-service pausado** "Mis Tickets" sigue funcionando. Incluye el diagnóstico duplicado → 409 legible | ~20 s |
+| 10 | `python pruebas/10_demo_breaker.py <servicio>` | **DEMO VISIBLE del circuit breaker** para un servicio (`almacen`, `tickets`, `diagnosticos`, `facturas`, `auditoria`, `notificaciones`): pausa el contenedor, le manda tráfico hasta abrir el circuito (CLOSED→OPEN con fail-fast), lo deja OPEN 15 s para verlo en Grafana, y al reanudar el servicio el circuito **se cierra solo** (sonda activa). Ideal para la sustentación | ~1.5 min |
 
 **Todas las pruebas tocan todos los servicios.** La E2E (8) recorre el flujo
 completo por los 8 servicios; las de carga (3-5) reparten el tráfico entre
@@ -312,7 +313,17 @@ docker start almacen-service
 ```
 
 La prueba automatizada `python pruebas/07_breaker_todos.py` hace exactamente
-esto para los 6 servicios de corrido.
+esto para los 6 servicios de corrido. Y para **verlo bien en una sustentación**
+(un servicio, paso a paso, dejando el circuito OPEN unos segundos para mirarlo
+en Grafana y luego cerrándose solo), usa:
+
+```bash
+python pruebas/10_demo_breaker.py almacen     # o tickets, diagnosticos, facturas, auditoria, notificaciones
+```
+
+> **Ojo:** si pausas un contenedor y el circuito **no** abre, es porque no le
+> estás mandando tráfico — el breaker solo abre cuando **ve fallos**. La prueba
+> 10 se encarga de mandar el tráfico por ti.
 
 **Recuperación automática (sonda activa).** El circuito ahora se **cierra
 solo** cuando el servicio revive, **sin necesidad de que mandes más
