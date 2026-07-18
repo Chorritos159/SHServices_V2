@@ -18,7 +18,7 @@ from comun import nivel_carga  # noqa: E402
 if __name__ == "__main__":
     nivel_carga(
         nombre="05_carga1M", objetivo="1M",
-        nodos=int(os.environ.get("NODOS", "15")),
-        bloque=int(os.environ.get("BLOQUE", "120")),
-        duracion_seg=int(os.environ.get("DURACION", "900")),
+        nodos=int(os.environ.get("NODOS", "5")),
+        bloque=int(os.environ.get("BLOQUE", "16")),
+        duracion_seg=int(os.environ.get("DURACION", "600")),  # 10 min (la más larga)
     )

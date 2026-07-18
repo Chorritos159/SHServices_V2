@@ -79,23 +79,31 @@ def docker(*args, env=None):
                           encoding="utf-8", errors="replace", env=env)
 
 
-def ampliar_rate_limit(rps: int = 100000, burst: int = 100000, espera_seg: int = 6):
-    """Amplía TEMPORALMENTE el rate limit del Gateway (mide el throughput
-    real del backend, no el techo del limitador). Recuerda restaurar con
+def ampliar_rate_limit(rps: int = 100000, burst: int = 100000,
+                       bulkhead: int = 100000, espera_seg: int = 6):
+    """Amplía TEMPORALMENTE el rate limit Y el bulkhead del Gateway, para que en
+    las cargas se atiendan TODAS las peticiones (sin 429 de rate limit ni 503 de
+    bulkhead) y se mida el throughput real del backend. Restaurar con
     `restaurar_rate_limit()` en un `finally`.
     """
     env = os.environ.copy()
     env["RATE_LIMIT_RPS"] = str(rps)
     env["RATE_LIMIT_BURST"] = str(burst)
+    env["BULKHEAD_LIMITE_OVERRIDE"] = str(bulkhead)
+    # NO se apaga el circuit breaker ni se inflan los timeouts: eso, con la
+    # concurrencia alta, hacía que las peticiones se acumularan y COLGARAN a los
+    # servicios de un solo proceso. El breaker los PROTEGE. La clave para
+    # atender todas es concurrencia moderada (ver nodos/bloque de las pruebas).
     docker("compose", "up", "-d", "api-gateway", env=env)
     time.sleep(espera_seg)
 
 
 def restaurar_rate_limit():
-    banner("Restaurando límites normales del gateway (20 rps / 40 burst)")
+    banner("Restaurando límites normales del gateway (rate limit, bulkhead, timeout y breaker)")
     env = os.environ.copy()
-    env.pop("RATE_LIMIT_RPS", None)
-    env.pop("RATE_LIMIT_BURST", None)
+    for k in ("RATE_LIMIT_RPS", "RATE_LIMIT_BURST", "BULKHEAD_LIMITE_OVERRIDE",
+              "TIMEOUT_FACTOR", "CIRCUIT_BREAKER_DISABLED"):
+        env.pop(k, None)
     docker("compose", "up", "-d", "api-gateway", env=env)
 
 

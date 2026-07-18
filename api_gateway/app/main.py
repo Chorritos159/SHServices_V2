@@ -82,6 +82,15 @@ TIMEOUTS = {
 }
 TIMEOUT_DEFAULT = 5.0
 
+# Modo PRUEBA DE CARGA (Fase 5, S34), por variables de entorno:
+# - TIMEOUT_FACTOR multiplica los timeouts para que un pico de latencia bajo
+#   presión NO se convierta en 504 (que abriría el circuito y frenaría todo).
+# - CIRCUIT_BREAKER_DISABLED=1 apaga el fail-fast del breaker, para medir el
+#   throughput CRUDO del backend (atender todas). En producción/demo se dejan
+#   en 1 y "" (breaker activo): son SOLO para las corridas de carga.
+TIMEOUT_FACTOR = float(os.getenv("TIMEOUT_FACTOR", "1"))
+_BREAKER_ON = os.getenv("CIRCUIT_BREAKER_DISABLED", "").strip().lower() not in ("1", "true", "yes")
+
 # Métodos que MUTAN estado: son los que encolamos si el servicio está caído.
 # Las lecturas (GET/HEAD) no se encolan (basta reintentarlas en vivo) y DELETE
 # se deja fuera por ser destructivo y exclusivo de ADMIN.
@@ -206,8 +215,21 @@ BULKHEAD_LIMITES = {
     "facturas": 8, "auditoria": 5, "notificaciones": 5,
 }
 BULKHEAD_LIMITE_DEFAULT = 8
-BULKHEADS = {svc: Bulkhead(svc, BULKHEAD_LIMITES.get(svc, BULKHEAD_LIMITE_DEFAULT))
-             for svc in MICROSERVICIOS}
+
+# Override opcional del cupo del bulkhead (Fase 5, S34): en las PRUEBAS DE CARGA
+# se amplía (junto con el rate limit) para medir el throughput real del backend
+# y que TODAS las peticiones se atiendan, sin que el bulkhead rechace con 503.
+# Vacío = límites normales de producción/demo.
+_BULKHEAD_OVERRIDE = os.getenv("BULKHEAD_LIMITE_OVERRIDE", "").strip()
+
+
+def _limite_bulkhead(svc: str) -> int:
+    if _BULKHEAD_OVERRIDE:
+        return int(_BULKHEAD_OVERRIDE)
+    return BULKHEAD_LIMITES.get(svc, BULKHEAD_LIMITE_DEFAULT)
+
+
+BULKHEADS = {svc: Bulkhead(svc, _limite_bulkhead(svc)) for svc in MICROSERVICIOS}
 
 # Umbral de ocupación (S34, shedding): por encima de este %, el bulkhead
 # todavía tiene cupo técnico pero ya se reserva para tráfico de prioridad
@@ -267,7 +289,7 @@ async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: s
     timeout. Actualiza las métricas Prometheus de resiliencia.
     """
     breaker = BREAKERS[service]
-    timeout = TIMEOUTS.get(service, TIMEOUT_DEFAULT)
+    timeout = TIMEOUTS.get(service, TIMEOUT_DEFAULT) * TIMEOUT_FACTOR
     # Solo GET/HEAD son seguros de reintentar ante timeout/5xx (idempotentes).
     # Un POST con timeout tiene efecto incierto: reintentarlo puede duplicar.
     es_lectura = metodo in ("GET", "HEAD")
@@ -280,7 +302,7 @@ async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: s
     # permite() puede mover OPEN->HALF_OPEN al vencer el cooldown; se sincroniza
     # inmediatamente despues para que ESA transicion quede logueada aunque la
     # sonda siguiente cierre el circuito enseguida.
-    permitido = breaker.permite()
+    permitido = breaker.permite() if _BREAKER_ON else True
     _sincronizar_metricas_breaker(service, breaker)
     if not permitido:
         metricas.REQUESTS.labels(service=service, outcome="circuit_open").inc()

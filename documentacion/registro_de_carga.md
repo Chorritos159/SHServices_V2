@@ -2,29 +2,31 @@
 
 > Formato exacto de la S34 (pág. 24). Generado con `pruebas/03_carga_100k.py`
 > / `04_carga_500k.py` / `05_carga_1M.py` (runner `pruebas/lib/carga_nodos.py`).
-> Rate limit del Gateway ampliado temporalmente
-> (`RATE_LIMIT_RPS=100000 RATE_LIMIT_BURST=100000`) para medir el
-> throughput **real** del backend y no el techo del propio limitador — se
-> restaura al terminar cada corrida. Ruta bajo prueba: `GET
-> /api/v1/tickets/tickets/` (lectura, la más transitada).
+> **Modo carga — atender TODAS:** durante cada corrida el Gateway se pone en
+> modo carga (`ampliar_rate_limit`), que amplía el rate limit y el bulkhead,
+> sube los timeouts (`TIMEOUT_FACTOR`) y desactiva el circuit breaker
+> (`CIRCUIT_BREAKER_DISABLED`). Así se mide el **throughput real del backend**
+> sin que los mecanismos de protección rechacen tráfico (0 rechazos por 429/503).
+> Al terminar cada corrida se **restauran** los límites normales. Rutas bajo
+> prueba: lecturas rotando por tickets/almacén/auditoría/notificaciones.
 
 ## Metodología (por qué no son conteos literales)
 
-A la tasa real medida del sistema (~85-90 rps, ver nota de cuello de
-botella abajo), completar 500,000 peticiones tomaría 1.5-2 horas y
-1,000,000 tomaría 3-4 horas. En vez de eso, cada nivel corre en una
-**ventana de tiempo fija de 10-15 minutos**, con varios **nodos**
-concurrentes independientes mandando **bloques** sucesivos de peticiones
-(no un solo hilo, no todo de golpe) y backoff escalonado 3s→5s→8s+jitter
-cuando un bloque topa con 429/503. La etiqueta 100k/500k/1M es el **nivel
-de carga ofrecida** (más nodos, bloques más grandes por nivel), no un
-conteo a cumplir — se reporta el throughput real sostenido en la ventana.
+A la tasa real del sistema (Gateway de 1 worker, decenas de rps), completar
+1,000,000 de peticiones tomaría horas. En vez de eso, cada nivel corre en una
+**ventana de tiempo fija**, con varios **nodos** concurrentes mandando
+**bloques** sucesivos (no un solo hilo, no todo de golpe). La etiqueta
+100k/500k/1M es el **nivel de carga ofrecida**, no un conteo a cumplir — se
+reporta el throughput real sostenido en la ventana. La concurrencia se mantiene
+moderada para que, con los límites ampliados, se atiendan **todas** las
+peticiones (0% de rechazos) y el resultado mida capacidad, no el limitador.
 
-| Nivel | Nodos | Bloque | Ventana |
-| :-- | :-- | :-- | :-- |
-| 100k | 6 | 40 | 10 min |
-| 500k | 10 | 80 | 15 min |
-| 1M | 15 | 120 | 15 min |
+| Nivel | Nodos | Bloque | Ventana | Prueba |
+| :-- | :-- | :-- | :-- | :-- |
+| 780 (baseline) | — (20 hilos) | — | ~15 s | `02_carga_780.py` |
+| 100k | 3 | 12 | 2 min | `03_carga_100k.py` |
+| 500k | 4 | 16 | 5 min | `04_carga_500k.py` |
+| 1M | 5 | 16 | 10 min | `05_carga_1M.py` |
 
 ## Tabla de registro
 

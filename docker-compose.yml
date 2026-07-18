@@ -144,6 +144,13 @@ services:
       # está exportada en el shell -> caen a los defaults del código (20/40).
       RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-20}
       RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-40}
+      # Vacío = cupo normal del bulkhead. Las pruebas de carga lo amplían
+      # temporalmente para atender TODAS las peticiones (sin 503 de bulkhead).
+      BULKHEAD_LIMITE_OVERRIDE: ${BULKHEAD_LIMITE_OVERRIDE:-}
+      # Modo carga: subir timeouts y apagar el breaker para medir throughput
+      # crudo (atender todas). Defaults = producción (timeout normal, breaker ON).
+      TIMEOUT_FACTOR: ${TIMEOUT_FACTOR:-1}
+      CIRCUIT_BREAKER_DISABLED: ${CIRCUIT_BREAKER_DISABLED:-}
     ports:
       - "8000:80"        # <-- ÚNICO mapeo al host
     networks:

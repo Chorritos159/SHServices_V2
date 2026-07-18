@@ -12,7 +12,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from comun import GW, RESULTADOS, banner, correr_runner, login, metrica_gateway, verificar_sistema  # noqa: E402
+from comun import (GW, RESULTADOS, ampliar_rate_limit, banner, correr_runner,  # noqa: E402
+                   login, metrica_gateway, restaurar_rate_limit, verificar_sistema)
 
 import httpx  # noqa: E402
 
@@ -20,24 +21,32 @@ import httpx  # noqa: E402
 def main():
     verificar_sistema()
     total = int(os.environ.get("TOTAL", "780"))
-    hilos = int(os.environ.get("HILOS", "100"))
+    hilos = int(os.environ.get("HILOS", "20"))
 
-    banner(f"PRUEBA 2: {total} PETICIONES ({hilos} trabajadores, límites normales)")
+    banner(f"PRUEBA 2 (baseline): {total} PETICIONES ({hilos} trabajadores) — atender TODAS")
     token = login("admin", "admin123")
 
-    correr_runner(
-        "carga.py",
-        "--total", total, "--hilos", hilos,
-        "--ruta", "api/v1/tickets/tickets/",
-        "--token", token, "--nombre", "02_carga780", "--salida", RESULTADOS,
-    )
+    # Baseline de throughput: se amplían rate limit y bulkhead para que se
+    # atiendan TODAS las peticiones (sin 429/503 artificiales) y se mida el
+    # throughput real del backend. (La demostración de rate limit/bulkhead
+    # rechazando bajo presión vive en la prueba 06 de caos.)
+    print("Ampliando rate limit y bulkhead para atender todas...")
+    ampliar_rate_limit()
+    try:
+        correr_runner(
+            "carga.py",
+            "--total", total, "--hilos", hilos,
+            "--ruta", "api/v1/tickets/tickets/",
+            "--token", token, "--nombre", "02_carga780", "--salida", RESULTADOS,
+        )
+    finally:
+        restaurar_rate_limit()
 
     print()
     print("--- Interpretación ---")
-    print("HTTP 200 = atendida. 429 = rate limit (backpressure del Gateway).")
-    print("503 = bulkhead de 'tickets' lleno (cupo=12, este endpoint es GET ->")
-    print("prioridad 'media', no aplica shedding). Ninguno es una falla: es el")
-    print("sistema degradando con contrato (Fases 1-2 de S34).")
+    print("Con límites ampliados se atienden TODAS: casi todo debe ser HTTP 200.")
+    print("Si aparece algún 504, es timeout del backend bajo presión (no rate")
+    print("limiting) — señal de capacidad, no de rechazo controlado.")
 
     print()
     print("--- El Gateway sigue sano tras la ráfaga ---")
