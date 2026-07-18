@@ -113,7 +113,7 @@ async def registrar_diagnostico(
                     )
 
         # 2. Guardar el diagnóstico (repuestos serializados como JSON).
-        id_diag = f"DIAG-{str(uuid.uuid4())[:8].upper()}"
+        id_diag = f"DIAG-{uuid.uuid4().hex[:12].upper()}"
         nuevo_diag = DiagnosticoDB(
             id=id_diag,
             id_ticket=diagnostico.idTicket,

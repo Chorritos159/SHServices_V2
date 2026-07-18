@@ -1,0 +1,31 @@
+{
+  "prueba": "t_health",
+  "fecha": "2026-07-18T17:41:43",
+  "objetivo_etiqueta": "trivial",
+  "total_objetivo": null,
+  "modo_corte": "ventana de tiempo",
+  "modo": "solo lecturas",
+  "nodos": 8,
+  "bloque": 30,
+  "bloques_enviados": 138,
+  "duracion_objetivo_seg": 40,
+  "rutas": [
+    "health"
+  ],
+  "duracion_real_seg": 42.9,
+  "throughput_rps": 96.4,
+  "enviadas": 4140,
+  "exitosas": 4136,
+  "tasa_exito": 0.999,
+  "codigos": {
+    "200": 4136,
+    "ERR": 4
+  },
+  "latencia_ms": {
+    "p50": 1184.3,
+    "p90": 1782.0,
+    "p95": 1895.7,
+    "p99": 2102.6,
+    "max": 2435.8
+  }
+}

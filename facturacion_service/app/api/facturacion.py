@@ -31,7 +31,7 @@ def _crear_garantia(db: Session, factura: FacturaCreate, monto_total: float):
         return ya
     ahora = datetime.now(timezone.utc).replace(tzinfo=None)
     garantia = GarantiaDB(
-        id=f"GAR-{factura.sede[:3].upper()}-{uuid.uuid4().hex[:6].upper()}",
+        id=f"GAR-{factura.sede[:3].upper()}-{uuid.uuid4().hex[:12].upper()}",
         id_ticket=factura.idTicket,
         documento_cliente=factura.documentoCliente,
         equipo=factura.equipo,
@@ -105,7 +105,7 @@ async def emitir_comprobante(
         total_calculado = round(factura.montoManoObra + factura.montoRepuestos + monto_lineas, 2)
 
         # 3. Generar el numero de comprobante unico.
-        id_factura = f"FAC-{factura.sede[:3].upper()}-{str(uuid.uuid4())[:4].upper()}"
+        id_factura = f"FAC-{factura.sede[:3].upper()}-{uuid.uuid4().hex[:12].upper()}"
 
         # 4. Guardar en PostgreSQL (con el detalle serializado).
         nueva_factura = FacturaDB(

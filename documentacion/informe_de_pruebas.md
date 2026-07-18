@@ -1,6 +1,6 @@
 # Informe de pruebas — SHServices V2
 
-> Generado automáticamente el **18/07/2026 16:30** con
+> Generado automáticamente el **18/07/2026 16:58** con
 > `python pruebas/generar_informe.py`, leyendo la última corrida de cada
 > prueba en `pruebas/resultados/`. Ningún número está escrito a mano.
 
@@ -12,9 +12,9 @@ que es justo la variable que se quiere medir.
 
 | Nivel | Peticiones (éxito) | Throughput | p95 | p99 | Error rate | CPU/Mem | Cola |
 | :-- | --: | --: | --: | --: | --: | :-- | --: |
-| 780 (línea base) | 810 (100.0%) | 31.7 rps | 234.3 ms | 280.0 ms | 0.0% | *(monitor)* | *(monitor)* |
-| 100k | 8069 (99.2%) | 37.2 rps | 1495.5 ms | 1748.2 ms | 0.8% | *(monitor)* | *(monitor)* |
-| 500k | 10567 (95.9%) | 35.0 rps | 2476.7 ms | 3496.2 ms | 4.1% | *(monitor)* | *(monitor)* |
+| 780 (línea base) | 766 (100.0%) | 29.9 rps | 327.0 ms | 433.7 ms | 0.0% | 175.3% / 141 MiB | 5 |
+| 100k | 8051 (99.0%) | 41.0 rps | 1468.9 ms | 1994.9 ms | 1.0% | 175.3% / 141 MiB | 5 |
+| 500k | 20106 (98.8%) | 42.1 rps | 2026.6 ms | 2462.1 ms | 1.2% | 139.4% / 177 MiB | 2 |
 | 1M | *(sin corrida)* | | | | | | |
 | 100k REAL | *(sin corrida)* | | | | | | |
 
@@ -24,13 +24,40 @@ que es justo la variable que se quiere medir.
 
 ### Códigos de respuesta por nivel
 
-- **780 (línea base)**: `{'200': 558, '201': 252}`
-- **100k**: `{'200': 5270, '201': 2734, '409': 2, 'ERR': 63}`
-- **500k**: `{'200': 6325, '201': 3578, '202': 228, '409': 4, '503': 223, '504': 39, 'ERR': 170}`
+- **780 (línea base)**: `{'200': 491, '201': 275}`
+- **100k**: `{'200': 5062, '201': 2911, '409': 3, 'ERR': 75}`
+- **500k**: `{'200': 12794, '201': 7069, '409': 17, 'ERR': 226}`
 
-Un **500** es el sistema perdiendo el control. Un **503/504/429** es
-degradación **con contrato**: el sistema decidió rechazar para protegerse
-y lo dijo con un código que el cliente puede reintentar.
+### Cómo se lee cada código
+
+| Código | Qué significa | ¿Es un fallo? |
+| :-- | :-- | :-- |
+| **200 / 201** | La operación se completó | No |
+| **202** | Escritura **encolada en el outbox** porque el servicio destino no respondía. No se perdió: se entrega sola al volver | No — es la garantía de cero pérdida funcionando |
+| **409** | Conflicto de negocio: el ticket ya tenía diagnóstico, la factura ya existía. Bajo carga mixta con datos aleatorios es inevitable y **correcto** | No — es la idempotencia rechazando un duplicado |
+| **429** | Rate limit: el sistema decidió frenar para protegerse | No — es backpressure con contrato |
+| **503 / 504** | Circuit breaker o timeout: fail-fast ante una dependencia enferma | No — es degradación con contrato, reintentable |
+| **500** | Falló algo que nadie previó | **SÍ. Es el único código que delata al sistema** |
+| **ERR** | El generador no recibió respuesta: la petición no llegó a completarse | Ver abajo |
+
+### Sobre los `ERR`
+
+`ERR` no es un código HTTP: es cualquier excepción del cliente de carga
+(el servidor nunca devolvió estado). Conviene mirarlo con la latencia
+máxima al lado antes de atribuirle una causa:
+
+- Si el **máximo está pegado al timeout del cliente (10.000 ms)**, son
+  timeouts: el servidor tardó más de lo aceptable. Eso **sí** es del
+  sistema y hay que decirlo.
+- Si el **máximo está muy por debajo** (p. ej. 3.700 ms), fallaron a nivel
+  de **conexión**, no por lentitud. Apunta al generador de carga o al
+  sistema operativo (límites de conexiones, puertos efímeros en Windows),
+  no a que el backend fuera lento.
+
+En las corridas de este informe el segundo caso es el que aplica. Aun así
+**no está aislado con certeza**, y se registra como *limitación de la
+medición*, no como "culpa del cliente": afirmar lo segundo exigiría
+reproducirlo con otro generador desde otra máquina, y eso no se hizo.
 
 ---
 
@@ -129,9 +156,9 @@ Los 8 servicios hicieron su parte:
 ```
 OK  auth-service: emitio los 3 tokens
     OK  api-gateway: enruto los dos flujos (sin el, nada habria respondido)
-    OK  ticket-service: creo y movio el ticket TICK-PIU-BFB2C359 hasta ENTREGADO
+    OK  ticket-service: creo y movio el ticket TICK-PIU-4250059D hasta ENTREGADO
     OK  diagnostico-service: registro la asignacion y el diagnostico
-    OK  almacen-service: reservo repuesto (3->2), ingreso PRD-020 y vendio 2
+    OK  almacen-service: reservo repuesto (2->1), ingreso PRD-021 y vendio 2
     OK  facturacion-service: cobro el SOPORTE (con garantia) y la VENTA (sin garantia)
     OK  auditoria-service: registro 6 evento(s) del flujo
     OK  notificacion-service: alerto al tecnico y dio al ADMIN la vista completa

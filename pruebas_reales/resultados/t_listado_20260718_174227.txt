@@ -1,0 +1,7 @@
+== Reporte: t_listado (2026-07-18T17:42:27) ==
+objetivo(etiqueta)=listado  nodos=8  bloque=30  bloques_enviados=41  ventana=40s
+duracion_real=42.8s  throughput=28.8 rps
+exitosas=80/1230 (6.5%)
+codigos: HTTP 200: 80  HTTP 503: 929  HTTP 504: 219  HTTP ERR: 2
+latencia ms: p50=417.8 p90=7079.0 p95=7453.2 p99=7486.8 max=10874.9
+reporte JSON: pruebas_reales/resultados\t_listado_20260718_174227.json

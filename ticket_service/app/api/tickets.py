@@ -103,7 +103,7 @@ async def crear_ticket(
     # Ahora: 8 hex (4.300 millones) + reintento con ID nuevo si aun asi colisiona.
     nuevo_ticket_db = None
     for intento in range(1, 6):
-        ticket_id = f"TICK-{sede[:3]}-{uuid.uuid4().hex[:8].upper()}"
+        ticket_id = f"TICK-{sede[:3]}-{uuid.uuid4().hex[:12].upper()}"
         nuevo_ticket_db = TicketDB(
             id=ticket_id,
             datos_cliente=ticket.datosCliente,

@@ -1,0 +1,34 @@
+{
+  "prueba": "carga_lecturas",
+  "fecha": "2026-07-18T17:40:21",
+  "objetivo_etiqueta": "lecturas-20000",
+  "total_objetivo": 20000,
+  "modo_corte": "conteo",
+  "modo": "solo lecturas",
+  "nodos": 8,
+  "bloque": 30,
+  "bloques_enviados": 674,
+  "duracion_objetivo_seg": 600,
+  "rutas": [
+    "api/v1/tickets/tickets/",
+    "api/v1/almacen/almacen/productos",
+    "api/v1/auditoria/auditoria/eventos",
+    "api/v1/notificaciones/notificaciones/mis-alertas"
+  ],
+  "duracion_real_seg": 464.0,
+  "throughput_rps": 43.6,
+  "enviadas": 20220,
+  "exitosas": 19306,
+  "tasa_exito": 0.9548,
+  "codigos": {
+    "200": 19306,
+    "ERR": 914
+  },
+  "latencia_ms": {
+    "p50": 4152.0,
+    "p90": 5103.5,
+    "p95": 5260.2,
+    "p99": 5589.3,
+    "max": 6369.1
+  }
+}
