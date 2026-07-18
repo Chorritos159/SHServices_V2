@@ -7,7 +7,7 @@ el ticket-service esté caído.
 Se monta en `/api/v1/garantias` (sin doblar "facturas") para que el Gateway lo
 exponga como `/api/v1/facturas/garantias`.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -24,7 +24,7 @@ logger = get_logger("facturacion-service")
 
 
 def _garantia_out(g: GarantiaDB) -> dict:
-    ahora = datetime.utcnow()
+    ahora = datetime.now(timezone.utc).replace(tzinfo=None)
     restantes = (g.fecha_vencimiento - ahora).days
     return {
         "id": g.id, "id_ticket": g.id_ticket, "documento_cliente": g.documento_cliente,

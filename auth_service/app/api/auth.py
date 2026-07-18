@@ -89,7 +89,7 @@ async def login(credenciales: LoginRequest, request: Request, db: Session = Depe
             op.campos["passwordMigrada"] = True
 
         # Fabricamos el pasaporte (Token JWT) con rol Y sede.
-        tiempo_expiracion = datetime.datetime.utcnow() + datetime.timedelta(hours=2)
+        tiempo_expiracion = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) + datetime.timedelta(hours=2)
         payload = {
             "sub": empleado.usuario,
             "rol": empleado.rol,

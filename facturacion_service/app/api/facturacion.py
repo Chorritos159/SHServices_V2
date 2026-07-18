@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request, BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 import json
 from app.models.schemas import FacturaCreate, FacturaResponse
@@ -28,7 +28,7 @@ def _crear_garantia(db: Session, factura: FacturaCreate, monto_total: float):
     ya = db.query(GarantiaDB).filter(GarantiaDB.id_ticket == factura.idTicket).first()
     if ya:
         return ya
-    ahora = datetime.utcnow()
+    ahora = datetime.now(timezone.utc).replace(tzinfo=None)
     garantia = GarantiaDB(
         id=f"GAR-{factura.sede[:3].upper()}-{uuid.uuid4().hex[:6].upper()}",
         id_ticket=factura.idTicket,

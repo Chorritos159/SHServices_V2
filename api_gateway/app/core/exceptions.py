@@ -27,7 +27,7 @@ def _correlation_id(request: Request) -> str:
     return request.headers.get("x-correlation-id", "N/A")
 
 
-async def global_exception_handler(request: Request, exc: Exception):
+def global_exception_handler(request: Request, exc: Exception):
     """Ultimo recurso: algo reviento y nadie lo previo. 500 honesto."""
     correlation_id = _correlation_id(request)
     logger.extra["correlation_id"] = correlation_id
@@ -54,7 +54,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Rechazos de negocio (404, 409, 401...): el detalle YA es legible."""
     correlation_id = _correlation_id(request)
     logger.extra["correlation_id"] = correlation_id
@@ -81,7 +81,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     )
 
 
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
+def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Payload invalido: se traduce el error de Pydantic a algo legible.
 
     Pydantic devuelve una estructura anidada ([{'loc': ['body', 'x'], 'msg':

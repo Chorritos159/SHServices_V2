@@ -180,7 +180,7 @@ async def registrar_diagnostico(
             manoObra=diagnostico.mano_obra,
             precioReparacion=diagnostico.precio_reparacion,
             repuestosDescontados=len(diagnostico.repuestos),
-            fecha=datetime.datetime.utcnow().isoformat() + "Z",
+            fecha=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat() + "Z",
         )
 
         # Registro de idempotencia DESPUÉS de confirmar (para no bloquear el

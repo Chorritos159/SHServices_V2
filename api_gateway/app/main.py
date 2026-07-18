@@ -98,10 +98,10 @@ METODOS_ESCRITURA = {"POST", "PUT", "PATCH"}
 
 # Un circuit breaker por servicio destino (aísla el estado de salud de cada uno).
 BREAKERS = {svc: CircuitBreaker(svc) for svc in MICROSERVICIOS}
-_aperturas_vistas = {svc: 0 for svc in MICROSERVICIOS}
+_aperturas_vistas = dict.fromkeys(MICROSERVICIOS, 0)
 # Último estado logueado por servicio: para emitir UNA línea por TRANSICIÓN
 # (CLOSED->OPEN, OPEN->HALF_OPEN, HALF_OPEN->CLOSED) y no una por request.
-_estado_visto = {svc: "CLOSED" for svc in MICROSERVICIOS}
+_estado_visto = dict.fromkeys(MICROSERVICIOS, "CLOSED")
 
 # Inicialización de TODAS las series de métricas al arranque (Fase 4/5, S34).
 # Un Counter de prometheus_client no existe como serie hasta su primer .inc():

@@ -82,7 +82,7 @@ def encolar(*, idempotency_key: str, servicio: str, metodo: str, path: str,
             headers_json=json.dumps(headers_guardar),
             operacion=describir_operacion(servicio, metodo, path),
             estado=PENDIENTE,
-            proximo_reintento_en=datetime.datetime.utcnow(),
+            proximo_reintento_en=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
         )
         db.add(registro)
         try:
@@ -177,7 +177,7 @@ async def drenar_una_vez(microservicios: dict, breakers: dict | None = None) -> 
 
     Pensado para llamarse en bucle desde el worker y también desde las pruebas.
     """
-    ahora = datetime.datetime.utcnow()
+    ahora = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     db = SessionLocal()
     try:
         pendientes = (
@@ -231,7 +231,7 @@ async def drenar_una_vez(microservicios: dict, breakers: dict | None = None) -> 
                 )
             else:  # PENDIENTE: backoff
                 espera = _backoff(reg.intentos)
-                reg.proximo_reintento_en = datetime.datetime.utcnow() + datetime.timedelta(seconds=espera)
+                reg.proximo_reintento_en = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) + datetime.timedelta(seconds=espera)
             db.commit()
         finally:
             db.close()

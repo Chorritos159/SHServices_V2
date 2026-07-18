@@ -29,17 +29,36 @@ gateway.interceptors.request.use(async (request) => {
   return request;
 });
 
+/**
+ * Error normalizado del Gateway.
+ *
+ * Es una subclase de `Error` (y no un objeto plano) para que conserve el stack
+ * trace y para que cualquier `catch` genérico pueda tratarlo como un error de
+ * verdad. Los handlers del BFF siguen leyendo `.status` y `.data` igual que
+ * antes.
+ */
+export class GatewayError extends Error {
+  readonly status: number;
+  readonly data: unknown;
+
+  constructor(status: number, data: unknown) {
+    super(`El API Gateway respondió ${status}.`);
+    this.name = "GatewayError";
+    this.status = status;
+    this.data = data;
+  }
+}
+
 // ── Interceptor de RESPUESTA ─────────────────────────────────────────────
 // Normaliza los errores del Gateway (401 token expirado, 403 RBAC,
 // 503 circuit-breaker, 504 timeout) para que el BFF los reenvíe limpios.
 gateway.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    const status = error.response?.status;
-    const data = error.response?.data;
-    return Promise.reject({
-      status: status ?? 500,
-      data: data ?? { error: "No se pudo contactar al API Gateway." },
-    });
+    const status = error.response?.status ?? 500;
+    const data = error.response?.data ?? {
+      error: "No se pudo contactar al API Gateway.",
+    };
+    return Promise.reject(new GatewayError(status, data));
   },
 );

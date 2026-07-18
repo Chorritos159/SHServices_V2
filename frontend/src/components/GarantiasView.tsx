@@ -155,12 +155,20 @@ function TarjetaGarantia({
     ? "bg-emerald-500/15 text-emerald-300"
     : "bg-red-500/15 text-red-300";
 
+  // <div> y no <article>: a un elemento de contenido (landmark) no se le debe
+  // encima el rol "button"; el <div> es genérico y sí lo admite.
   return (
-    <article
+    <div
       onClick={onVerComprobante}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === "Enter") onVerComprobante(); }}
+      onKeyDown={(e) => {
+        // Un role="button" real responde a Enter Y a Espacio.
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onVerComprobante();
+        }
+      }}
       title="Ver el comprobante de esta garantía"
       className={`cursor-pointer rounded-xl border p-5 transition hover:brightness-125 ${color}`}
     >
@@ -200,7 +208,7 @@ function TarjetaGarantia({
       <p className="mt-3 border-t border-slate-800 pt-2 text-center text-xs text-slate-500">
         {cargando ? "Cargando comprobante…" : "Clic para ver el comprobante"}
       </p>
-    </article>
+    </div>
   );
 }
 
