@@ -30,16 +30,23 @@ conteo a cumplir — se reporta el throughput real sostenido en la ventana.
 
 | Fase | Throughput | p95 | p99 | Error rate | CPU/Mem (api-gateway) | Queue depth | Resultado |
 | :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
+| 780 (baseline, límites normales) | *(pendiente)* | | | | | | |
 | 100k | *(pendiente de corrida)* | | | | | | |
 | 500k | *(pendiente de corrida)* | | | | | | |
 | 1M | *(pendiente de corrida)* | | | | | | |
 
-> Esta tabla se completa con los valores de `throughput_rps`,
-> `latencia_ms.p95/p99`, `tasa_exito` y `codigos` de cada reporte JSON en
-> `pruebas/resultados/03_carga100k_*.json` / `04_carga500k_*.json` /
-> `05_carga1M_*.json`, más `docker stats api-gateway` durante la corrida y
-> `rabbitmq_queue_messages_ready` de Grafana en ese momento. Las tres
-> corridas (30-40 min en total) se ejecutan y se revisan juntos.
+> La fila **780** es la línea base con los límites NORMALES del Gateway
+> (`prueba 02`): su Error rate alto son 429/503 de degradación con contrato
+> (backpressure + bulkhead), NO fallos. Las 100k/500k/1M corren con el rate
+> limit ampliado para medir el throughput real del backend.
+>
+> **Para llenar la tabla automáticamente:** tras correr las pruebas 2/3/4/5,
+> ejecuta `python pruebas/resumen_carga.py` — imprime y GUARDA la tabla con
+> Throughput/p95/p99/Error rate ya calculados en
+> `pruebas/resultados/tabla_registro_carga.md`. Copia esos valores aquí y
+> completa a mano CPU/Mem (`docker stats api-gateway`), Queue depth
+> (`docker exec rabbitmq rabbitmqctl list_queues name messages`, ~0 en lecturas)
+> y Resultado (regla S34: explica el primer cuello de botella con métricas).
 
 ## Cuello de botella identificado (corridas previas, diseño anterior)
 

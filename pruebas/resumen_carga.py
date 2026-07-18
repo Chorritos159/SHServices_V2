@@ -17,6 +17,7 @@ import os
 RESULTADOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resultados")
 
 NIVELES = [
+    ("780", "*carga780*.json"),
     ("100k", "*carga100k*.json"),
     ("500k", "*carga500k*.json"),
     ("1M", "*carga1M*.json"),
@@ -57,7 +58,24 @@ def main():
     ]
     for nivel, patron in NIVELES:
         lineas.append(fila(nivel, patron))
+    # Detalle de códigos por nivel: ayuda a interpretar el "Error rate"
+    # (429 = rate limit / backpressure, 503 = bulkhead o circuito, ERR = fallo real).
+    lineas += ["", "**Detalle de códigos HTTP por nivel** (para interpretar el Error rate):"]
+    for nivel, patron in NIVELES:
+        ruta = ultimo(patron)
+        if not ruta:
+            lineas.append(f"- {nivel}: (sin corrida)")
+            continue
+        d = json.load(open(ruta, encoding="utf-8"))
+        cod = d.get("codigos", {})
+        cod_txt = ", ".join(f"{k}×{v}" for k, v in cod.items()) or "—"
+        lineas.append(f"- {nivel}: {cod_txt}  (200=OK, 429=rate limit, 503=bulkhead/circuito, ERR=fallo real)")
+
     lineas += [
+        "",
+        "> La **780** corre con límites NORMALES a propósito: sus 429/503 son degradación",
+        "> CON CONTRATO (backpressure + bulkhead), no fallos. Las 100k/500k/1M corren con el",
+        "> rate limit ampliado para medir el throughput real del backend.",
         "",
         "**Cómo completar las columnas manuales:**",
         "- **CPU/Mem**: `docker stats api-gateway` durante la corrida (anota el pico de %CPU y MEM).",
