@@ -1,20 +1,45 @@
 # Análisis estático — SonarQube
 
-> Corrida del 2026-07-17 sobre los 8 microservicios + el frontend
-> (`sonar-project.properties`). Proyecto: `shservices-v2`.
-> Panel: http://localhost:9001 (`admin` / `admin`).
+> Corrida del **2026-07-18** (cierre S34) sobre los 8 microservicios + el frontend
+> (`sonar-project.properties`). Proyecto: `shservices-v2`, 153 archivos analizados.
+> Panel: http://localhost:9001 (usuario `admin`).
 
 ## Resultado actual
 
 | Métrica | Valor | Rating |
 | :-- | :-- | :-- |
 | **Bugs** | **0** | **A** (Fiabilidad) |
-| Vulnerabilidades | 15 (todas MINOR) | B (Seguridad) |
+| Vulnerabilidades | 16 (todas MINOR) | B (Seguridad) |
 | Security Hotspots | 0 | — |
-| Code Smells | 101 | A (Mantenibilidad) |
-| Duplicación | 10.4 % | — |
-| Líneas de código | 5,766 | — |
-| **Quality Gate** | **OK** ✅ | |
+| Code Smells | 193 | **A** (Mantenibilidad) |
+| Duplicación | 26.0 % | — |
+| Líneas de código | 8,641 | — |
+| **Quality Gate** | ERROR (solo por condiciones de *código nuevo*) | |
+
+### Sobre el Quality Gate en ERROR
+
+El Quality Gate por defecto de SonarQube evalúa el **código nuevo** con umbrales
+pensados para un proyecto con suite de tests unitarios y CI. Falla por tres
+condiciones, ninguna de ellas un defecto de funcionamiento:
+
+| Condición | Valor | Por qué |
+| :-- | :-- | :-- |
+| `new_coverage` < 80 % | 0 % | **No hay tests unitarios instrumentados.** La verificación es por **pruebas de integración ejecutables** (`pruebas/01`–`10`), que cubren el flujo real end-to-end pero no reportan cobertura a Sonar. Registrado como brecha. |
+| `new_duplicated_lines_density` > 3 % | 46 % | Duplicación **estructural** de una arquitectura de microservicios: cada servicio tiene su propio `app/core/` (logger, database, exceptions) y su propio endpoint `/_chaos/crash`. No comparten librería a propósito — así un servicio se despliega y falla de forma independiente. |
+| `new_violations` > 0 | 117 | Code smells menores (nombres, complejidad, `TODO`s). Mantenibilidad global sigue en **A**. |
+
+**Lo que sí importa y está en verde: 0 bugs y Fiabilidad A.**
+
+## Bugs corregidos en esta corrida
+
+SonarQube detectó **2 bugs reales** (MAJOR) que se corrigieron:
+
+| Dónde | Problema | Corrección |
+| :-- | :-- | :-- |
+| `api_gateway/app/main.py` | `asyncio.create_task()` sin guardar la referencia: asyncio solo mantiene una **referencia débil**, así que el recolector de basura podía matar el **worker del outbox** y la **sonda del circuit breaker** en silencio (sin error, sin log) | Las tareas se guardan en un `set` de módulo con `add_done_callback` para limpiarlas al terminar |
+
+`auditoria-service` y `notificacion-service` aparecían con el mismo aviso, pero
+**ya guardaban** la referencia correctamente (`_tareas_fondo`): falso positivo de la regla.
 
 ## Qué se corrigió en esta corrida
 

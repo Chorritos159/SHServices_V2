@@ -510,8 +510,11 @@ docker start -a sonar-scan          # ~45 s
 ```
 
 Resultados: **http://localhost:9001** (usuario `admin`) → proyecto
-*SHServices V2*. Estado actual: **0 bugs, Quality Gate OK**, 15
-vulnerabilidades MINOR aceptadas (HTTP/AMQP interno entre contenedores) —
+*SHServices V2*. Estado actual (2026-07-18): **0 bugs · Fiabilidad A ·
+Mantenibilidad A**, 16 vulnerabilidades MINOR aceptadas (HTTP/AMQP interno
+entre contenedores). El Quality Gate marca ERROR solo por condiciones de
+*código nuevo* (cobertura 0 % — no hay tests unitarios instrumentados — y
+duplicación estructural entre microservicios); justificación completa en
 detalle y justificación en `seguridad/sonarqube_resultados.md`.
 
 > **Nota:** el escáner copia el código con `docker cp` en vez de montarlo
