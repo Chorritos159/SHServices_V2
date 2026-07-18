@@ -60,23 +60,164 @@ async def golpe(client, url, headers):
         return "ERR", (time.perf_counter() - t0) * 1000
 
 
-async def nodo(indice, urls, headers, bloque, fin_ts, resultados, latencias, candado, bloques_enviados):
+# ─────────────────────────────────────────────────────────────────────────
+# MODO MIXTO (--mixto): lecturas Y ESCRITURAS tocando TODOS los servicios.
+# Las escrituras son las que hacen que RabbitMQ se mueva (queue depth /
+# consumer lag) y que auditoria + notificaciones trabajen de verdad.
+# Todo lo que se crea va marcado con MARCA para poder limpiarlo despues
+# (ver pruebas/limpiar_datos_carga.py).
+# ─────────────────────────────────────────────────────────────────────────
+MARCA = "CARGA"
+
+
+def _suf():
+    return f"{random.randint(100000, 999999)}"
+
+
+async def _pedir(client, headers, metodo, ruta, cuerpo=None, base=""):
+    """Una peticion; devuelve (codigo, ms). Nunca lanza."""
+    t0 = time.perf_counter()
+    try:
+        url = f"{base}/{ruta.lstrip('/')}"
+        if metodo == "GET":
+            r = await client.get(url, headers=headers, timeout=10.0)
+        else:
+            r = await client.post(url, headers=headers, json=cuerpo or {}, timeout=10.0)
+        return r.status_code, (time.perf_counter() - t0) * 1000, r
+    except Exception:
+        return "ERR", (time.perf_counter() - t0) * 1000, None
+
+
+async def op_lectura(client, headers, base, ruta):
+    c, ms, _ = await _pedir(client, headers, "GET", ruta, base=base)
+    return [(c, ms)]
+
+
+async def op_crear_ticket(client, headers, base):
+    """POST ticket de VENTA: valido siempre y NO engorda la cola del tecnico
+    (nace en VENTA_REGISTRADA). Emite evento -> auditoria + notificaciones."""
+    cuerpo = {
+        "datosCliente": f"{MARCA}-Cliente-{_suf()}",
+        "documento_cliente": "70000000",
+        "telefono_cliente": "987654321",
+        "tipoOperacion": "VENTA",
+        "prioridad": "BAJA",
+    }
+    c, ms, _ = await _pedir(client, headers, "POST", "api/v1/tickets/tickets/", cuerpo, base)
+    return [(c, ms)]
+
+
+async def op_crear_producto(client, headers, base):
+    """POST producto en almacen. Emite producto.registrado."""
+    cuerpo = {"nombre": f"{MARCA}-Prod-{_suf()}", "categoria": "REPUESTO",
+              "sede": "PIURA", "stock_inicial": 5}
+    c, ms, _ = await _pedir(client, headers, "POST", "api/v1/almacen/almacen/productos", cuerpo, base)
+    return [(c, ms)]
+
+
+async def op_marcar_leidas(client, headers, base):
+    """Escritura segura en notificaciones (no genera basura)."""
+    c, ms, _ = await _pedir(client, headers, "POST",
+                            "api/v1/notificaciones/notificaciones/marcar-leidas", {}, base)
+    return [(c, ms)]
+
+
+async def op_flujo_negocio(client, headers, base):
+    """CADENA de escritura con datos VALIDOS que toca diagnosticos y facturas:
+    crear ticket SOPORTE -> tomarlo -> registrar diagnostico -> cobrar.
+    Es la unica forma de ejercitar esos dos servicios con escrituras reales
+    (necesitan un ticket en el estado correcto). Va con peso bajo.
+    """
+    res = []
+    cuerpo_t = {
+        "datosCliente": f"{MARCA}-Flujo-{_suf()}",
+        "documento_cliente": "70000001",
+        "telefono_cliente": "987654321",
+        "tipoOperacion": "SOPORTE",
+        "equipo": "PC de carga",
+        "numero_serie": f"{MARCA}-SN-{_suf()}",
+        "caracteristicas_falla": "prueba de carga",
+        "prioridad": "BAJA",
+    }
+    c, ms, r = await _pedir(client, headers, "POST", "api/v1/tickets/tickets/", cuerpo_t, base)
+    res.append((c, ms))
+    id_ticket = None
+    try:
+        if r is not None and r.status_code < 400:
+            id_ticket = r.json().get("idTicket")
+    except Exception:
+        id_ticket = None
+    if not id_ticket:
+        return res
+
+    # 2. el tecnico lo toma (diagnostico-service, dueno de las asignaciones)
+    c, ms, _ = await _pedir(client, headers, "POST", "api/v1/diagnosticos/asignaciones/tomar",
+                            {"id_ticket": id_ticket, "equipo": "PC de carga"}, base)
+    res.append((c, ms))
+
+    # 3. registrar el diagnostico (sin repuestos: no toca stock)
+    c, ms, _ = await _pedir(client, headers, "POST", "api/v1/diagnosticos/diagnosticos/",
+                            {"idTicket": id_ticket, "fallaDetectada": "carga",
+                             "mano_obra": 50, "precio_reparacion": 50, "repuestos": []}, base)
+    res.append((c, ms))
+
+    # 4. cobrar (facturacion-service) -> emite ticket.facturado
+    c, ms, _ = await _pedir(client, headers, "POST", "api/v1/facturas/facturas/",
+                            {"idTicket": id_ticket, "montoManoObra": 50,
+                             "montoRepuestos": 0, "metodoPago": "EFECTIVO", "sede": "PIURA"}, base)
+    res.append((c, ms))
+    return res
+
+
+# Mezcla ponderada: ~70% lecturas / ~30% escrituras. La cadena de negocio va
+# con peso 1 (poco frecuente) porque son 4 peticiones y crea datos.
+def construir_mezcla():
+    lecturas = [
+        ("api/v1/tickets/tickets/pendientes", 3),
+        ("api/v1/almacen/almacen/productos", 3),
+        ("api/v1/auditoria/auditoria/eventos", 3),
+        ("api/v1/notificaciones/notificaciones/mis-alertas", 3),
+        ("api/v1/diagnosticos/asignaciones/mias", 2),
+    ]
+    ops = []
+    for ruta, peso in lecturas:
+        ops += [("GET " + ruta, lambda cl, h, b, _r=ruta: op_lectura(cl, h, b, _r))] * peso
+    ops += [("POST crear_ticket", op_crear_ticket)] * 3
+    ops += [("POST crear_producto", op_crear_producto)] * 2
+    ops += [("POST marcar_leidas", op_marcar_leidas)] * 2
+    ops += [("CADENA negocio", op_flujo_negocio)] * 1
+    return ops
+
+
+async def nodo(indice, urls, headers, bloque, fin_ts, resultados, latencias, candado,
+               bloques_enviados, mezcla=None, base=""):
     """Un nodo: manda bloques sucesivos (concurrentes DENTRO del bloque,
     secuenciales ENTRE bloques) hasta que se acaba el tiempo de la corrida.
 
-    Si hay varias URLs (carga que toca varios servicios), cada peticion del
-    bloque rota por la lista para repartir el trafico entre todos.
+    Si hay `mezcla` (modo mixto), cada hueco del bloque ejecuta una operacion
+    de la mezcla (lecturas Y escrituras, todos los servicios). Si no, rota por
+    las URLs de solo lectura (modo clasico).
     """
     nivel_backoff = 0
     limits = httpx.Limits(max_connections=bloque + 5, max_keepalive_connections=bloque + 5)
     async with httpx.AsyncClient(limits=limits) as client:
         while time.monotonic() < fin_ts:
-            tareas = [golpe(client, urls[j % len(urls)], headers) for j in range(bloque)]
+            if mezcla:
+                tareas = [random.choice(mezcla)[1](client, headers, base) for _ in range(bloque)]
+            else:
+                tareas = [golpe(client, urls[j % len(urls)], headers) for j in range(bloque)]
             resp = await asyncio.gather(*tareas)
+
+            # En modo mixto cada operacion devuelve una LISTA de resultados
+            # (la cadena de negocio son 4 peticiones); se aplanan.
+            if mezcla:
+                planos = [par for sub in resp for par in sub]
+            else:
+                planos = list(resp)
 
             hubo_limite = False
             async with candado:
-                for codigo, ms in resp:
+                for codigo, ms in planos:
                     resultados[codigo] += 1
                     latencias.append(ms)
                     if codigo in (429, 503, 504):
@@ -131,13 +272,19 @@ async def correr(args):
     inicio = time.monotonic()
     fin_ts = inicio + args.duracion_seg
 
-    destino = urls[0] if len(urls) == 1 else f"{len(urls)} servicios"
+    mezcla = construir_mezcla() if args.mixto else None
+    base = f"http://{args.host}:{args.puerto}"
+    if mezcla:
+        destino = "TODOS los servicios (lecturas + escrituras)"
+    else:
+        destino = urls[0] if len(urls) == 1 else f"{len(urls)} servicios"
     print(f"== {args.nombre}: objetivo etiqueta '{args.objetivo}', "
           f"{args.nodos} nodos x bloques de {args.bloque}, ventana {args.duracion_seg}s -> {destino} ==",
           flush=True)
 
     tareas_nodos = [
-        nodo(i, urls, headers, args.bloque, fin_ts, resultados, latencias, candado, bloques_enviados)
+        nodo(i, urls, headers, args.bloque, fin_ts, resultados, latencias, candado,
+             bloques_enviados, mezcla, base)
         for i in range(args.nodos)
     ]
     await asyncio.gather(
@@ -154,6 +301,7 @@ async def correr(args):
         "prueba": args.nombre,
         "fecha": datetime.now().isoformat(timespec="seconds"),
         "objetivo_etiqueta": args.objetivo,
+        "modo": "mixto (lecturas + escrituras, todos los servicios)" if mezcla else "solo lecturas",
         "nodos": args.nodos,
         "bloque": args.bloque,
         "bloques_enviados": bloques_enviados[0],
@@ -214,6 +362,9 @@ def main():
     p.add_argument("--password", default="admin123")
     p.add_argument("--nombre", default="carga_nodos")
     p.add_argument("--salida", default="pruebas/resultados")
+    p.add_argument("--mixto", type=int, default=0,
+                   help="1 = mezcla lecturas Y ESCRITURAS tocando TODOS los servicios "
+                        "(incluye una cadena crear->tomar->diagnosticar->cobrar).")
     args = p.parse_args()
     asyncio.run(correr(args))
 

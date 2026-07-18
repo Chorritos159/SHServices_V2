@@ -145,6 +145,11 @@ def nivel_carga(nombre: str, objetivo: str, nodos: int, bloque: int, duracion_se
             "--rutas", RUTAS_TODOS_SERVICIOS, "--objetivo", objetivo,
             "--usuario", "admin", "--password", "admin123",
             "--nombre", nombre, "--salida", RESULTADOS,
+            # Mezcla lecturas Y ESCRITURAS sobre TODOS los servicios (incluye la
+            # cadena crear->tomar->diagnosticar->cobrar). Las escrituras son las
+            # que mueven RabbitMQ (queue depth / consumer lag) y hacen trabajar
+            # a auditoria y notificaciones.
+            "--mixto", 1,
         )
     finally:
         restaurar_rate_limit()

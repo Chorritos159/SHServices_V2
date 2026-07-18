@@ -96,28 +96,46 @@ async def crear_ticket(
             return JSONResponse(status_code=previo.status_code, content=json.loads(previo.respuesta_json))
 
     # 1. Preparar los datos (la sede sale del token, no del cliente)
-    ticket_id = f"TICK-{sede[:3]}-{str(uuid.uuid4())[:4].upper()}"
     estado_inicial = "EN_COLA" if ticket.tipoOperacion == "SOPORTE" else "VENTA_REGISTRADA"
 
-    # 2. Guardar en PostgreSQL
-    nuevo_ticket_db = TicketDB(
-        id=ticket_id,
-        datos_cliente=ticket.datosCliente,
-        documento_cliente=ticket.documento_cliente,
-        telefono_cliente=ticket.telefono_cliente,
-        tipo_operacion=ticket.tipoOperacion,
-        datos_equipo=ticket.equipo,            # espejo legado
-        equipo=ticket.equipo,
-        numero_serie=ticket.numero_serie,
-        caracteristicas_falla=ticket.caracteristicas_falla,
-        precio_estimado=ticket.precio_estimado,
-        sede=sede,
-        usuario_registro=usuario,
-        prioridad=ticket.prioridad,
-        estado=estado_inicial
-    )
-    db.add(nuevo_ticket_db)
-    db.commit()
+    # 2. Guardar en PostgreSQL.
+    # El ID usaba solo 4 hex (65.536 combinaciones): bajo carga concurrente
+    # chocaban por la paradoja del cumpleanos y salia un 500 (UniqueViolation).
+    # Ahora: 8 hex (4.300 millones) + reintento con ID nuevo si aun asi colisiona.
+    nuevo_ticket_db = None
+    for intento in range(1, 6):
+        ticket_id = f"TICK-{sede[:3]}-{uuid.uuid4().hex[:8].upper()}"
+        nuevo_ticket_db = TicketDB(
+            id=ticket_id,
+            datos_cliente=ticket.datosCliente,
+            documento_cliente=ticket.documento_cliente,
+            telefono_cliente=ticket.telefono_cliente,
+            tipo_operacion=ticket.tipoOperacion,
+            datos_equipo=ticket.equipo,            # espejo legado
+            equipo=ticket.equipo,
+            numero_serie=ticket.numero_serie,
+            caracteristicas_falla=ticket.caracteristicas_falla,
+            precio_estimado=ticket.precio_estimado,
+            sede=sede,
+            usuario_registro=usuario,
+            prioridad=ticket.prioridad,
+            estado=estado_inicial
+        )
+        db.add(nuevo_ticket_db)
+        try:
+            db.commit()
+            break
+        except IntegrityError:
+            db.rollback()
+            if intento == 5:
+                logger.error(
+                    "No se pudo generar un ID de ticket libre tras 5 intentos.",
+                    extra={"campos": {"operation": "crear_ticket", "result": "error"}},
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="No se pudo registrar el ticket por alta concurrencia. Intentalo de nuevo.",
+                )
     db.refresh(nuevo_ticket_db)
     duracion_ms = round((time.monotonic() - inicio) * 1000, 1)
     logger.info(

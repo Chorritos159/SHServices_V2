@@ -7,8 +7,29 @@
 > sube los timeouts (`TIMEOUT_FACTOR`) y desactiva el circuit breaker
 > (`CIRCUIT_BREAKER_DISABLED`). Así se mide el **throughput real del backend**
 > sin que los mecanismos de protección rechacen tráfico (0 rechazos por 429/503).
-> Al terminar cada corrida se **restauran** los límites normales. Rutas bajo
-> prueba: lecturas rotando por tickets/almacén/auditoría/notificaciones.
+> Al terminar cada corrida se **restauran** los límites normales.
+>
+> **Carga MIXTA — todos los servicios, con escrituras** (`--mixto`): ~70%
+> lecturas y ~30% **escrituras**, repartidas por todos los servicios:
+>
+> | Servicio | Lectura | Escritura |
+> | :-- | :-- | :-- |
+> | tickets | `GET /pendientes` | `POST /` (crear ticket) |
+> | almacen | `GET /productos` | `POST /productos` |
+> | notificaciones | `GET /mis-alertas` | `POST /marcar-leidas` |
+> | diagnosticos | `GET /asignaciones/mias` | `POST /asignaciones/tomar` + `POST /diagnosticos/` *(cadena)* |
+> | facturas | — | `POST /facturas/` *(cadena)* |
+> | auditoria | `GET /eventos` | *(consume los eventos que generan las escrituras)* |
+> | auth | login de cada nodo | — |
+>
+> La **cadena de negocio** (crear ticket → tomarlo → diagnosticar → cobrar) es
+> la única forma de ejercitar diagnósticos y facturación con escrituras
+> **válidas** (necesitan un ticket en el estado correcto); va con peso bajo.
+> Las escrituras son las que hacen trabajar a **RabbitMQ** (eventos) y a los
+> consumidores de auditoría y notificaciones.
+>
+> Los datos que crea la carga van marcados con el prefijo `CARGA-`; se limpian
+> con `python pruebas/limpiar_datos_carga.py --borrar`.
 
 ## Metodología (por qué no son conteos literales)
 
