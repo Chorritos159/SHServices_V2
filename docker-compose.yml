@@ -186,10 +186,16 @@ services:
       CHAOS_ENABLED: "true"
     networks:
       - shservices-net
-    # Expuesto para generar tokens desde su Swagger local (http://localhost:8003/docs).
-    # ⚠️ Solo para sustentación/demo. En producción real esto NO debe estar abierto.
-    ports:
-      - "8003:80"
+    # SIN puerto publicado (hallazgo 3 de OWASP, CERRADO el 2026-07-18).
+    #
+    # Antes publicaba el 8003 porque el Gateway bloqueaba /api/v1/auth/* y el
+    # frontend tenia que hablarle directo. Eso dejaba el login fuera del punto
+    # de entrada unico: sin rate limit, sin circuit breaker y alcanzable desde
+    # el host saltandose el Gateway.
+    #
+    # Ahora el login va por POST http://localhost:8000/api/v1/auth/login y su
+    # Swagger se lee en http://localhost:8000/docs-todos, asi que ya no hay
+    # ninguna razon para abrir este puerto.
     depends_on:
       postgres-db:
         condition: service_healthy

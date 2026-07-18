@@ -13,14 +13,15 @@ con el servicio caido.
 Esta prueba tumba CADA servicio, uno por uno, y exige lo mismo para todos:
 503 (no 500) y circuito en OPEN. Al terminar, restaura todo.
 
-POR QUE NO ESTA `auth` (no es un olvido)
-El Gateway BLOQUEA `/api/v1/auth/*` con un 403 antes de enrutar: el login va
-directo al auth-service (puerto 8003) porque nadie tiene token todavia. Como
-esa ruta nunca se proxya, su circuito no puede ejercitarse desde aqui: no hay
-peticion que hacer fallar. Su entrada en BREAKERS se mantiene a proposito, para
-el dia en que se cierre el 8003 y el login pase por el Gateway (la accion
-recomendada en seguridad/OWASP_Top10.md, Hallazgo 3); mientras tanto su serie
-en `gateway_circuit_state` se queda en 0 (CLOSED) sin moverse.
+`auth` YA ENTRA (desde 2026-07-18)
+Antes quedaba fuera porque el Gateway bloqueaba /api/v1/auth/* con un 403 y el
+login iba directo al puerto 8003: esa ruta no se proxyaba, asi que su circuito
+no podia ejercitarse. Cerrados los hallazgos 3 y 4 de OWASP, el login pasa por
+`POST /api/v1/auth/login` con rate limit propio, bloqueo por intentos fallidos
+y circuit breaker — de modo que ahora SI se puede tumbar auth-service y exigirle
+lo mismo que al resto. Es la unica ruta publica del Gateway (sin token: nadie
+lo tiene todavia), y por eso se comprueba aparte: se espera 503 con mensaje
+legible, no un error de red crudo en la cara del usuario.
 
 Uso:  python pruebas/07_breaker_todos.py
 """
@@ -110,13 +111,75 @@ def main():
         if not estado_final.startswith("0"):
             fallos.append(f"{servicio}: no se recupero solo (quedo en {estado_final})")
 
+    # ------------------------------------------------------------------
+    # AUTH: se comprueba aparte porque su ruta es PUBLICA (sin token) y lo que
+    # importa no es solo el 503, sino que el usuario reciba una explicacion
+    # entendible en vez de un error de red crudo. Nadie puede entrar al sistema
+    # si esto falla, asi que el mensaje es parte del contrato.
+    out("\n--- auth  (contenedor: auth-service) — ruta publica de login ---")
+    estado_previo = metrica_gateway('gateway_circuit_state{service="auth"}')
+    out(f"  circuito antes: {estado_previo}  (0=CLOSED)")
+
+    subprocess.run(["docker", "stop", "auth-service"], capture_output=True)
+    time.sleep(1)
+
+    codigos, detalle = [], ""
+    for _ in range(5):
+        try:
+            r = httpx.post(f"{GW}/api/v1/auth/login",
+                           json={"usuario": "admin", "password": "admin123"}, timeout=15.0)
+            codigos.append(r.status_code)
+            if r.status_code == 503:
+                detalle = (r.json() or {}).get("detalle", "")
+        except Exception as exc:
+            codigos.append(type(exc).__name__)
+    out(f"  respuestas con auth-service caido: {codigos}")
+
+    estado = metrica_gateway('gateway_circuit_state{service="auth"}')
+    out(f"  circuito despues: {estado}  (2=OPEN esperado)")
+
+    hubo_500 = any(c == 500 for c in codigos)
+    todo_503 = all(c == 503 for c in codigos)
+    abrio = estado.startswith("2")
+    if hubo_500:
+        fallos.append("auth: devolvio 500 (el error se escapo del proxy)")
+        out("  FALLO: hubo 500 -> el error no lo maneja el proxy resiliente")
+    if not abrio:
+        fallos.append(f"auth: el circuito NO abrio (quedo en {estado})")
+        out("  FALLO: el circuito no abrio")
+    if not todo_503:
+        fallos.append(f"auth: no todas las respuestas fueron 503 ({codigos})")
+    # El mensaje debe explicar que NO es culpa de la contrasena del usuario.
+    mensaje_ok = "contrasena" in detalle.lower() or "contraseña" in detalle.lower()
+    if mensaje_ok:
+        out(f"  OK: mensaje legible -> \"{detalle[:88]}...\"")
+    else:
+        fallos.append("auth: el 503 no explica al usuario que no es su contrasena")
+        out(f"  FALLO: mensaje poco claro -> \"{detalle[:88]}\"")
+    if not hubo_500 and abrio and todo_503 and mensaje_ok:
+        out("  OK: 503 controlado, circuito OPEN y mensaje entendible")
+
+    subprocess.run(["docker", "start", "auth-service"], capture_output=True)
+    out(f"  auth-service restaurado; esperando cooldown ({COOLDOWN}s) + arranque...")
+    time.sleep(COOLDOWN + 8)
+    try:
+        httpx.post(f"{GW}/api/v1/auth/login",
+                   json={"usuario": "admin", "password": "admin123"}, timeout=15.0)
+    except Exception:
+        pass
+    estado_final = metrica_gateway('gateway_circuit_state{service="auth"}')
+    out(f"  circuito tras recuperacion: {estado_final}  (0=CLOSED esperado)")
+    if not estado_final.startswith("0"):
+        fallos.append(f"auth: no se recupero solo (quedo en {estado_final})")
+
     out("\n" + "=" * 60)
     if fallos:
         out(f" RESULTADO: {len(fallos)} FALLO(S)")
         for f in fallos:
             out(f"   - {f}")
     else:
-        out(" RESULTADO: OK — los 6 servicios abren el circuito y se recuperan solos.")
+        out(" RESULTADO: OK — los 7 servicios (incluido auth) abren el circuito")
+        out("            y se recuperan solos.")
     out("=" * 60)
 
     marca = datetime.now().strftime("%Y%m%d_%H%M%S")

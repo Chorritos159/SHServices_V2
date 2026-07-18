@@ -34,7 +34,7 @@ from datetime import datetime
 
 import httpx
 
-AUTH_URL = "http://localhost:8003/api/v1/auth/login"
+AUTH_URL = "http://localhost:8000/api/v1/auth/login"   # via Gateway
 BACKOFF_SEQ = [3.0, 5.0, 8.0]  # segundos, escalonado (S34)
 
 

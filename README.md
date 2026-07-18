@@ -282,6 +282,7 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | 3 | `python pruebas/03_carga_100k.py` | Nivel **100k**: 6 nodos x bloques de 40, ventana de 10 min | 10 min |
 | 4 | `python pruebas/04_carga_500k.py` | Nivel **500k**: 10 nodos x bloques de 80, ventana de 15 min | 15 min |
 | 5 | `python pruebas/05_carga_1M.py` | Nivel **1M**: 15 nodos x bloques de 120, ventana de 15 min | 15 min |
+| 11 | `python pruebas/11_caos_bajo_carga.py [--nivel 100k\|500k\|1M]` | **Caos BAJO CARGA sostenida**: lanza la carga real y va tumbando servicios sin parar el tráfico. Mide contención (cero 500), continuidad (% atendido) y recuperación automática, con línea de tiempo | ~3 min (100k) |
 | 6 | `python pruebas/06_caos.py` | 6 fichas de falla controlada: servicio caído, latencia, cola saturada (bulkhead+shed), rate limit, evento duplicado y **degradación funcional** (cae ticket-service y la VENTA se completa igual) | ~1.5 min |
 | 7 | `python pruebas/07_breaker_todos.py` | El circuit breaker abre para **los 6 servicios**: tumba cada uno, exige 503 (no 500) y circuito OPEN, y verifica la recuperación automática | ~3 min |
 | 8 | `python pruebas/08_flujo_completo.py` | El flujo de negocio **completo tocando los 8 servicios**: caja registra → técnico toma/diagnostica (reserva stock real) → caja cobra/entrega → admin agrega inventario → consultas de auditoría y notificaciones. Verifica que los 8 recibieron tráfico | ~15 s |

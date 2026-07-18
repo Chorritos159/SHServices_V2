@@ -47,14 +47,27 @@ export async function loginAction(
     expiresIn = data.expires_in;
   } catch (err) {
     if (isAxiosError(err)) {
-      if (err.response?.status === 401) {
-        return { error: "Credenciales incorrectas." };
+      const estado = err.response?.status;
+      // El Gateway ya redacta mensajes pensados para una persona (servicio de
+      // acceso caído, bloqueo por intentos, demasiadas solicitudes). Si viene
+      // uno, se muestra tal cual en vez de sustituirlo por un genérico.
+      const delGateway = (err.response?.data as { detalle?: string })?.detalle;
+
+      if (estado === 401) {
+        return { error: "Usuario o contraseña incorrectos." };
+      }
+      if (estado === 429 || estado === 503) {
+        return { error: delGateway ?? "El servicio de acceso no está disponible ahora mismo." };
       }
       if (!err.response) {
-        return { error: "No se pudo contactar al auth-service (¿está arriba en :8003?)." };
+        return {
+          error:
+            "No se pudo contactar con el sistema. Revisa tu conexión y vuelve a intentarlo.",
+        };
       }
+      if (delGateway) return { error: delGateway };
     }
-    return { error: "Error inesperado al iniciar sesión." };
+    return { error: "Error inesperado al iniciar sesión. Vuelve a intentarlo." };
   }
 
   // Doble verificación: confirmamos la firma antes de confiar en el rol.

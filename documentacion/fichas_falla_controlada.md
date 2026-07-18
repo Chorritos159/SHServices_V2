@@ -122,3 +122,65 @@ degradó a "se perdió el ticket", sino a "el ticket llega más tarde".
 
 La prueba hace `docker unpause` en un `finally`, así que el servicio vuelve
 aunque la ficha falle a mitad.
+
+---
+
+## Ficha G — Caos BAJO CARGA sostenida (`pruebas/11_caos_bajo_carga.py`)
+
+**Añadida el 2026-07-18.** Es la ficha que faltaba y la más parecida a un
+incidente real.
+
+### Por qué existe
+
+Las fichas A-F rompen cosas con el sistema **en reposo**, y las pruebas de
+carga 03/04/05 lo miden **sano**. Ninguna respondía la pregunta que de verdad
+importa: *¿qué le pasa a la gente que ya está operando cuando un servicio se
+cae en mitad de la jornada?*
+
+Esta prueba lanza la carga real (100k / 500k / 1M) y, **sin parar el tráfico**,
+va tumbando servicios uno a uno y devolviéndolos, muestreando el estado de los
+circuitos cada 5 s para construir una línea de tiempo.
+
+### Los tres criterios
+
+| Criterio | Qué se exige | Por qué |
+| :-- | :-- | :-- |
+| **Contención** | **Cero respuestas 500** | Un 500 es el sistema perdiendo el control. Toda falla debe salir como 503/504, que son contrato |
+| **Continuidad** | ≥50% del tráfico atendido | Con 3 de 7 servicios cayendo por turnos, exigir 100% sería absurdo; lo que no puede pasar es que se caiga todo |
+| **Recuperación** | Los 7 circuitos en CLOSED al final | Sin tocar nada a mano: lo cierra la sonda activa (ADR-0014) |
+
+### Resultado medido (2026-07-18, nivel 100k)
+
+```
+peticiones enviadas .............. 2775
+throughput ....................... 15.3 rps
+atendidas con exito .............. 2702  (97.4%)
+encoladas en el outbox (202) ..... 130
+degradadas con contrato (503) .... 72
+ERRORES OPACOS (500) ............. 0
+latencia p95 / p99 ............... 1344 / 1656 ms
+
+t+  0s  caidos: ninguno    circuitos: todos CLOSED
+t+ 22s  caidos: almacen    circuitos: almacen=OPEN
+t+ 60s  caidos: ninguno    circuitos: todos CLOSED     <- recuperado solo
+t+ 82s  caidos: tickets    circuitos: tickets=OPEN
+t+125s  caidos: ninguno    circuitos: todos CLOSED     <- recuperado solo
+t+136s  caidos: facturas   circuitos: facturas=OPEN
+t+189s  caidos: ninguno    circuitos: todos CLOSED     <- recuperado solo
+```
+
+**Lo que dice ese resultado.** Con tres servicios cayendo por turnos durante la
+ventana, el sistema atendió el **97.4%** del tráfico y no produjo **ni un solo
+500**. Las 130 escrituras que llegaron durante las caídas no se perdieron:
+quedaron en el outbox y se entregaron solas. Y en la línea de tiempo se ve que
+**solo se abre el circuito del servicio caído** — los otros seis siguen
+cerrados, que es la definición de "no hay cascada".
+
+### Un fallo de la propia prueba, corregido
+
+La primera versión leía el estado final de los circuitos **después** de
+`restaurar_rate_limit()`, que reinicia el Gateway y pone los contadores a cero.
+El resultado era un diccionario vacío y el criterio de recuperación pasaba
+siempre: un falso OK. Ahora la lectura se toma antes del reinicio, y si no se
+puede leer se marca como **fallo** en vez de darlo por bueno — un criterio que
+no se puede verificar no es un criterio aprobado.

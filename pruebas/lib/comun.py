@@ -25,7 +25,7 @@ RESULTADOS = os.path.join(RAIZ, "pruebas", "resultados")
 os.makedirs(RESULTADOS, exist_ok=True)
 
 GW = "http://localhost:8000"
-AUTH = "http://localhost:8003/api/v1/auth"
+AUTH = f"{GW}/api/v1/auth"   # el login ya pasa por el Gateway (hallazgos OWASP 3 y 4)
 
 
 def banner(mensaje: str):
@@ -90,6 +90,12 @@ def ampliar_rate_limit(rps: int = 100000, burst: int = 100000,
     env["RATE_LIMIT_RPS"] = str(rps)
     env["RATE_LIMIT_BURST"] = str(burst)
     env["BULKHEAD_LIMITE_OVERRIDE"] = str(bulkhead)
+    # El login tiene su PROPIO cubo (3 rps), mucho más estrecho que el global,
+    # para frenar la fuerza bruta. Un runner solo hace un login, pero varias
+    # pruebas encadenadas podrían agotarlo y fallar por un 429 que no tiene
+    # nada que ver con lo que se está midiendo.
+    env["LOGIN_RATE_RPS"] = str(rps)
+    env["LOGIN_RATE_BURST"] = str(burst)
     # NO se apaga el circuit breaker ni se inflan los timeouts: eso, con la
     # concurrencia alta, hacía que las peticiones se acumularan y COLGARAN a los
     # servicios de un solo proceso. El breaker los PROTEGE. La clave para
@@ -102,6 +108,7 @@ def restaurar_rate_limit():
     banner("Restaurando límites normales del gateway (rate limit, bulkhead, timeout y breaker)")
     env = os.environ.copy()
     for k in ("RATE_LIMIT_RPS", "RATE_LIMIT_BURST", "BULKHEAD_LIMITE_OVERRIDE",
+              "LOGIN_RATE_RPS", "LOGIN_RATE_BURST",
               "TIMEOUT_FACTOR", "CIRCUIT_BREAKER_DISABLED"):
         env.pop(k, None)
     docker("compose", "up", "-d", "api-gateway", env=env)

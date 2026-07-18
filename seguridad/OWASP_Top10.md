@@ -16,9 +16,9 @@
 | A02 | Cryptographic Failures | ✅ **Corregido** | Contraseñas estaban en **texto plano** → migradas a bcrypt (ver hallazgo 1) |
 | A03 | Injection | ✅ OK | Todo el acceso a datos va por SQLAlchemy ORM (consultas parametrizadas); cero SQL crudo interpolado. React escapa el HTML por defecto; sin `dangerouslySetInnerHTML` |
 | A04 | Insecure Design | ✅ OK | Resiliencia por diseño (circuit breaker, bulkhead, rate limit, idempotencia — Fases 1-3); identidad centralizada en un solo punto |
-| A05 | Security Misconfiguration | ⚠️ **Aceptado** | Sin `debug=True`; contenedores sin privilegios. Swagger/auth expuestos para la demo (hallazgo 3, aceptado). Los endpoints de caos ya nacen **apagados** y devuelven 404 salvo que se encienda `CHAOS_ENABLED` (hallazgo 6, **corregido**) |
+| A05 | Security Misconfiguration | 🟡 **Parcial** | Sin `debug=True`; contenedores sin privilegios. El puerto 8003 del auth-service **ya está cerrado** y el login pasa por el Gateway (hallazgo 3). Los endpoints de caos nacen **apagados** y devuelven 404 salvo `CHAOS_ENABLED` (hallazgo 6). Sigue abierto: Swagger de microservicios y paneles sin credenciales fuertes |
 | A06 | Vulnerable & Outdated Components | ⚠️ Pendiente | `npm audit` (2026-07-18): **2 moderadas** en el frontend, sin exposición directa (dependencias de build). Sin escaneo automatizado de dependencias Python |
-| A07 | Identification & Auth Failures | ✅ **Mejorado** | Hash bcrypt + comparación en tiempo constante + mensaje de error único (no permite enumerar usuarios). Sin bloqueo por intentos fallidos (ver hallazgo 4) |
+| A07 | Identification & Auth Failures | ✅ **Corregido** | Hash bcrypt + comparación en tiempo constante + mensaje de error único (no permite enumerar usuarios). **Bloqueo temporal tras 5 intentos fallidos por usuario y rate limit propio del login** (hallazgo 4, cerrado) |
 | A08 | Software & Data Integrity | ✅ OK | Imágenes con tag fijo; contenedores corren como usuario sin privilegios (`USER appuser`); sin `curl \| bash` en los Dockerfiles |
 | A09 | Logging & Monitoring Failures | ✅ OK | Logs estructurados S34 con `correlationId` en los 9 servicios; **no se loguea ninguna contraseña ni token**; Prometheus + Grafana + Loki |
 | A10 | Server-Side Request Forgery | ✅ OK | El Gateway solo enruta a un **mapa fijo** de servicios (`MICROSERVICIOS`); un `service` desconocido devuelve 404. La URL destino nunca se construye con input del usuario |
@@ -57,37 +57,99 @@ internos **confían** en esas cabeceras sin re-validar el token. Quien
 pudiera emitir peticiones **dentro de la red Docker** podría falsificar
 las cabeceras y saltarse el control de acceso.
 
-**Mitigación actual:** ningún microservicio de negocio publica puerto al
-host (solo el Gateway en `8000` y el auth-service en `8003`), así que el
-ataque exige ya tener acceso a la red interna.
+**Mitigación actual:** el **único** puerto de entrada al sistema es el del
+Gateway (`8000`) — desde el 2026-07-18 ni siquiera el auth-service publica el
+suyo (hallazgo 3). Los microservicios de negocio sí publican el suyo, pero solo
+para consultar su Swagger en la demo (registrado como brecha #14), así que el
+ataque exige ya tener acceso al host o a la red interna.
 
 **Acción recomendada:** propagar el JWT y validarlo también en cada
 servicio (defensa en profundidad), o una malla de servicios con mTLS.
 Registrado en `documentacion/brechas_finales.md`.
 
-## Hallazgo 3 — A05: superficie expuesta para la demo ⚠️ ACEPTADO
+## Hallazgo 3 — A05: superficie expuesta para la demo 🟡 PARCIALMENTE CERRADO
 
-- `auth-service` publica el puerto `8003` (necesario porque el Gateway
-  bloquea `/api/v1/auth/*` y el frontend hace login directo).
-- Swagger (`/docs`) abierto en Gateway y auth-service.
+**Lo que estaba abierto:**
+
+- ~~`auth-service` publicaba el puerto `8003`~~ → **CERRADO (2026-07-18)**
+- Swagger (`/docs`) abierto en Gateway y microservicios.
 - Paneles de Grafana/RabbitMQ/Prometheus/Dozzle sin autenticación fuerte
   (credenciales `admin/admin`, `guest/guest`).
 
-**Aceptado** para sustentación/demo local. Antes de cualquier despliegue
-real: cerrar `8003` (que el login pase por el Gateway), desactivar Swagger
-en producción, y poner credenciales fuertes en los paneles.
+### El puerto 8003: cerrado
 
-## Hallazgo 4 — A07: sin bloqueo por intentos fallidos ⚠️ ABIERTO
+Se publicaba porque el Gateway bloqueaba `/api/v1/auth/*` con un 403 y el
+frontend no tenía otra forma de hacer login. Eso dejaba **la operación más
+sensible del sistema fuera del punto de entrada único**: sin rate limit, sin
+circuit breaker, y alcanzable desde el host saltándose el Gateway entero.
 
-No hay límite de intentos de login por usuario/IP: un atacante puede
-probar contraseñas sin freno (el rate limit global del Gateway **no**
-aplica al login, porque va directo al auth-service en el `8003`).
+**Corrección.** El login pasa a `POST /api/v1/auth/login` **en el Gateway**,
+como única ruta pública (sin token, porque nadie lo tiene todavía), y con todo
+lo que eso implica:
 
-**Mitigación parcial:** el coste 12 de bcrypt hace cada intento ~250 ms,
-lo que ya limita mucho el ritmo de un ataque.
+- Rate limit **propio y más estrecho** que el global: 3 rps / ráfaga 10. Un
+  humano no hace tres logins por segundo, así que no molesta a nadie real.
+- **Circuit breaker** de `auth`, que antes no podía ejercitarse.
+- Un 503 **legible** si auth-service no responde (ver hallazgo 4).
+- El resto de `/auth` (gestión de usuarios) pasa por el camino autenticado
+  normal, con JWT validado y RBAC.
 
-**Acción recomendada:** bloqueo temporal tras N fallos por usuario, y rate
-limit específico en el endpoint de login.
+El `ports: 8003` desapareció de `docker-compose.yml`. El Swagger de auth se
+sigue leyendo, ahora en `http://localhost:8000/docs-todos`.
+
+**Verificado (2026-07-18):** `http://localhost:8003/health` → sin conexión;
+`POST http://localhost:8000/api/v1/auth/login` → 200 con token.
+
+### Lo que sigue abierto
+
+Swagger de los microservicios y paneles sin credenciales fuertes: **aceptado**
+para la sustentación. Antes de un despliegue real: desactivar Swagger en
+producción y poner credenciales fuertes en los paneles.
+
+## Hallazgo 4 — A07: sin bloqueo por intentos fallidos 🟢 CERRADO
+
+**Lo que estaba mal.** No había límite de intentos: se podían probar
+contraseñas sin freno, porque el rate limit del Gateway no tocaba el login
+(iba directo al `8003`). La única barrera era el coste 12 de bcrypt (~250 ms
+por intento), que ralentiza pero no detiene.
+
+**Cómo se corrigió.** Al pasar el login por el Gateway (hallazgo 3) se pudo
+añadir la defensa donde corresponde, en el punto de entrada:
+
+1. **Bloqueo temporal por usuario.** Tras **5 fallos en 5 minutos**, ese
+   usuario queda bloqueado 5 minutos y recibe un **429** que le dice cuánto
+   falta y qué hacer. Es por usuario, no global: bloquear a `caja01` no deja
+   fuera al resto del local.
+2. **Rate limit propio del login**: 3 rps / ráfaga 10, mucho más estrecho que
+   el global de 20 rps.
+3. El bloqueo **aguanta aunque acierte la contraseña**. Es deliberado: si no,
+   un atacante que da con la clave al intento 200 entraría igual, y el bloqueo
+   no serviría de nada.
+4. Un **401 no abre el circuito** de `auth`: una contraseña incorrecta es una
+   respuesta sana del servicio, no un fallo de infraestructura. Solo cuentan
+   los 5xx y los errores de transporte.
+
+### Verificado en vivo (2026-07-18)
+
+```
+intentos 1-5 contra 'caja01'  -> 401 "Usuario o contraseña incorrectos."
+intento 6                      -> 429 "Se bloqueo el acceso por 5 intentos
+                                       fallidos. Vuelve a intentarlo en 5
+                                       minuto(s)..."
+con la contraseña CORRECTA     -> 429 (el bloqueo aguanta)
+'admin' en paralelo            -> 200 (no le afecta)
+```
+
+### Limitación conocida
+
+El contador vive **en memoria del Gateway**, así que un reinicio lo borra. Es
+consistente porque el Gateway corre con 1 worker (ADR-0008), pero no sobrevive
+a un despliegue. La solución es la misma que para el estado del circuit
+breaker: moverlo a Redis. Registrado en `documentacion/brechas_finales.md`.
+
+También es por **usuario**, no por IP: no frena a quien rota nombres de usuario
+contra el sistema. Un rate limit por IP en un reverse proxy delante del Gateway
+sería la siguiente capa.
 
 ## Hallazgo 5 — A06: dependencias con vulnerabilidades conocidas ⚠️ ABIERTO
 

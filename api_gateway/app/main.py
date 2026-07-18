@@ -698,6 +698,173 @@ async def swagger_unificado():
 </html>""")
 
 
+# 3.c LOGIN a través del Gateway (cierra los hallazgos 3 y 4 de OWASP).
+#
+# Antes el Gateway bloqueaba `/api/v1/auth/*` con un 403 y el frontend hacía
+# login DIRECTO contra el puerto 8003. Eso dejaba tres agujeros:
+#
+#   - El login era la única operación sin rate limit (el del Gateway no lo
+#     tocaba), así que se podían probar contraseñas sin freno.
+#   - No tenía circuit breaker: si auth-service caía, el usuario recibía un
+#     error crudo de red del navegador en vez de un mensaje entendible.
+#   - Obligaba a publicar el puerto 8003 al host, saltándose el Gateway.
+#
+# Esta ruta va ANTES del enrutador genérico y NO exige token —nadie lo tiene
+# todavía—, pero sí pasa por rate limit, bloqueo por intentos y breaker.
+
+# Cubo aparte, mucho más estrecho que el global (20 rps): un humano no hace
+# 3 logins por segundo, así que este límite no molesta a nadie real y sí frena
+# el goteo automatizado.
+LOGIN_LIMITER = TokenBucket(
+    capacidad=int(os.getenv("LOGIN_RATE_BURST", "10")),
+    tasa_por_seg=float(os.getenv("LOGIN_RATE_RPS", "3")),
+)
+
+# Bloqueo temporal por usuario tras N fallos (hallazgo 4).
+LOGIN_MAX_FALLOS = int(os.getenv("LOGIN_MAX_FALLOS", "5"))
+LOGIN_VENTANA_S = float(os.getenv("LOGIN_VENTANA_S", "300"))    # 5 min
+LOGIN_BLOQUEO_S = float(os.getenv("LOGIN_BLOQUEO_S", "300"))    # 5 min
+_FALLOS_LOGIN: dict[str, list[float]] = {}
+
+
+def _fallos_recientes(usuario: str) -> list[float]:
+    """Fallos de ese usuario dentro de la ventana, descartando los viejos."""
+    ahora = time.monotonic()
+    recientes = [t for t in _FALLOS_LOGIN.get(usuario, []) if ahora - t < LOGIN_VENTANA_S]
+    if recientes:
+        _FALLOS_LOGIN[usuario] = recientes
+    else:
+        _FALLOS_LOGIN.pop(usuario, None)
+    return recientes
+
+
+def _segundos_bloqueo(usuario: str) -> float:
+    """Segundos que le quedan bloqueados, o 0 si puede intentarlo."""
+    recientes = _fallos_recientes(usuario)
+    if len(recientes) < LOGIN_MAX_FALLOS:
+        return 0.0
+    return max(0.0, LOGIN_BLOQUEO_S - (time.monotonic() - recientes[-1]))
+
+
+@app.post("/api/v1/auth/login", tags=["Seguridad"])
+async def login_por_gateway(request: Request):
+    """Login. Único endpoint público del Gateway (sin él nadie podría entrar)."""
+    correlation_id = request.state.correlation_id
+    breaker = BREAKERS["auth"]
+
+    try:
+        credenciales = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=422,
+            content={"error": "Datos invalidos",
+                     "detalle": "Envia un JSON con 'usuario' y 'password'.",
+                     "trace_id": correlation_id},
+        )
+    usuario = str(credenciales.get("usuario", "")).strip().lower()
+
+    # 1. Bloqueo por intentos fallidos de ESE usuario.
+    if usuario:
+        restante = _segundos_bloqueo(usuario)
+        if restante > 0:
+            logger.warning(
+                f"Login bloqueado para '{usuario}': supero {LOGIN_MAX_FALLOS} intentos fallidos.",
+                extra={"campos": {"operation": "login", "event": "auth",
+                                  "result": "bloqueado", "usuario": usuario,
+                                  "segundosRestantes": round(restante)}},
+            )
+            return JSONResponse(
+                status_code=429,
+                content={"error": "Demasiados intentos",
+                         "detalle": (f"Se bloqueo el acceso por {LOGIN_MAX_FALLOS} intentos "
+                                     f"fallidos. Vuelve a intentarlo en {round(restante / 60) or 1} "
+                                     "minuto(s) o pide a un administrador que te ayude."),
+                         "trace_id": correlation_id},
+                headers={"Retry-After": str(round(restante))},
+            )
+
+    # 2. Rate limit propio del login (freno al goteo automatizado).
+    if not LOGIN_LIMITER.consumir():
+        metricas.RATE_LIMIT_REJECTS.inc()
+        espera = max(1, round(LOGIN_LIMITER.segundos_hasta_proximo_token()))
+        return JSONResponse(
+            status_code=429,
+            content={"error": "Demasiadas solicitudes",
+                     "detalle": f"Hay demasiados intentos de inicio de sesion. Reintenta en {espera}s.",
+                     "trace_id": correlation_id},
+            headers={"Retry-After": str(espera)},
+        )
+
+    # 3. Circuito abierto: fail-fast con un mensaje que entienda una persona.
+    if not breaker.permite():
+        _sincronizar_metricas_breaker("auth", breaker)
+        metricas.REQUESTS.labels(service="auth", outcome="short_circuit").inc()
+        return _auth_no_disponible(correlation_id, breaker)
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{MICROSERVICIOS['auth']}/api/v1/auth/login",
+                json=credenciales,
+                headers={"X-Correlation-ID": correlation_id,
+                         "Content-Type": "application/json"},
+                timeout=TIMEOUTS.get("auth", TIMEOUT_DEFAULT) * TIMEOUT_FACTOR,
+            )
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        breaker.registrar(False)
+        _sincronizar_metricas_breaker("auth", breaker)
+        metricas.REQUESTS.labels(service="auth", outcome="unreachable").inc()
+        logger.error(
+            f"El servicio 'auth' esta inaccesible. {_explicar_circuito(breaker)}",
+            extra={"campos": {"operation": "login", "event": "auth", "result": "unreachable",
+                              "errorType": type(exc).__name__, "circuito": breaker.estado,
+                              "fallosConsecutivos": breaker.fallos_consecutivos,
+                              "umbralApertura": breaker.umbral_consecutivos}},
+        )
+        return _auth_no_disponible(correlation_id, breaker)
+
+    # El 5xx del propio auth-service también cuenta como fallo para el circuito;
+    # un 401 NO: la contraseña incorrecta es una respuesta sana del servicio.
+    breaker.registrar(resp.status_code < 500)
+    _sincronizar_metricas_breaker("auth", breaker)
+
+    if usuario:
+        if resp.status_code == 401:
+            _FALLOS_LOGIN.setdefault(usuario, []).append(time.monotonic())
+            quedan = LOGIN_MAX_FALLOS - len(_fallos_recientes(usuario))
+            logger.warning(
+                f"Login fallido de '{usuario}' ({quedan} intento(s) antes del bloqueo).",
+                extra={"campos": {"operation": "login", "event": "auth",
+                                  "result": "rechazado", "usuario": usuario,
+                                  "intentosRestantes": max(quedan, 0)}},
+            )
+        elif resp.status_code < 400:
+            _FALLOS_LOGIN.pop(usuario, None)   # entró bien: se limpia el historial
+
+    if resp.status_code >= 500:
+        return _auth_no_disponible(correlation_id, breaker)
+
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+def _auth_no_disponible(correlation_id: str, breaker) -> JSONResponse:
+    """503 legible cuando no se puede validar la identidad.
+
+    El usuario no tiene por qué saber qué es un microservicio: se le dice qué
+    pasa, que no es culpa suya y qué hacer. El detalle técnico va al log.
+    """
+    return JSONResponse(
+        status_code=503,
+        content={"error": "Servicio de acceso no disponible",
+                 "detalle": ("No podemos verificar tu usuario en este momento porque el "
+                             "servicio de autenticacion no esta respondiendo. No es un "
+                             "problema con tu contrasena. Vuelve a intentarlo en unos "
+                             "segundos; si sigue igual, avisa a Soporte de TI."),
+                 "circuito": breaker.estado, "trace_id": correlation_id},
+        headers={"Retry-After": "5"},
+    )
+
+
 # 4. Enrutador Dinámico y Circuit Breaker (¡AHORA CON SEGURIDAD JWT!)
 @app.api_route(
     "/api/v1/{service}/{path:path}", 
@@ -708,8 +875,17 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
     """Redirige el tráfico y protege el sistema si un microservicio cae."""
 
     # Excepción para el servicio de Auth (Nadie tiene token antes de loguearse)
-    if service == "auth":
-        return JSONResponse(status_code=403, content={"error": "Petición directa al auth-service bloqueada. Use Swagger local por ahora."})
+    # `/auth/login` tiene su propia ruta publica (definida arriba, sin token).
+    # El RESTO de /auth (gestion de usuarios) si pasa por aqui, o sea con JWT
+    # validado y RBAC; el auth-service vuelve a exigir ADMIN por su cuenta.
+    # Antes todo /auth se bloqueaba con un 403 y el frontend hablaba directo
+    # con el puerto 8003, saltandose el Gateway entero.
+    if service == "auth" and path.strip("/") == "login":
+        return JSONResponse(
+            status_code=404,
+            content={"error": "No encontrado",
+                     "detalle": "Usa POST /api/v1/auth/login."},
+        )
 
     if service not in MICROSERVICIOS:
         return JSONResponse(status_code=404, content={"error": "Servicio no registrado en el Gateway."})

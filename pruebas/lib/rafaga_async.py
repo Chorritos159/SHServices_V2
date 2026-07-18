@@ -14,7 +14,7 @@ import sys
 import httpx
 
 GW = "http://localhost:8000"
-AUTH_URL = "http://localhost:8003/api/v1/auth/login"
+AUTH_URL = "http://localhost:8000/api/v1/auth/login"   # via Gateway
 
 
 async def login(usuario="admin", password="admin123"):
