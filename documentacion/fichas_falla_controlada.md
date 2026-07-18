@@ -2,7 +2,7 @@
 
 > Formato exacto de la S34 (pág. 30): cada falla se diseña con hipótesis y
 > evidencia esperada, y se ejecuta con el sistema **operando** (no en frío).
-> Las 5 fichas corresponden a `pruebas/06_caos.py`, corrida el 2026-07-16
+> Las 6 fichas corresponden a `pruebas/06_caos.py`, corrida el 2026-07-16
 > (versión Bash original; migrado a Python puro después, mismo comportamiento).
 > Reporte completo: `pruebas/resultados/05_caos_20260716_225158.txt`.
 
@@ -74,3 +74,51 @@
 | Base o almacenamiento lento | Requeriría un proxy/mock delante de PostgreSQL (no está en el alcance de esta fase) |
 | Error de contrato | Cubierto parcialmente por la validación Pydantic de cada servicio (422 ante payload inválido), pero no se diseñó como ficha de caos explícita |
 | Fallo parcial (ejecutar una parte y fallar la siguiente) | El flujo diagnóstico→almacén (`_mover_stock`) ya maneja este caso en el código (try/except por repuesto), pero no se verificó como ficha de caos dedicada en esta fase |
+
+---
+
+## Ficha F — Degradación funcional: la VENTA sobrevive sin ticket-service
+
+**Añadida el 2026-07-18**, junto con la venta de mostrador.
+
+| Campo | Valor |
+| :-- | :-- |
+| **Falla inyectada** | `docker pause ticket-service` (caída dura: acepta la conexión TCP y no responde nunca) |
+| **Operación bajo prueba** | Venta directa de mostrador: 2 unidades de un producto de la sede |
+| **Comportamiento esperado** | La venta se completa igual. El ticket es *best-effort* |
+| **Mecanismo** | Degradación funcional + outbox del Gateway |
+
+### Por qué esta ficha existe
+
+Las fichas A-E prueban que una falla **no se propaga**. Esta prueba algo
+distinto y más exigente: que una falla **no detiene el negocio** cuando la
+operación no depende de verdad del servicio caído.
+
+Una venta de mostrador necesita dos cosas: que salga el stock y que el cliente
+se lleve su comprobante. El ticket es un registro de conveniencia. Tratarlo
+como obligatorio significaría que una caída de `ticket-service` cierra la caja
+—y eso no es resiliencia, es acoplamiento disfrazado.
+
+### Resultado medido (2026-07-18)
+
+```
+Producto elegido: PRD-003 (23 en stock, S/.80.0)
+ticket-service PAUSADO
+
+1. Alta del ticket   -> HTTP 202 (encolado en el outbox); la venta NO se detiene aquí
+2. Descuento de stock -> HTTP 200
+3. Cobro              -> HTTP 201, comprobante FAC-PIU-6F6B por S/.160.00
+
+OK: VENTA COMPLETADA con ticket-service caído (referencia VENTA-PIU-CAOS...,
+    sin ticket). El cliente se llevó su producto y su comprobante.
+```
+
+El **202 del paso 1** es la parte interesante y no estaba planeada: el Gateway
+no solo dejó pasar la venta, además **encoló el alta del ticket en su outbox**,
+así que cuando `ticket-service` vuelve el registro se crea solo. La venta no se
+degradó a "se perdió el ticket", sino a "el ticket llega más tarde".
+
+### Qué se restaura al terminar
+
+La prueba hace `docker unpause` en un `finally`, así que el servicio vuelve
+aunque la ficha falle a mitad.

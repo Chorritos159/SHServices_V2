@@ -1,23 +1,37 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""PRUEBA 8 (Fase 8, S34): el flujo de negocio COMPLETO tocando los 8 servicios.
+"""PRUEBA 8 (S34): TODOS los flujos de negocio, tocando los 8 servicios.
 
-Recorre el ciclo de vida real de un ticket SOPORTE de punta a punta, con los
-tres roles y un unico correlationId, y ademas los casos sueltos (admin agrega
-inventario, consultas). Al final verifica que los 8 servicios recibieron
-trafico: una prueba que solo golpea 'tickets' deja 7 servicios sin ejercitar.
+Es la prueba E2E de referencia del proyecto. Recorre los DOS caminos que el
+negocio soporta, con los tres roles y un unico correlationId:
 
-Flujo:
-  1. CAJA registra un ticket SOPORTE           -> ticket-service (EN_COLA)
-  2. TECNICO lo toma                            -> ticket-service (EN_DIAGNOSTICO)
-  3. TECNICO diagnostica y reserva un repuesto  -> diagnostico-service -> almacen-service
-  4. TECNICO marca diagnosticado                -> ticket-service (DIAGNOSTICADO, evento ticket.listo)
-  5. CAJA cobra                                 -> facturacion-service (evento ticket.facturado)
-  6. CAJA entrega                               -> ticket-service (ENTREGADO) -> almacen (confirma stock)
-  7. ADMIN agrega inventario                    -> almacen-service (evento producto.registrado)
-  8. ADMIN consulta la auditoria                -> auditoria-service
-  9. TECNICO consulta sus notificaciones        -> notificacion-service
-Los eventos (pasos 1/4/5/7) los consumen auditoria y notificacion por RabbitMQ.
+  FLUJO A — SOPORTE (el equipo entra, se repara y se entrega)
+    1. CAJA registra un ticket SOPORTE        -> ticket-service (EN_COLA)
+    2. TECNICO lo toma                        -> diagnostico-service (EN_DIAGNOSTICO)
+    3. TECNICO diagnostica y RESERVA repuesto -> diagnostico -> almacen
+    4. TECNICO marca DIAGNOSTICADO            -> ticket-service (evento ticket.listo)
+    5. CAJA cobra                             -> facturacion (factura + GARANTIA)
+    6. CAJA entrega                           -> ticket-service (ENTREGADO) + almacen confirma
+
+  FLUJO B — VENTA de mostrador (el cliente compra y se lleva)
+    7. ADMIN ingresa un PRODUCTO_VENTA        -> almacen (evento producto.registrado)
+    8. CAJA consulta el catalogo de SU sede   -> almacen (aislamiento por sede)
+    9. CAJA vende                             -> almacen descuenta + facturacion cobra
+                                                 (VENTA no genera garantia)
+
+  VERIFICACION TRANSVERSAL
+   10. Auditoria registro los eventos del flujo   -> auditoria-service
+   11. Notificaciones: al TECNICO la suya, al ADMIN TODAS -> notificacion-service
+   12. El mismo correlationId aparece en los logs estructurados (informativo)
+   13. Los 8 servicios hicieron su trabajo
+
+Absorbe a la antigua PRUEBA 1 (traza unica): su verificacion de trazabilidad
+esta en los pasos 10 y 12. Mantener dos pruebas que creaban el mismo ticket
+solo servia para que se fueran separando con el tiempo.
+
+Nota: los pasos de la VENTA se lanzan contra el Gateway replicando lo que hace
+el BFF (`POST /api/ventas`), porque el BFF exige la cookie de sesion del
+navegador. Se ejercitan exactamente los mismos endpoints de backend.
 
 Uso:  python pruebas/08_flujo_completo.py
 """
@@ -30,19 +44,11 @@ from datetime import datetime
 import httpx
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from comun import GW, AUTH, RESULTADOS, login, verificar_sistema  # noqa: E402
+from comun import GW, RESULTADOS, login, verificar_sistema  # noqa: E402
 
-# Los 8 servicios que la prueba debe ejercitar, con su contenedor.
-SERVICIOS = {
-    "auth-service": "auth-service",
-    "api-gateway": "api-gateway",
-    "ticket-service": "ticket-service",
-    "diagnostico-service": "diagnostico-service",
-    "almacen-service": "almacen-service",
-    "facturacion-service": "facturacion-service",
-    "auditoria-service": "auditoria-service",
-    "notificacion-service": "notificacion-service",
-}
+# Contenedores donde debe verse el correlationId (paso 12, informativo).
+CONTENEDORES_TRAZA = ("api-gateway", "ticket-service", "auditoria-service",
+                      "notificacion-service")
 
 
 def main():
@@ -70,9 +76,9 @@ def main():
     def hdr(token):
         return {**H, "Authorization": f"Bearer {token}"}
 
-    out("=" * 64)
-    out(f" PRUEBA 8: FLUJO COMPLETO tocando los 8 servicios - trace {cid}")
-    out("=" * 64)
+    out("=" * 68)
+    out(f" PRUEBA 8: TODOS LOS FLUJOS, 8 servicios - trace {cid}")
+    out("=" * 68)
 
     # ------------------------------------------------------------------
     paso("0. Autenticacion de los 3 roles (auth-service)")
@@ -81,6 +87,11 @@ def main():
     t_admin = login("admin", "admin123")
     check(all([t_caja, t_tec, t_admin]), "caja01 / tecnico01 / admin autenticados",
           "algun login fallo")
+
+    out()
+    out("#" * 68)
+    out("# FLUJO A - SOPORTE: el equipo entra, se repara y se entrega")
+    out("#" * 68)
 
     # ------------------------------------------------------------------
     paso("1. CAJA registra un ticket SOPORTE (ticket-service -> EN_COLA)")
@@ -115,7 +126,7 @@ def main():
     check(True, "ticket en EN_DIAGNOSTICO (sync de la asignacion)", "")
 
     # ------------------------------------------------------------------
-    paso("3. TECNICO diagnostica y RESERVA un repuesto (diagnostico-service -> almacen-service)")
+    paso("3. TECNICO diagnostica y RESERVA un repuesto (diagnostico -> almacen)")
     # REP-001 existe en PIURA por el seed (tecnico01 es de PIURA).
     stock_antes = _stock(t_admin, "REP-001", "PIURA")
     r = httpx.post(f"{GW}/api/v1/diagnosticos/diagnosticos/", headers=hdr(t_tec), timeout=15.0, json={
@@ -174,45 +185,130 @@ def main():
     check(r.status_code < 400, "ticket ENTREGADO, stock confirmado",
           f"no se pudo entregar: HTTP {r.status_code} {r.text}")
 
+    out()
+    out("#" * 68)
+    out("# FLUJO B - VENTA de mostrador: el cliente compra y se lleva")
+    out("#" * 68)
+
     # ------------------------------------------------------------------
-    paso("7. ADMIN agrega inventario nuevo (almacen-service, emite producto.registrado)")
+    paso("7. ADMIN ingresa un PRODUCTO_VENTA al inventario de PIURA")
     r = httpx.post(f"{GW}/api/v1/almacen/almacen/productos", headers=hdr(t_admin), timeout=15.0, json={
-        "nombre": "Cargador tipo C 100W", "categoria": "REPUESTO", "sede": "PIURA",
-        "stock_inicial": 30, "precio_unitario": 110.0,
+        "nombre": "Mochila para laptop 15", "categoria": "PRODUCTO_VENTA", "sede": "PIURA",
+        "stock_inicial": 12, "precio_unitario": 95.0,
     })
     inventario_ok = r.status_code < 400
-    check(inventario_ok, f"producto {r.json().get('codigo') if inventario_ok else ''} ingresado",
+    cod_venta = r.json().get("codigo") if inventario_ok else None
+    check(inventario_ok, f"producto {cod_venta} ingresado (12 unidades, S/.95.00)",
           f"no se pudo agregar inventario: HTTP {r.status_code} {r.text}")
 
-    out("\n    (esperando propagacion asincrona de eventos por RabbitMQ...)")
-    time.sleep(4)
+    # ------------------------------------------------------------------
+    paso("8. CAJA consulta el catalogo vendible de SU sede (aislamiento por sede)")
+    r = httpx.get(f"{GW}/api/v1/almacen/almacen/productos/venta", headers=hdr(t_caja), timeout=15.0)
+    catalogo = r.json() if r.status_code < 400 else []
+    sedes = {p["sede"] for p in catalogo}
+    categorias = {p["categoria"] for p in catalogo}
+    check(r.status_code < 400 and len(catalogo) > 0,
+          f"catalogo con {len(catalogo)} producto(s) vendible(s)",
+          f"no se pudo leer el catalogo: HTTP {r.status_code}")
+    check(sedes <= {"PIURA"},
+          "solo devuelve productos de PIURA (la sede sale del token, no de un parametro)",
+          f"FUGA ENTRE SEDES: el catalogo trae {sedes}")
+    check(categorias <= {"PRODUCTO_VENTA"},
+          "solo devuelve PRODUCTO_VENTA (los repuestos no se venden en mostrador)",
+          f"el catalogo trae categorias que no son vendibles: {categorias}")
+    check(any(p["codigo"] == cod_venta for p in catalogo),
+          f"el producto recien ingresado ({cod_venta}) ya aparece a la venta",
+          f"{cod_venta} no aparece en el catalogo de venta")
 
     # ------------------------------------------------------------------
-    paso("8. ADMIN consulta la auditoria (auditoria-service)")
+    paso("9. CAJA vende 2 unidades (almacen descuenta + facturacion cobra)")
+    stock_v_antes = _stock(t_admin, cod_venta, "PIURA")
+    # Replica de lo que hace el BFF /api/ventas: descuento atomico y luego cobro.
+    r = httpx.post(f"{GW}/api/v1/almacen/almacen/venta", headers=hdr(t_caja), timeout=15.0, json={
+        "lineas": [{"codigo_producto": cod_venta, "cantidad": 2}],
+    })
+    venta_stock_ok = r.status_code < 400
+    stock_v_despues = _stock(t_admin, cod_venta, "PIURA")
+    check(venta_stock_ok and stock_v_antes is not None and stock_v_despues == stock_v_antes - 2,
+          f"stock descontado ({cod_venta}: {stock_v_antes} -> {stock_v_despues})",
+          f"el descuento de la venta fallo: HTTP {r.status_code} {r.text}")
+
+    id_venta = f"VENTA-PIU-{int(time.time())}"
+    r = httpx.post(f"{GW}/api/v1/facturas/facturas/", headers=hdr(t_caja), timeout=15.0, json={
+        "idTicket": id_venta, "sede": "PIURA", "montoManoObra": 0.0, "montoRepuestos": 0.0,
+        "metodoPago": "TARJETA", "tipoOperacion": "VENTA", "documentoCliente": "20601234567",
+        "lineas": [{"codigo_producto": cod_venta, "descripcion": "Mochila para laptop 15",
+                    "cantidad": 2, "precio_unitario": 95.0}],
+    })
+    venta_fac_ok = r.status_code < 400
+    cuerpo = r.json() if venta_fac_ok else {}
+    check(venta_fac_ok and cuerpo.get("montoTotal") == 190.0,
+          f"comprobante {cuerpo.get('idFactura')} por S/.{cuerpo.get('montoTotal')} (2 x 95.00)",
+          f"no se pudo cobrar la venta: HTTP {r.status_code} {r.text}")
+    check(venta_fac_ok and not cuerpo.get("idGarantia"),
+          "la VENTA no emite garantia (solo SOPORTE la genera)",
+          f"una VENTA genero garantia {cuerpo.get('idGarantia')}, no deberia")
+
+    out()
+    out("#" * 68)
+    out("# VERIFICACION TRANSVERSAL")
+    out("#" * 68)
+
+    out("\n    (esperando propagacion asincrona de eventos por RabbitMQ...)")
+    time.sleep(5)
+
+    # ------------------------------------------------------------------
+    paso("10. Auditoria: los eventos del flujo quedaron registrados (auditoria-service)")
     r = httpx.get(f"{GW}/api/v1/auditoria/auditoria/eventos", headers=hdr(t_admin), timeout=15.0)
     eventos_flujo = [e for e in r.json() if e.get("trace_id") == cid] if r.status_code < 400 else []
+    tipos = sorted({e.get("evento") for e in eventos_flujo})
     check(len(eventos_flujo) >= 1, f"auditoria tiene {len(eventos_flujo)} evento(s) de este flujo",
           "auditoria no registro eventos de este flujo")
+    for t in tipos:
+        out(f"        - {t}")
 
     # ------------------------------------------------------------------
-    paso("9. TECNICO consulta sus notificaciones (notificacion-service)")
+    paso("11. Notificaciones: al TECNICO la suya, al ADMIN TODAS (notificacion-service)")
     r = httpx.get(f"{GW}/api/v1/notificaciones/notificaciones/mis-alertas", headers=hdr(t_tec), timeout=15.0)
     tiene_alerta = r.status_code < 400 and any(n.get("referencia") == tk for n in r.json())
     check(tiene_alerta, f"el tecnico ve la alerta del ticket {tk}",
           "el tecnico no recibio la notificacion del ticket")
 
+    r = httpx.get(f"{GW}/api/v1/notificaciones/notificaciones/mis-alertas", headers=hdr(t_admin), timeout=15.0)
+    alertas_admin = r.json() if r.status_code < 400 else []
+    eventos_admin = sorted({n.get("evento") for n in alertas_admin})
+    # El ADMIN supervisa la operacion: debe ver el ciclo entero, no solo lo suyo.
+    esperados = {"TicketCreado.v1", "FacturaGenerada.v1", "ProductoRegistrado.v1"}
+    vistos = esperados & set(eventos_admin)
+    check(vistos == esperados,
+          f"el ADMIN ve {len(eventos_admin)} tipo(s) de evento, incluidos {sorted(esperados)}",
+          f"al ADMIN le faltan eventos: {sorted(esperados - vistos)}")
+    for e in eventos_admin:
+        out(f"        - {e}")
+
     # ------------------------------------------------------------------
-    paso("COBERTURA: los 8 servicios hicieron su trabajo en este flujo?")
+    paso("12. Trazabilidad: el mismo correlationId en los logs estructurados")
+    out("    (informativo: no hace fallar la prueba — depende del log driver de")
+    out("     Docker. La evidencia DURA de trazabilidad es el paso 10, donde el")
+    out("     trace_id esta persistido en la auditoria, no solo escrito en un log.)")
+    for contenedor in CONTENEDORES_TRAZA:
+        n = _contar_en_logs(contenedor, cid)
+        out(f"        {contenedor:22s} {n} linea(s) con correlationId={cid}")
+
+    # ------------------------------------------------------------------
+    paso("13. COBERTURA: los 8 servicios hicieron su trabajo en este flujo?")
     evidencias = {
         "auth-service":         (bool(t_caja and t_tec and t_admin), "emitio los 3 tokens"),
-        "api-gateway":          (bool(tk), "enruto todo el flujo (sin el, nada habria respondido)"),
-        "ticket-service":       (bool(tk), f"creo y movio el ticket {tk}"),
-        "diagnostico-service":  (diag_ok, "registro el diagnostico y la asignacion"),
-        "almacen-service":      (stock_despues == (stock_antes - 1) if stock_antes is not None else False,
-                                 f"reservo el repuesto (stock {stock_antes} -> {stock_despues})"),
-        "facturacion-service":  (fac_ok, "emitio la factura y la garantia"),
+        "api-gateway":          (bool(tk), "enruto los dos flujos (sin el, nada habria respondido)"),
+        "ticket-service":       (bool(tk), f"creo y movio el ticket {tk} hasta ENTREGADO"),
+        "diagnostico-service":  (diag_ok, "registro la asignacion y el diagnostico"),
+        "almacen-service":      (bool(inventario_ok and venta_stock_ok),
+                                 f"reservo repuesto ({stock_antes}->{stock_despues}), ingreso {cod_venta} y vendio 2"),
+        "facturacion-service":  (bool(fac_ok and venta_fac_ok),
+                                 "cobro el SOPORTE (con garantia) y la VENTA (sin garantia)"),
         "auditoria-service":    (len(eventos_flujo) >= 1, f"registro {len(eventos_flujo)} evento(s) del flujo"),
-        "notificacion-service": (tiene_alerta, "entrego la alerta al tecnico"),
+        "notificacion-service": (bool(tiene_alerta and vistos == esperados),
+                                 "alerto al tecnico y dio al ADMIN la vista completa"),
     }
     _verificar_cobertura(evidencias, out, fallos)
 
@@ -232,6 +328,23 @@ def _stock(token, codigo, sede):
     return None
 
 
+def _contar_en_logs(contenedor, cid):
+    """Cuantas lineas de log del contenedor llevan este correlationId.
+
+    encoding utf-8 explicito: en Windows `text=True` decodifica con cp1252 por
+    defecto y peta con UnicodeDecodeError si el log trae algun caracter raro.
+    """
+    try:
+        r = subprocess.run(
+            ["docker", "logs", contenedor, "--since", "120s"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=20,
+        )
+        return ((r.stdout or "") + (r.stderr or "")).count(f'"correlationId": "{cid}"')
+    except Exception:
+        return 0
+
+
 def _verificar_cobertura(evidencias, out, fallos):
     """Confirma que CADA servicio hizo su trabajo en este flujo.
 
@@ -249,14 +362,14 @@ def _verificar_cobertura(evidencias, out, fallos):
 
 def _finalizar(salida, fallos):
     salida.append("")
-    salida.append("=" * 64)
+    salida.append("=" * 68)
     if fallos:
         salida.append(f" RESULTADO: {len(fallos)} FALLO(S)")
         for f in fallos:
             salida.append(f"   - {f}")
     else:
-        salida.append(" RESULTADO: OK - el flujo completo recorrio los 8 servicios.")
-    salida.append("=" * 64)
+        salida.append(" RESULTADO: OK - SOPORTE y VENTA completos sobre los 8 servicios.")
+    salida.append("=" * 68)
     print("\n".join(salida[-(len(fallos) + 4):]))
 
     marca = datetime.now().strftime("%Y%m%d_%H%M%S")

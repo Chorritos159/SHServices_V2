@@ -68,16 +68,23 @@ async def listar_productos_venta(request: Request, db: Annotated[Session, Depend
         return productos
 
 
-def _siguiente_codigo(db: Session) -> str:
-    """Genera el siguiente codigo secuencial REP-NNN mirando el maximo existente."""
-    codigos = db.query(ProductoDB.codigo).filter(ProductoDB.codigo.like("REP-%")).all()
+def _siguiente_codigo(db: Session, categoria: str) -> str:
+    """Siguiente codigo secuencial, con el prefijo que corresponde a la categoria.
+
+    `REP-` para repuestos y `PRD-` para productos de venta, cada uno con su
+    propia secuencia. Antes todo nacia como `REP-`, asi que un artículo de
+    mostrador terminaba llamandose `REP-321` y en el catalogo de venta parecia
+    un repuesto: el codigo dejaba de decir la verdad sobre lo que es.
+    """
+    prefijo = "PRD" if categoria.upper() == "PRODUCTO_VENTA" else "REP"
+    codigos = db.query(ProductoDB.codigo).filter(ProductoDB.codigo.like(f"{prefijo}-%")).all()
     numeros = []
     for (c,) in codigos:
         sufijo = c.split("-")[-1]
         if sufijo.isdigit():
             numeros.append(int(sufijo))
     siguiente = (max(numeros) + 1) if numeros else 1
-    return f"REP-{siguiente:03d}"
+    return f"{prefijo}-{siguiente:03d}"
 
 
 @router.post("/productos", response_model=ProductoResponse, status_code=201, tags=["Inventario"])
@@ -91,7 +98,7 @@ async def crear_producto(
     correlation_id = _trazar(request)
 
     with logger.operacion("crear_producto", event="ProductoRegistrado.v1") as op:
-        codigo = _siguiente_codigo(db)
+        codigo = _siguiente_codigo(db, producto.categoria)
         nuevo_producto = ProductoDB(
             codigo=codigo,
             nombre=producto.nombre,

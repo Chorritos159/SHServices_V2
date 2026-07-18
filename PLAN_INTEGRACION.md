@@ -196,7 +196,7 @@ Dos huecos que la Fase 7 deja al descubierto:
    pero hay que verificar servicio por servicio que **toda** operación
    (incluidos health checks, consumidores y publicadores) emite log
    estructurado — no solo las rutas principales.
-2. **Pruebas:** hoy `01_traza_unica.py` toca 4 servicios y las de carga
+2. **Pruebas:** hoy `08_flujo_completo.py` toca los 8 servicios y las de carga
    solo golpean `tickets`. **Ninguna prueba ejercita los 8.** Un servicio
    sin tráfico en las pruebas es un servicio cuyo comportamiento bajo
    presión y ante fallas nadie verificó.

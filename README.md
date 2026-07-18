@@ -277,12 +277,12 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 
 | # | Comando | Qué prueba | Duración |
 | :-- | :-- | :-- | :-- |
-| 1 | `python pruebas/01_traza_unica.py` | Una operación completa trazada de inicio a fin: auditoría + notificaciones + logs estructurados de 4 contenedores con UN correlationId | ~10 s |
+| 1 | *(absorbida)* | La antigua "traza única" es ahora parte de la prueba 8 (pasos 10 y 12). Se fusionaron para no mantener dos pruebas que creaban el mismo ticket y acababan divergiendo | — |
 | 2 | `python pruebas/02_carga_780.py` | 780 peticiones a la vez con límites normales: rate limit (429) y bulkhead (503) rechazando de forma controlada | ~5 s |
 | 3 | `python pruebas/03_carga_100k.py` | Nivel **100k**: 6 nodos x bloques de 40, ventana de 10 min | 10 min |
 | 4 | `python pruebas/04_carga_500k.py` | Nivel **500k**: 10 nodos x bloques de 80, ventana de 15 min | 15 min |
 | 5 | `python pruebas/05_carga_1M.py` | Nivel **1M**: 15 nodos x bloques de 120, ventana de 15 min | 15 min |
-| 6 | `python pruebas/06_caos.py` | 5 fichas de falla controlada: servicio caído, latencia, cola saturada (bulkhead+shed), rate limit, evento duplicado | ~1 min |
+| 6 | `python pruebas/06_caos.py` | 6 fichas de falla controlada: servicio caído, latencia, cola saturada (bulkhead+shed), rate limit, evento duplicado y **degradación funcional** (cae ticket-service y la VENTA se completa igual) | ~1.5 min |
 | 7 | `python pruebas/07_breaker_todos.py` | El circuit breaker abre para **los 6 servicios**: tumba cada uno, exige 503 (no 500) y circuito OPEN, y verifica la recuperación automática | ~3 min |
 | 8 | `python pruebas/08_flujo_completo.py` | El flujo de negocio **completo tocando los 8 servicios**: caja registra → técnico toma/diagnostica (reserva stock real) → caja cobra/entrega → admin agrega inventario → consultas de auditoría y notificaciones. Verifica que los 8 recibieron tráfico | ~15 s |
 | 9 | `python pruebas/09_asignaciones.py` | **Asignación exclusiva de tickets** y su resiliencia: un técnico toma un ticket (queda solo para él), otro recibe 409, "Mis Tickets" y la vista de admin, y con **ticket-service pausado** "Mis Tickets" sigue funcionando. Incluye el diagnóstico duplicado → 409 legible | ~20 s |
@@ -575,7 +575,7 @@ que el usuario note nada.
   automáticamente, no se arma a mano). Circuit breaker state en vivo,
   throughput/latencia/error rate, bulkhead, rate limit, queue depth y
   consumer lag de RabbitMQ.
-- **Traza única de un ticket**: `python pruebas/01_traza_unica.py` — crea
+- **Traza única de un ticket**: `python pruebas/08_flujo_completo.py` — crea
   un ticket con un `correlationId` conocido y confirma que aparece en
   auditoría, notificaciones y los logs de los 4 contenedores del flujo.
 

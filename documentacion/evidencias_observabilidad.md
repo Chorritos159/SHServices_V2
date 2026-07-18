@@ -9,7 +9,7 @@
 | Evidencia | Mínimo esperado | Estado | Dónde se ve |
 | :-- | :-- | :-- | :-- |
 | Logs estructurados | JSON o formato consistente | ✅ | JSON, un evento por línea, en los 9 servicios (`app/core/logger.py`). Dozzle (`:9999`) en vivo o Grafana→Loki |
-| CorrelationId | presente en todo el flujo | ✅ | `correlationId` en cada línea; el Gateway lo genera/propaga y viaja hasta RabbitMQ (`message.correlation_id`) y la BD de auditoría. Prueba: `python pruebas/01_traza_unica.py` |
+| CorrelationId | presente en todo el flujo | ✅ | `correlationId` en cada línea; el Gateway lo genera/propaga y viaja hasta RabbitMQ (`message.correlation_id`) y la BD de auditoría. Prueba: `python pruebas/08_flujo_completo.py` (pasos 10 y 12) |
 | Métricas | requests, errores, latencia | ✅ | `/metrics` de Gateway, ticket, auditoría y notificaciones → Prometheus (`:9090`) |
 | Trazas | relación entre servicios | ✅ | El `correlationId` es la traza: una operación se reconstruye completa uniendo los logs de los 4 servicios que tocó + la tabla `auditoria_eventos`. Ver §4 |
 | Dashboard | salud, latencia y errores | ✅ | Grafana (`:3000`) → *SHServices — Resiliencia (S34)*, 20 paneles en 7 filas |
@@ -95,7 +95,7 @@ Cliente → Gateway (genera X-Correlation-ID)
         → auditoria-service + notificacion-service (lo persisten como trace_id)
 ```
 
-`python pruebas/01_traza_unica.py` lo demuestra de punta a punta: crea un
+`python pruebas/08_flujo_completo.py` lo demuestra de punta a punta: crea un
 ticket con un correlationId conocido y confirma que aparece en auditoría,
 en notificaciones y en los logs de los 4 contenedores del flujo.
 

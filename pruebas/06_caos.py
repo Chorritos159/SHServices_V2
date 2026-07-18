@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""PRUEBA 6 (Fase 5, S34): CAOS — 5 fichas de falla controlada.
+"""PRUEBA 6 (Fase 5, S34): CAOS — 6 fichas de falla controlada.
   A. Servicio caído (docker stop almacen-service) -> circuit breaker OPEN
      -> fail-fast -> recuperación automática al volver.
   B. Latencia inyectada (Toxiproxy en tickets) -> timeout (504) -> circuito
@@ -8,6 +8,9 @@
   C. Cola saturada (ráfaga concurrente real) -> bulkhead + shedding (503).
   D. Backpressure (ráfaga concurrente real) -> rate limit global (429).
   E. Evento duplicado (redelivery simulado) -> idempotencia, no duplica.
+  F. Degradación funcional: cae ticket-service y la VENTA de mostrador se
+     completa igual (stock + comprobante). El negocio no se detiene por un
+     servicio que esa operación no necesita.
 
 Uso:  python pruebas/06_caos.py
 """
@@ -134,8 +137,79 @@ def main():
     else:
         marca(f"idTicket distinto: '{id1}' vs '{id2}'")
 
+    # ---------- FICHA F ----------
+    titulo("FICHA F: DEGRADACIÓN FUNCIONAL — la VENTA sobrevive sin ticket-service")
+    marca("Escenario: cae ticket-service en plena jornada. Una venta de mostrador")
+    marca("NO lo necesita: lo esencial es cobrar y que salga el stock. El ticket es")
+    marca("un registro de conveniencia, así que la venta debe completarse igual.")
+    marca("")
+
+    # Producto vendible de PIURA para la prueba.
+    cat = httpx.get(f"{GW}/api/v1/almacen/almacen/productos/venta",
+                    headers={"Authorization": f"Bearer {token}"}, timeout=15.0)
+    vendible = next((p for p in cat.json() if p["stock_disponible"] >= 2), None) if cat.status_code < 400 else None
+
+    if not vendible:
+        marca("SALTADA: no hay ningún producto con stock >= 2 en la sede del token.")
+    else:
+        codigo, precio = vendible["codigo"], vendible["precio_unitario"]
+        stock_antes = vendible["stock_disponible"]
+        marca(f"Producto elegido: {codigo} ({stock_antes} en stock, S/.{precio})")
+
+        subprocess.run(["docker", "pause", "ticket-service"], capture_output=True)
+        marca("ticket-service PAUSADO (caída dura: acepta la conexión y no responde)")
+        time.sleep(2)
+        try:
+            # 1. El ticket es best-effort: debe fallar y NO detener la venta.
+            try:
+                rt = httpx.post(f"{GW}/api/v1/tickets/tickets/",
+                                headers={"Authorization": f"Bearer {token}"}, timeout=15.0,
+                                json={"datosCliente": "Cliente Venta Degradada",
+                                      "documento_cliente": "20609999999",
+                                      "telefono_cliente": "999111222",
+                                      "tipoOperacion": "VENTA", "prioridad": "MEDIA"})
+                cod_ticket = rt.status_code
+            except httpx.HTTPError:
+                cod_ticket = 0
+            marca(f"1. Alta del ticket -> HTTP {cod_ticket} "
+                  f"({'encolado en el outbox' if cod_ticket == 202 else 'no disponible'}); "
+                  "la venta NO se detiene aquí")
+
+            # 2. El stock SÍ tiene que salir (almacen sigue en pie).
+            rs = httpx.post(f"{GW}/api/v1/almacen/almacen/venta",
+                            headers={"Authorization": f"Bearer {token}"}, timeout=15.0,
+                            json={"lineas": [{"codigo_producto": codigo, "cantidad": 2}]})
+            marca(f"2. Descuento de stock -> HTTP {rs.status_code}")
+
+            # 3. Y el cobro también, con una referencia propia VENTA-*.
+            id_venta = f"VENTA-PIU-CAOS{int(time.time())}"
+            rf = httpx.post(f"{GW}/api/v1/facturas/facturas/",
+                            headers={"Authorization": f"Bearer {token}"}, timeout=15.0,
+                            json={"idTicket": id_venta, "sede": "PIURA",
+                                  "montoManoObra": 0.0, "montoRepuestos": 0.0,
+                                  "metodoPago": "EFECTIVO", "tipoOperacion": "VENTA",
+                                  "documentoCliente": "20609999999",
+                                  "lineas": [{"codigo_producto": codigo,
+                                              "descripcion": vendible["nombre"],
+                                              "cantidad": 2, "precio_unitario": precio}]})
+            total = rf.json().get("montoTotal") if rf.status_code < 400 else None
+            marca(f"3. Cobro -> HTTP {rf.status_code}, comprobante "
+                  f"{rf.json().get('idFactura') if rf.status_code < 400 else '-'} por S/.{total}")
+
+            if rs.status_code < 400 and rf.status_code < 400:
+                marca(f"OK: VENTA COMPLETADA con ticket-service caído "
+                      f"(referencia {id_venta}, sin ticket). El cliente se llevó su")
+                marca("    producto y su comprobante; el negocio no se detuvo.")
+            else:
+                marca("FALLO: la venta no se completó pese a que almacén y facturación estaban vivos")
+        finally:
+            subprocess.run(["docker", "unpause", "ticket-service"], capture_output=True)
+            marca("ticket-service REANUDADO")
+            time.sleep(3)
+
     titulo("Veredicto S26/S34: fallas CONTENIDAS (fail-fast + fallback honesto + "
-           "recuperación automática + backpressure + idempotencia); sin cascada.")
+           "recuperación automática + backpressure + idempotencia + degradación "
+           "funcional); sin cascada.")
 
     marca_archivo = datetime.now().strftime("%Y%m%d_%H%M%S")
     ruta = f"{RESULTADOS}/06_caos_{marca_archivo}.txt"
