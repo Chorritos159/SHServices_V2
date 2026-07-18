@@ -42,32 +42,68 @@ def _guardar(rol_destino: str, mensaje: str, referencia: str, evento: str, trace
         db.close()
 
 
+def _referencia(datos: dict) -> str:
+    """Identificador legible del hecho, sea cual sea el evento."""
+    return (
+        datos.get("idTicket")
+        or datos.get("codigo")
+        or datos.get("idFactura")
+        or datos.get("idDiagnostico")
+        or "-"
+    )
+
+
+def _resumen_admin(routing_key: str, datos: dict) -> str:
+    """Frase para la bandeja del ADMIN, que ve TODO lo que pasa en el sistema."""
+    ref = _referencia(datos)
+    sede = datos.get("sede")
+    sufijo = f" ({sede})" if sede else ""
+
+    textos = {
+        "producto.registrado": f"Nuevo producto en inventario: {ref} {datos.get('nombre', '')}".strip(),
+        "ticket.creado": f"Ticket registrado: {ref} [{datos.get('estado', '?')}]",
+        "ticket.tomado": f"Un tecnico tomo el ticket {ref}",
+        "ticket.diagnosticado": f"Diagnostico registrado para {ref}",
+        "ticket.listo": f"Equipo listo para cobro y entrega: {ref}",
+        "ticket.facturado": f"Cobro emitido: {ref} por S/.{datos.get('montoTotal', '?')}",
+        "ticket.entregado": f"Equipo entregado al cliente: {ref}",
+        "ticket.rechazado": f"Presupuesto rechazado: {ref}",
+    }
+    return textos.get(routing_key, f"Evento {routing_key}: {ref}") + sufijo
+
+
 def _enrutar(routing_key: str, payload: dict):
-    """
-    Reglas de enrutamiento por evento -> rol:
-      - ProductoRegistrado (producto.registrado) -> ADMIN
-      - TicketCreado en EN_COLA (ticket.creado)  -> TECNICO
-      - TicketListo / DIAGNOSTICADO (ticket.listo) -> CAJA
+    """Enrutamiento evento -> rol.
+
+    Dos capas:
+
+    1. **El rol que tiene que ACTUAR** recibe la alerta accionable (el técnico
+       cuando entra un equipo, Caja cuando hay algo que cobrar).
+    2. **ADMIN recibe SIEMPRE todo.** Es quien supervisa la operación de las
+       dos sedes: si solo viera "producto registrado" tendría un panel ciego
+       para el resto del negocio. Como el índice único es
+       `(trace_id, evento, rol_destino)`, la copia para ADMIN convive con la
+       del rol accionable sin chocar, y un redelivery de RabbitMQ sigue sin
+       duplicar nada.
     """
     evento = payload.get("evento", "")
     datos = payload.get("datos") or {}
     trace_id = payload.get("trace_id")
+    ref = _referencia(datos)
 
-    if routing_key == "producto.registrado":
-        codigo = datos.get("codigo", "?")
-        nombre = datos.get("nombre", "")
-        _guardar("ADMIN", f"Nuevo producto registrado: {codigo} {nombre}".strip(), codigo, evento, trace_id)
-
-    elif routing_key == "ticket.creado":
-        # Solo los tickets EN_COLA (SOPORTE) requieren a un técnico.
+    # 1. Alerta accionable para el rol que debe hacer algo.
+    if routing_key == "ticket.creado":
+        # Solo los tickets EN_COLA (SOPORTE) requieren a un técnico. Una VENTA
+        # nace en VENTA_REGISTRADA y no tiene nada que hacer un técnico con ella.
         if datos.get("estado") == "EN_COLA":
-            id_ticket = datos.get("idTicket", "?")
-            _guardar("TECNICO", f"Nuevo equipo en cola: {id_ticket}", id_ticket, evento, trace_id)
+            _guardar("TECNICO", f"Nuevo equipo en cola: {ref}", ref, evento, trace_id)
 
     elif routing_key == "ticket.listo":
         # El equipo ya fue diagnosticado: Recepción puede cobrar y entregar.
-        id_ticket = datos.get("idTicket", "?")
-        _guardar("CAJA", f"Equipo listo para cobro y entrega: {id_ticket}", id_ticket, evento, trace_id)
+        _guardar("CAJA", f"Equipo listo para cobro y entrega: {ref}", ref, evento, trace_id)
+
+    # 2. Copia de supervisión para ADMIN, pase lo que pase.
+    _guardar("ADMIN", _resumen_admin(routing_key, datos), ref, evento, trace_id)
 
 
 async def iniciar_consumidor():
@@ -81,10 +117,11 @@ async def iniciar_consumidor():
                     "tickets.eventos", aio_pika.ExchangeType.TOPIC, durable=True
                 )
                 queue = await channel.declare_queue("notificaciones_queue", durable=True)
-                # Escucha los eventos de interés.
-                await queue.bind(exchange, routing_key="ticket.creado")
-                await queue.bind(exchange, routing_key="ticket.listo")
-                await queue.bind(exchange, routing_key="producto.registrado")
+                # Comodines y no una lista fija de claves: el ADMIN tiene que
+                # ver TODO lo que pasa, así que cualquier evento nuevo que se
+                # publique mañana entra solo, sin tocar este binding.
+                await queue.bind(exchange, routing_key="ticket.*")
+                await queue.bind(exchange, routing_key="producto.*")
 
                 logger.info("Servicio de Notificaciones conectado y escuchando eventos...")
 

@@ -32,3 +32,23 @@ class ReservaRequest(BaseModel):
     codigo_producto: str
     cantidad: int = Field(..., gt=0)
     sede: str
+
+
+class LineaVenta(BaseModel):
+    """Una línea del carrito de una venta de mostrador."""
+    codigo_producto: str
+    cantidad: int = Field(..., gt=0)
+
+
+class VentaRequest(BaseModel):
+    """Carrito completo de una venta directa.
+
+    Va como UNA sola petición —y no una por línea— para que el descuento sea
+    atómico: o salen todos los productos o no sale ninguno. Si se hiciera línea
+    por línea y la tercera fallara por stock, las dos primeras ya habrían salido
+    del inventario y habría que compensarlas desde fuera, que es justo el tipo
+    de descuadre que un almacén no perdona.
+
+    La `sede` NO viaja en el cuerpo: se toma del token de quien vende.
+    """
+    lineas: list[LineaVenta] = Field(..., min_length=1)

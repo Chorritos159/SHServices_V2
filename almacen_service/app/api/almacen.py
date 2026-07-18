@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.orm import Session
-from app.models.schemas import ProductoCreate, ProductoResponse, ReservaRequest, ProductoInventario
+from app.models.schemas import (
+    ProductoCreate, ProductoResponse, ReservaRequest, ProductoInventario, VentaRequest,
+)
 from app.models.inventario import ProductoDB
 from app.core.database import get_db
 from app.core.logger import get_logger, NO_ENCONTRADO, RECHAZADO
@@ -25,6 +27,43 @@ async def listar_productos(request: Request, db: Session = Depends(get_db)):
         productos = db.query(ProductoDB).order_by(ProductoDB.sede, ProductoDB.codigo).all()
         op.campos["totalProductos"] = len(productos)
         op.mensaje = f"Listado de inventario entregado: {len(productos)} producto(s)."
+        return productos
+
+
+@router.get("/productos/venta", response_model=list[ProductoInventario], tags=["Inventario"])
+async def listar_productos_venta(request: Request, db: Session = Depends(get_db)):
+    """Catálogo vendible para el POS de Caja: lo que ESTA sede puede vender hoy.
+
+    Se diferencia de `GET /productos` (que devuelve todo el inventario, para el
+    Admin) en tres cosas, y las tres son a propósito:
+
+    - **La sede sale del token**, no de un parámetro. Si viniera por query, una
+      cajera de PIURA podría pedir el catálogo de TALARA cambiando la URL y
+      vender stock que no tiene delante. Es el mismo criterio que ya usa
+      diagnostico-service al reservar repuestos.
+    - Solo `PRODUCTO_VENTA`: los `REPUESTO` se consumen dentro de una
+      reparación (van por reserva), no se venden sueltos en mostrador.
+    - Solo con stock: no tiene sentido ofrecer lo que no se puede entregar.
+    """
+    _trazar(request)
+    sede = request.headers.get("x-user-sede", "").upper()
+    if not sede:
+        raise HTTPException(
+            status_code=401,
+            detail="Tu token no trae la sede. Vuelve a iniciar sesion.",
+        )
+
+    with logger.operacion("listar_productos_venta", sede=sede) as op:
+        productos = (
+            db.query(ProductoDB)
+            .filter(ProductoDB.sede == sede)
+            .filter(ProductoDB.categoria == "PRODUCTO_VENTA")
+            .filter(ProductoDB.stock_disponible > 0)
+            .order_by(ProductoDB.nombre)
+            .all()
+        )
+        op.campos["totalProductos"] = len(productos)
+        op.mensaje = f"Catalogo de venta de {sede}: {len(productos)} producto(s) con stock."
         return productos
 
 
@@ -219,9 +258,10 @@ async def liberar_stock(mov: ReservaRequest, request: Request, db: Session = Dep
 
 @router.post("/descontar", tags=["Operaciones de Stock"])
 async def descontar_stock(mov: ReservaRequest, request: Request, db: Session = Depends(get_db)):
-    """VENTA DIRECTA: descuenta de golpe de `disponible` (el cliente paga y se lleva ahora).
+    """VENTA DIRECTA de UNA línea: descuenta de golpe de `disponible`.
 
-    No pasa por reserva.
+    No pasa por reserva. Para una venta de mostrador con varias líneas usa
+    `POST /venta`, que las descuenta todas en una sola transacción.
     """
     _trazar(request)
     with logger.operacion(
@@ -246,3 +286,70 @@ async def descontar_stock(mov: ReservaRequest, request: Request, db: Session = D
         op.mensaje = (f"Venta directa: descontadas {mov.cantidad}x {item.codigo}; "
                       f"disponibles: {item.stock_disponible}.")
         return _estado_stock("STOCK_DESCONTADO", item)
+
+
+@router.post("/venta", tags=["Operaciones de Stock"])
+async def descontar_venta(venta: VentaRequest, request: Request, db: Session = Depends(get_db)):
+    """VENTA DE MOSTRADOR: descuenta TODAS las líneas del carrito, o ninguna.
+
+    Es el endpoint que usa el POS de Caja. Frente a llamar N veces a
+    `/descontar`, aquí el descuento es **atómico**: se bloquean las N filas,
+    se valida el stock de todas y solo entonces se hace UN commit. Si la
+    tercera línea no tiene stock, las dos primeras no llegaron a salir del
+    inventario y no hay nada que compensar desde fuera.
+
+    La `sede` sale del token (`X-User-Sede`), nunca del cuerpo: quien vende
+    solo puede mover el stock que tiene físicamente delante.
+    """
+    _trazar(request)
+    sede = request.headers.get("x-user-sede", "").upper()
+    if not sede:
+        raise HTTPException(
+            status_code=401,
+            detail="Tu token no trae la sede. Vuelve a iniciar sesion.",
+        )
+
+    with logger.operacion(
+        "descontar_venta", sede=sede, lineas=len(venta.lineas),
+    ) as op:
+        # 1. Bloquear y validar TODAS antes de tocar nada. Se ordenan por código
+        #    para que dos ventas concurrentes tomen los locks en el mismo orden
+        #    y no se abracen (deadlock).
+        items: list[tuple[ProductoDB, int]] = []
+        for linea in sorted(venta.lineas, key=lambda x: x.codigo_producto):
+            item = _buscar_bloqueado(db, linea.codigo_producto, sede)
+            if item.categoria != "PRODUCTO_VENTA":
+                op.result = RECHAZADO
+                op.mensaje = f"Venta rechazada: {item.codigo} es {item.categoria}, no es vendible en mostrador."
+                raise HTTPException(
+                    status_code=409,
+                    detail=(f"'{item.nombre}' es un {item.categoria.lower()} y no se vende "
+                            "suelto en mostrador; se consume dentro de una reparacion."),
+                )
+            if item.stock_disponible < linea.cantidad:
+                op.result = RECHAZADO
+                op.campos["stockDisponible"] = item.stock_disponible
+                op.mensaje = (f"Venta rechazada por stock insuficiente de {item.codigo}: "
+                              f"pedidas {linea.cantidad}, disponibles {item.stock_disponible}.")
+                raise HTTPException(
+                    status_code=409,
+                    detail=(f"Stock insuficiente de '{item.nombre}' en {sede}: se pidieron "
+                            f"{linea.cantidad} y hay {item.stock_disponible} disponible(s)."),
+                )
+            items.append((item, linea.cantidad))
+
+        # 2. Ninguna falló: ahora sí se descuentan todas y se confirma una vez.
+        for item, cantidad in items:
+            item.stock_disponible -= cantidad
+        db.commit()
+
+        detalle = [
+            {"codigo": item.codigo, "producto": item.nombre, "vendidas": cantidad,
+             "stock_disponible": item.stock_disponible}
+            for item, cantidad in items
+        ]
+        unidades = sum(c for _, c in items)
+        op.campos.update({"unidades": unidades, "productos": len(items)})
+        op.mensaje = (f"Venta de mostrador en {sede}: {unidades} unidad(es) de "
+                      f"{len(items)} producto(s) descontadas del inventario.")
+        return {"status": "STOCK_DESCONTADO", "sede": sede, "lineas": detalle}

@@ -4,17 +4,25 @@ import { useState } from "react";
 import { api } from "@/lib/api/client";
 import { Boton, Campo, Feedback, Select, esEncolado, extraerError, type Estado } from "@/components/ui/FormControls";
 import ReciboModal, { type ReciboData } from "@/components/print/ReciboModal";
+import CarritoVenta, { type LineaCarrito } from "@/components/CarritoVenta";
 
 /**
- * Registro de tickets (rol CAJA) — estilo Help Desk.
- * Datos del cliente y del equipo en secciones. En SOPORTE, al registrar con
- * éxito se abre el "Ticket de Recojo" imprimible.
+ * Registro de tickets y ventas (rol CAJA) — estilo Help Desk.
+ *
+ * Dos flujos distintos según el tipo de operación:
+ *
+ * - **SOPORTE:** se registra el ticket del equipo y sale el "Ticket de Recojo"
+ *   imprimible. El cobro llega después, cuando el técnico diagnostica.
+ * - **VENTA:** es mostrador puro. Se arma un carrito con los productos de SU
+ *   sede y se cobra en el acto (`POST /api/ventas`), que descuenta stock y
+ *   emite el comprobante. No genera garantía (eso es solo de SOPORTE).
  */
 export default function TicketForm() {
   const [estado, setEstado] = useState<Estado>({ tipo: "idle" });
   const [cargando, setCargando] = useState(false);
   const [tipoOperacion, setTipoOperacion] = useState("SOPORTE");
   const [recibo, setRecibo] = useState<ReciboData | null>(null);
+  const [lineas, setLineas] = useState<LineaCarrito[]>([]);
   const esSoporte = tipoOperacion === "SOPORTE";
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -31,16 +39,57 @@ export default function TicketForm() {
     const serie = String(fd.get("numero_serie") ?? "");
     const falla = String(fd.get("caracteristicas_falla") ?? "");
 
+    // ── VENTA de mostrador: carrito + cobro en un solo paso ──────────────
+    if (!esSoporte) {
+      if (lineas.length === 0) {
+        setEstado({ tipo: "error", mensaje: "Agrega al menos un producto a la venta." });
+        setCargando(false);
+        return;
+      }
+      try {
+        const { data, status } = await api.post("/ventas", {
+          datosCliente,
+          documento_cliente: documento,
+          telefono_cliente: telefono,
+          prioridad: String(fd.get("prioridad")),
+          metodoPago: String(fd.get("metodoPago") ?? "EFECTIVO"),
+          lineas,
+        });
+
+        // 202: el stock ya salió y el cobro quedó encolado (facturación caída).
+        if (status === 202 || data?.encolado) {
+          setEstado({ tipo: "encolado", mensaje: data.mensaje });
+        } else {
+          const total = Number(data.montoTotal ?? 0).toFixed(2);
+          setEstado({
+            tipo: "ok",
+            mensaje: data.avisoDegradado
+              ? `Venta ${data.idVenta} cobrada por S/. ${total}. ${data.avisoDegradado}`
+              : `Venta ${data.idVenta} registrada y cobrada por S/. ${total} (comprobante ${data.idFactura}).`,
+          });
+        }
+        form.reset();
+        setLineas([]);
+        setTipoOperacion("SOPORTE");
+      } catch (err) {
+        setEstado({ tipo: "error", mensaje: extraerError(err) });
+      } finally {
+        setCargando(false);
+      }
+      return;
+    }
+
+    // ── SOPORTE: alta del ticket del equipo ──────────────────────────────
     try {
       const { data } = await api.post("/tickets", {
         datosCliente,
         documento_cliente: documento,
         telefono_cliente: telefono,
         tipoOperacion: String(fd.get("tipoOperacion")),
-        equipo: esSoporte ? equipo : null,
-        numero_serie: esSoporte ? serie || null : null,
-        caracteristicas_falla: esSoporte ? falla : null,
-        precio_estimado: esSoporte ? Number(fd.get("precio_estimado") || 0) : null,
+        equipo,
+        numero_serie: serie || null,
+        caracteristicas_falla: falla,
+        precio_estimado: Number(fd.get("precio_estimado") || 0),
         prioridad: String(fd.get("prioridad")),
       });
 
@@ -57,22 +106,18 @@ export default function TicketForm() {
         return;
       }
 
-      if (esSoporte) {
-        // Abrimos el Ticket de Recojo imprimible con los datos capturados.
-        setRecibo({
-          idTicket: data.idTicket,
-          fecha: data.fechaRegistro ?? new Date().toISOString(),
-          cliente: datosCliente,
-          documento,
-          telefono,
-          equipo,
-          serie,
-          falla,
-        });
-        setEstado({ tipo: "idle" });
-      } else {
-        setEstado({ tipo: "ok", mensaje: `✅ Venta ${data.idTicket} registrada (${data.estadoInicial}).` });
-      }
+      // Abrimos el Ticket de Recojo imprimible con los datos capturados.
+      setRecibo({
+        idTicket: data.idTicket,
+        fecha: data.fechaRegistro ?? new Date().toISOString(),
+        cliente: datosCliente,
+        documento,
+        telefono,
+        equipo,
+        serie,
+        falla,
+      });
+      setEstado({ tipo: "idle" });
       form.reset();
       setTipoOperacion("SOPORTE");
     } catch (err) {
@@ -140,7 +185,22 @@ export default function TicketForm() {
           </fieldset>
         )}
 
-        <Boton cargando={cargando}>Registrar ticket</Boton>
+        {/* Sección: carrito y cobro (solo VENTA) */}
+        {!esSoporte && (
+          <>
+            <CarritoVenta lineas={lineas} onCambio={setLineas} />
+            <Select
+              name="metodoPago"
+              label="Método de pago"
+              options={["EFECTIVO", "TARJETA", "YAPE"]}
+              defaultValue="EFECTIVO"
+            />
+          </>
+        )}
+
+        <Boton cargando={cargando}>
+          {esSoporte ? "Registrar ticket" : "Cobrar venta"}
+        </Boton>
         <Feedback estado={estado} />
       </form>
 
