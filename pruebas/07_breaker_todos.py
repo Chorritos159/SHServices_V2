@@ -13,6 +13,15 @@ con el servicio caido.
 Esta prueba tumba CADA servicio, uno por uno, y exige lo mismo para todos:
 503 (no 500) y circuito en OPEN. Al terminar, restaura todo.
 
+POR QUE NO ESTA `auth` (no es un olvido)
+El Gateway BLOQUEA `/api/v1/auth/*` con un 403 antes de enrutar: el login va
+directo al auth-service (puerto 8003) porque nadie tiene token todavia. Como
+esa ruta nunca se proxya, su circuito no puede ejercitarse desde aqui: no hay
+peticion que hacer fallar. Su entrada en BREAKERS se mantiene a proposito, para
+el dia en que se cierre el 8003 y el login pase por el Gateway (la accion
+recomendada en seguridad/OWASP_Top10.md, Hallazgo 3); mientras tanto su serie
+en `gateway_circuit_state` se queda en 0 (CLOSED) sin moverse.
+
 Uso:  python pruebas/07_breaker_todos.py
 """
 import os

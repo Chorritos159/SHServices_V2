@@ -203,6 +203,27 @@ def _backoff_jitter(intento: int) -> float:
     return base + random.uniform(0, 1.0)
 
 
+def _explicar_circuito(breaker) -> str:
+    """Frase que dice en qué punto está el circuito y qué pasa a continuación.
+
+    El mensaje anterior era "Circuit breaker: el servicio X esta inaccesible
+    (estado: CLOSED)" y se leía como que el breaker estaba roto: nombra al
+    circuit breaker y a CLOSED junto a "inaccesible", que parecen
+    contradecirse. En realidad CLOSED tras un fallo es lo correcto — el
+    circuito abre al TERCER fallo consecutivo, no al primero.
+
+    Quien lee el log en mitad de un incidente no debería tener que conocer el
+    umbral de memoria para interpretarlo, así que la frase lo lleva dentro.
+    """
+    if breaker.estado == "OPEN":
+        return (f"Circuito OPEN: las siguientes peticiones haran fail-fast "
+                f"durante {breaker.cooldown_seg:.0f}s, sin gastar timeout.")
+    if breaker.estado == "HALF_OPEN":
+        return "Circuito HALF_OPEN: la sonda de recuperacion fallo, vuelve a abrirse."
+    return (f"Circuito CLOSED: fallo {breaker.fallos_consecutivos} de "
+            f"{breaker.umbral_consecutivos} consecutivos para abrir.")
+
+
 def _log_retry(service: str, intento: int, motivo: str, espera: float):
     """Deja constancia de que el mecanismo de RETRY se activo (no solo la metrica).
 
@@ -429,10 +450,14 @@ async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: s
                 metricas.REQUESTS.labels(service=service, outcome="unreachable").inc()
                 metricas.FALLBACKS.labels(service=service).inc()
                 logger.error(
-                    f"Circuit breaker: el servicio '{service}' esta inaccesible (estado: {breaker.estado}).",
+                    f"El servicio '{service}' esta inaccesible. "
+                    f"{_explicar_circuito(breaker)}",
                     extra={"campos": {"operation": "proxy_request", "event": service,
                                        "result": "unreachable", "durationMs": _duracion_ms(),
-                                       "errorType": type(exc).__name__}},
+                                       "errorType": type(exc).__name__,
+                                       "circuito": breaker.estado,
+                                       "fallosConsecutivos": breaker.fallos_consecutivos,
+                                       "umbralApertura": breaker.umbral_consecutivos}},
                 )
                 error_503 = JSONResponse(
                     status_code=503,

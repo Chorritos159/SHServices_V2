@@ -257,3 +257,53 @@ vivo: circuito de `tickets` en `OPEN` tras cortar el proxy con Toxiproxy,
 26 rechazos `shed_baja_prioridad` de una ráfaga concurrente a auditoría,
 16 rechazos de rate limit de una ráfaga de 60 peticiones simultáneas, y
 profundidad real de `auditoria_tickets_queue` / `notificaciones_queue`.
+
+---
+
+## Nota sobre la lectura del circuit breaker en los logs (2026-07-18)
+
+Un log como este se presta a confusión y conviene saber leerlo:
+
+```
+message="El servicio 'tickets' esta inaccesible. Circuito CLOSED: fallo 1 de 3
+         consecutivos para abrir."   errorType="ReadError"
+```
+
+**CLOSED tras un fallo NO es un error.** El circuito abre al **tercer** fallo
+consecutivo (`umbral_consecutivos=3`), no al primero. Si abriera al primero, un
+error puntual de red dejaría al servicio fuera 15 segundos para todo el mundo.
+
+El mensaje anterior decía `Circuit breaker: el servicio 'tickets' esta
+inaccesible (estado: CLOSED)` y se leía como que el breaker estaba roto —
+nombraba al breaker y a CLOSED junto a "inaccesible". Ahora la línea lleva
+dentro el contador y el umbral, para que se interprete sin conocer la
+configuración de memoria.
+
+### Verificado en vivo (2026-07-18), con `docker stop ticket-service`
+
+| Petición | Respuesta | Latencia | Circuito |
+| :-- | :-- | :-- | :-- |
+| 1 | 202 (encolada en outbox) | 86.1 ms | CLOSED (1/3) |
+| 2 | 202 | 86.9 ms | CLOSED (2/3) |
+| 3 | 202 | 86.3 ms | **OPEN** |
+| 4 | 202 | **14.0 ms** | OPEN (fail-fast) |
+| 5 | 202 | 29.1 ms | OPEN (fail-fast) |
+
+La prueba de que el fail-fast es real está en la latencia: de ~86 ms a ~14 ms,
+**6 veces más rápido**, porque a partir de la apertura el Gateway ya ni intenta
+la conexión. Y el 202 constante confirma que ninguna escritura se perdió: todas
+quedaron en el outbox.
+
+Al levantar el servicio, la **sonda activa** (ADR-0014) cerró el circuito sola
+en ~10 s, sin que nadie mandara tráfico.
+
+### Cobertura por servicio
+
+`pruebas/07_breaker_todos.py` tumba los 6 servicios proxyados uno a uno y exige
+para todos lo mismo: 503 (no 500) y circuito OPEN. Resultado: **6/6 OK**.
+
+`auth` no aparece y no es un olvido: el Gateway bloquea `/api/v1/auth/*` con un
+403 y el login va directo al 8003, así que esa ruta no se proxya y su circuito
+no puede ejercitarse. Su serie en `gateway_circuit_state` se queda en 0 (CLOSED)
+de forma permanente. La entrada se mantiene para cuando el login pase por el
+Gateway (Hallazgo 3 de OWASP).
