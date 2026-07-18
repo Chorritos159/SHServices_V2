@@ -1,5 +1,5 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
@@ -9,7 +9,7 @@ from app.models.schemas import FacturaCreate, FacturaResponse
 from app.models.factura import FacturaDB
 from app.models.garantia import GarantiaDB
 from app.core.database import get_db
-from app.core.logger import get_logger, DUPLICADO
+from app.core.logger import get_logger, DUPLICADO, ERROR
 from app.core.rabbitmq import publicar_evento
 
 router = APIRouter()
@@ -120,12 +120,30 @@ async def emitir_comprobante(
         db.add(nueva_factura)
         try:
             db.commit()
-        except IntegrityError:
+        except IntegrityError as exc:
             # Carrera: dos requests concurrentes para el mismo ticket pasaron
             # el chequeo previo antes de que cualquiera hiciera commit. La
             # unicidad de la BD es la garantia real; se resuelve igual.
             db.rollback()
             existente = db.query(FacturaDB).filter(FacturaDB.id_ticket == factura.idTicket).first()
+
+            # `existente` PUEDE ser None y hay que decirlo, no darlo por hecho:
+            # este bloque solo sabe manejar el choque contra la unicidad de
+            # id_ticket, pero un IntegrityError tambien lo lanza cualquier otra
+            # restriccion (un NOT NULL, una FK). En esos casos no hay factura
+            # previa que devolver y el `existente.id` reventaba con
+            # "'NoneType' object has no attribute 'id'" -> 500 opaco.
+            # Aparecio 1 vez en la corrida de auto-recuperacion bajo carga.
+            if existente is None:
+                op.result = ERROR
+                op.mensaje_error = (f"IntegrityError al cobrar el ticket {factura.idTicket} "
+                                    f"que NO es una carrera de idempotencia: {exc.orig}")
+                raise HTTPException(
+                    status_code=409,
+                    detail=("No se pudo registrar el cobro por un conflicto de datos. "
+                            "Revisa que el ticket y los importes sean correctos."),
+                )
+
             op.result = DUPLICADO
             op.campos["idFactura"] = existente.id
             op.mensaje = (f"Carrera de idempotencia resuelta para el ticket {factura.idTicket}; "

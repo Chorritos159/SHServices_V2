@@ -166,3 +166,36 @@ de forma distinta.
 Las pruebas de carga sirvieron para lo que tienen que servir: **encontraron un
 límite que nadie había puesto a propósito**. El sistema no aguantaba menos de
 lo esperado por diseño, sino por un valor por defecto que nadie había mirado.
+
+## Segundo hallazgo: un 500 en la carrera de idempotencia (2026-07-18)
+
+Tras arreglar el pool, la corrida de auto-recuperación bajo carga dejó **un
+último HTTP 500**:
+
+```
+Error no controlado en POST /api/v1/facturas/: 'NoneType' object has no attribute 'id'
+```
+
+En `facturacion_service`, el manejador de la carrera de idempotencia daba por
+hecho que tras un `IntegrityError` **siempre** existe una factura previa:
+
+```python
+except IntegrityError:
+    db.rollback()
+    existente = db.query(FacturaDB).filter(...).first()
+    op.campos["idFactura"] = existente.id      # <- si existente es None, revienta
+```
+
+Pero `IntegrityError` no solo lo lanza el choque contra la unicidad de
+`id_ticket`: también cualquier otra restricción (un `NOT NULL`, una FK). En
+esos casos no hay factura previa que devolver, `existente` es `None` y el
+`.id` explotaba en un 500 opaco — justo en el endpoint del **dinero**.
+
+Corregido: si `existente` es `None` se responde **409 legible** y el motivo
+real (`exc.orig`) queda en el log para quien opera.
+
+**Verificado:** 8 cobros simultáneos del mismo ticket → `[201 × 8]`, cero 500.
+
+Los dos hallazgos comparten patrón: **código que asumía el camino feliz y solo
+falla bajo concurrencia**. Ninguna prueba funcional los habría encontrado; hizo
+falta carga real.

@@ -22,11 +22,23 @@ máquina. Está detrás de `CHAOS_ENABLED` (ver seguridad/OWASP_Top10.md).
 
 Cubre los 5 servicios que exponen el endpoint y tienen circuito propio.
 
+CON CARGA DE FONDO (`--nivel`)
+Medir la recuperación con el sistema en reposo da el MEJOR caso y lo presenta
+como si fuera el habitual: un proceso arranca mucho más rápido en una máquina
+que no está haciendo nada. Con `--nivel` se lanza carga real (igual que la
+prueba 11) y los servicios se curan **mientras atienden tráfico**, que es lo
+que pasaría de verdad. Además se reporta qué sufrió ese tráfico: si matar 5
+procesos produjo o no alguna respuesta fuera de contrato.
+
 Uso:
-    python pruebas/12_autorecuperacion.py              # los 5, uno por uno
+    python pruebas/12_autorecuperacion.py                 # reposo (mejor caso)
+    python pruebas/12_autorecuperacion.py --nivel 500k    # ~6 min, el numero real
+    python pruebas/12_autorecuperacion.py --nivel 1M      # ~8 min
     python pruebas/12_autorecuperacion.py --servicio almacen
 """
 import argparse
+import glob
+import json
 import os
 import subprocess
 import sys
@@ -36,7 +48,9 @@ from datetime import datetime
 import httpx
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-from comun import GW, RESULTADOS, login, metrica_gateway, verificar_sistema  # noqa: E402
+from comun import (GW, LIB, RAIZ, RESULTADOS, ampliar_rate_limit, login,  # noqa: E402
+                   metrica_gateway, restaurar_rate_limit, RUTAS_TODOS_SERVICIOS,
+                   verificar_sistema)
 
 # servicio del Gateway -> (contenedor, puerto publicado para su /health)
 SERVICIOS = {
@@ -45,6 +59,15 @@ SERVICIOS = {
     "diagnosticos": ("diagnostico-service", 8004),
     "facturas": ("facturacion-service", 8005),
     "auditoria": ("auditoria-service", 8006),
+}
+
+# Carga de fondo mientras se mide. `reposo` = sin carga (mejor caso). Las
+# ventanas dan de sobra para los 5 ciclos de crash + recuperacion.
+NIVELES = {
+    "reposo": None,
+    "100k": {"nodos": 4, "bloque": 16, "duracion": 180},
+    "500k": {"nodos": 6, "bloque": 20, "duracion": 300},
+    "1M":   {"nodos": 8, "bloque": 24, "duracion": 420},
 }
 
 LIMITE_ESPERA_S = 120     # si en 2 min no volvió solo, es un fallo
@@ -80,11 +103,15 @@ def circuito_cerrado(servicio):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--servicio", choices=list(SERVICIOS), help="Solo uno (por defecto: los 5)")
+    ap.add_argument("--nivel", choices=list(NIVELES), default="reposo",
+                    help="Carga de fondo mientras se mide (por defecto: reposo, sin carga)")
     args = ap.parse_args()
     objetivo = {args.servicio: SERVICIOS[args.servicio]} if args.servicio else SERVICIOS
+    cfg = NIVELES[args.nivel]
 
     verificar_sistema()
     salida, fallos, filas = [], [], []
+    proceso_carga = None
 
     def out(linea=""):
         print(linea, flush=True)
@@ -94,11 +121,39 @@ def main():
     cabeceras = {"Authorization": f"Bearer {token}"}
 
     out("=" * 72)
-    out(" PRUEBA 12: AUTO-RECUPERACION — cuanto tarda el sistema en curarse solo")
+    out(f" PRUEBA 12: AUTO-RECUPERACION — cuanto tarda en curarse solo [{args.nivel}]")
     out("=" * 72)
     out("Se mata el PROCESO (os._exit(1)) y NO se vuelve a tocar nada.")
     out("Docker revive el contenedor; la sonda del breaker cierra el circuito.")
     out("")
+
+    marca = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nombre_carga = f"12_autorec_carga_{args.nivel}"
+
+    if cfg:
+        # Con trafico encima el numero es OTRO, y es el que vale: arrancar un
+        # proceso mientras 6 nodos le piden cosas no es lo mismo que arrancarlo
+        # en una maquina en reposo. Medir solo en reposo da el mejor caso y lo
+        # presenta como si fuera el habitual.
+        out(f"Carga de fondo: {cfg['nodos']} nodos x bloques de {cfg['bloque']} "
+            f"durante {cfg['duracion']}s.")
+        out("El sistema se esta curando MIENTRAS atiende trafico real.")
+        out("")
+        ampliar_rate_limit()
+        proceso_carga = subprocess.Popen(
+            [sys.executable, os.path.join(LIB, "carga_nodos.py"),
+             "--nodos", str(cfg["nodos"]), "--bloque", str(cfg["bloque"]),
+             "--duracion-seg", str(cfg["duracion"]),
+             "--rutas", RUTAS_TODOS_SERVICIOS, "--objetivo", args.nivel,
+             "--usuario", "admin", "--password", "admin123",
+             "--nombre", nombre_carga, "--salida", RESULTADOS, "--mixto", "1"],
+            cwd=RAIZ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        out("Calentando 15s antes del primer crash...")
+        time.sleep(15)
+    else:
+        out("Sin carga de fondo (mejor caso). Usa --nivel 500k para el numero real.")
+        out("")
 
     for servicio, (contenedor, puerto) in objetivo.items():
         out(f"\n--- {servicio}  ({contenedor}) ---")
@@ -157,8 +212,46 @@ def main():
         time.sleep(6)
 
     # ------------------------------------------------------------------
+    # Cerrar la carga de fondo y ver qué sufrió el tráfico mientras el sistema
+    # se curaba solo.
+    resumen_carga = None
+    if proceso_carga is not None:
+        out("\n[fin de los crashes] Esperando a que la carga cierre su ventana...")
+        try:
+            proceso_carga.wait(timeout=cfg["duracion"] + 120)
+        except subprocess.TimeoutExpired:
+            proceso_carga.terminate()
+        restaurar_rate_limit()
+
+        reportes = sorted(glob.glob(os.path.join(RESULTADOS, f"{nombre_carga}_*.json")))
+        if reportes:
+            with open(reportes[-1], encoding="utf-8") as f:
+                rep = json.load(f)
+            codigos = {int(k): v for k, v in rep["codigos"].items() if k.isdigit()}
+            total_req = rep["enviadas"]
+            ok = sum(v for k, v in codigos.items() if k < 400)
+            s500 = codigos.get(500, 0)
+            resumen_carga = (rep, total_req, ok, s500)
+
+            out("\n" + "=" * 72)
+            out(" QUE SUFRIO EL TRAFICO MIENTRAS EL SISTEMA SE CURABA")
+            out("=" * 72)
+            out(f"  peticiones enviadas .......... {total_req}")
+            out(f"  throughput ................... {rep['throughput_rps']} rps")
+            out(f"  atendidas con exito .......... {ok}  ({ok/total_req*100:.1f}%)")
+            out(f"  ERRORES OPACOS (500) ......... {s500}")
+            out(f"  latencia p95 / p99 ........... {rep['latencia_ms']['p95']} / "
+                f"{rep['latencia_ms']['p99']} ms")
+            out(f"  codigos ...................... {rep['codigos']}")
+            if s500 > 0:
+                fallos.append(f"hubo {s500} respuestas 500 durante los crashes")
+                out("\n  FALLO: aparecieron errores 500 (la falla no quedo contenida)")
+            else:
+                out("\n  OK: cero errores 500 — matar 5 procesos con trafico encima no")
+                out("      produjo ni una respuesta fuera de contrato")
+
     out("\n" + "=" * 72)
-    out(" TIEMPOS DE AUTO-RECUPERACION")
+    out(f" TIEMPOS DE AUTO-RECUPERACION [{args.nivel}]")
     out("=" * 72)
     out(f"  {'servicio':<16} {'docker':>9} {'health':>9} {'circuito':>10} {'total':>9}")
     out(f"  {'-'*16} {'-'*9:>9} {'-'*9:>9} {'-'*10:>10} {'-'*9:>9}")
@@ -176,6 +269,15 @@ def main():
         out("  se cae de madrugada y nadie lo mira. Es el dato que sostiene el")
         out("  objetivo de disponibilidad de documentacion/sla.md — sin el, ese")
         out("  99% seria una cifra inventada.")
+        if args.nivel == "reposo":
+            out("")
+            out("  OJO: medido en REPOSO, o sea el MEJOR caso. Con trafico encima el")
+            out("  arranque compite por CPU y el numero sube. Corre --nivel 500k para")
+            out("  el dato defendible.")
+        else:
+            out("")
+            out(f"  Medido BAJO CARGA ({args.nivel}): el servicio arranco compitiendo por")
+            out("  CPU con el trafico real. Este es el numero que vale, no el de reposo.")
 
     out("\n" + "=" * 72)
     if fallos:
@@ -187,8 +289,7 @@ def main():
         out("            sin que nadie ejecutara ni un comando.")
     out("=" * 72)
 
-    marca = datetime.now().strftime("%Y%m%d_%H%M%S")
-    ruta = f"{RESULTADOS}/12_autorecuperacion_{marca}.txt"
+    ruta = f"{RESULTADOS}/12_autorecuperacion_{args.nivel}_{marca}.txt"
     with open(ruta, "w", encoding="utf-8") as f:
         f.write("\n".join(salida) + "\n")
     print(f"Reporte guardado en: {ruta}")

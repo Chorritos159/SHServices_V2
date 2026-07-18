@@ -234,3 +234,34 @@ El desglose importa más que el total:
 `documentacion/sla.md`.** Sin él, ese 99% sería una cifra inventada: con
 ~6 s por caída, harían falta unas 87 caídas al mes para agotar el presupuesto
 de error del nivel alto.
+
+### Ficha H bis — el mismo número, pero bajo carga
+
+`python pruebas/12_autorecuperacion.py --nivel 500k`
+
+Medir la recuperación con el sistema **en reposo** da el mejor caso y lo
+presenta como si fuera el habitual: un proceso arranca mucho más rápido en una
+máquina que no está haciendo nada. Con `--nivel` el sistema se cura **mientras
+atiende tráfico real**, que es lo que pasaría de verdad.
+
+**La diferencia no es pequeña** (medido 2026-07-18, nivel 100k):
+
+| | En reposo | Bajo carga | |
+| :-- | --: | --: | :-- |
+| Docker revive el contenedor | 0.1 s | 0.1 s | igual (no depende de la carga) |
+| `/health` responde | 1.1 s | 2.0 s | el arranque compite por CPU |
+| Circuito vuelve a CLOSED | 0.3 s | **11.5 s** | la sonda espera el cooldown de 15 s |
+| **Total** | **6.1 s** | **19.0 s** | **3× más** |
+
+El tramo que se dispara es el del circuito, y tiene explicación: en reposo casi
+no había tráfico, así que el circuito apenas llegó a abrirse y cerró en cuanto
+la sonda lo tocó. Bajo carga el circuito **sí abre de verdad** (hay peticiones
+reales fallando) y entonces hay que esperar el cooldown completo antes de que
+la sonda pruebe.
+
+**Los 19 s son el número defendible**, no los 6. Si alguien pregunta cuánto
+tarda el sistema en recuperarse solo, la respuesta honesta es "unos 19 segundos
+con tráfico encima", no el mejor caso de laboratorio.
+
+Con ese dato, agotar el presupuesto de error mensual del nivel alto (99%)
+requeriría unas 23 caídas al mes.
