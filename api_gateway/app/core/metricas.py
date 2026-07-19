@@ -29,7 +29,15 @@ CIRCUIT_STATE = Gauge(
     "gateway_circuit_state",
     "Estado del circuit breaker por servicio (0=CLOSED,1=HALF_OPEN,2=OPEN)",
     ["service"],
-    multiprocess_mode="max",
+    # "mostrecent" y NO "max": el estado del circuito es COMPARTIDO (vive en
+    # Redis, ver ADR-0015), asi que todos los workers coinciden y lo correcto es
+    # publicar el ultimo valor escrito. Con "max" bastaba que UN worker hubiera
+    # anotado 2.0 (OPEN) para que la metrica se quedara clavada en OPEN para
+    # siempre: los workers que no atienden a ese servicio nunca reescriben su
+    # fichero, asi que el maximo jamas baja. Se detecto en Grafana, que mostraba
+    # 'almacen' en OPEN mientras los logs decian "la sonda respondio OK" y el
+    # servicio atendia con normalidad.
+    multiprocess_mode="mostrecent",
 )
 
 # Aperturas acumuladas del circuito (cuantas veces se abrio).
