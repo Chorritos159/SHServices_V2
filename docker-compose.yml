@@ -140,12 +140,20 @@ services:
     restart: always
     # 8 workers (para alto rendimiento en i9): el circuit breaker y sus métricas
     # se sincronizan en Redis para evitar inconsistencias ("parpadeo").
-    command: >
-      gunicorn app.main:app
-      --workers 8
-      --worker-class uvicorn.workers.UvicornWorker
-      --bind 0.0.0.0:80
-      --timeout 30
+    # Se limpia el directorio de metricas ANTES de arrancar: si quedaran los
+    # ficheros de un contenedor anterior, los contadores empezarian con valores
+    # heredados de procesos muertos. Hacerlo aqui y no en el codigo Python es
+    # deliberado: app/main.py lo importa cada worker, y limpiar ahi hacia que
+    # cada uno borrase lo que los demas ya habian escrito.
+    # FORMA DE LISTA a proposito. Con `command: >` y comillas anidadas, Compose
+    # partia mal los argumentos y gunicorn arrancaba con TODOS sus valores por
+    # defecto (127.0.0.1:8000, worker sync, 1 worker) ignorando las banderas:
+    # el Gateway quedaba inalcanzable y "unhealthy". La forma de lista pasa
+    # cada argumento tal cual, sin que nadie lo reinterprete.
+    command:
+      - sh
+      - -c
+      - rm -f /tmp/prometheus/*.db 2>/dev/null; exec gunicorn app.main:app --workers 8 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:80 --timeout 30
     environment:
       # Debe ser idéntica en auth-service y api-gateway o los tokens no validan.
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env}
@@ -155,6 +163,11 @@ services:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       # Redis compartido para el circuit breaker:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # Prometheus en modo MULTIPROCESO: con 8 workers, cada proceso tenia su
+      # propio registro y /metrics devolvia solo el del worker que contestaba,
+      # asi que los contadores subestimaban (medido: 30 enviadas, 21 leidas).
+      # Con este directorio compartido, las muestras se agregan al scrapear.
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
       # Rate limit del Gateway (Fase 5, S34): se amplía temporalmente en las
       # pruebas de carga 500k/1M para medir el throughput real del backend.
       # `docker compose up -d api-gateway` no pasa el default si la var no
@@ -168,6 +181,10 @@ services:
       # crudo (atender todas). Defaults = producción (timeout normal, breaker ON).
       TIMEOUT_FACTOR: ${TIMEOUT_FACTOR:-1}
       CIRCUIT_BREAKER_DISABLED: ${CIRCUIT_BREAKER_DISABLED:-}
+    tmpfs:
+      # En RAM: son archivos de metricas efimeros, se regeneran en cada
+      # arranque y no deben persistir entre contenedores.
+      - /tmp/prometheus
     ports:
       - "8000:80"        # <-- ÚNICO mapeo al host
     networks:

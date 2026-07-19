@@ -3,6 +3,24 @@
 Se registran en el registry por defecto de prometheus_client, el mismo que el
 Instrumentator ya publica en /metrics — asi Prometheus las scrapea sin cambios
 de configuracion y Grafana puede graficar circuit state, retries y fallbacks.
+
+MODO MULTIPROCESO
+El Gateway corre con 8 workers de Gunicorn (ADR-0015) y cada proceso tenia su
+PROPIO registro en memoria: /metrics devolvia el del worker que contestara el
+scrape, asi que los contadores subestimaban. Medido: 30 peticiones enviadas,
+21 reportadas.
+
+Con `PROMETHEUS_MULTIPROC_DIR` (lo fija docker-compose.yml), prometheus_client
+escribe las muestras en archivos compartidos y las agrega al hacer el scrape.
+
+Los CONTADORES se suman solos. Los GAUGES necesitan decir COMO agregarse,
+porque sumar el estado de un circuito no significaria nada:
+  - CIRCUIT_STATE  -> "max": si CUALQUIER worker lo ve OPEN, el circuito esta
+                      OPEN. Es lo conservador y lo correcto: basta con que un
+                      proceso este haciendo fail-fast para que el circuito lo
+                      este.
+  - BULKHEAD_IN_FLIGHT -> "livesum": las llamadas en vuelo SI se suman entre
+                      los workers vivos; es el total real de trabajo en curso.
 """
 from prometheus_client import Counter, Gauge
 
@@ -11,6 +29,7 @@ CIRCUIT_STATE = Gauge(
     "gateway_circuit_state",
     "Estado del circuit breaker por servicio (0=CLOSED,1=HALF_OPEN,2=OPEN)",
     ["service"],
+    multiprocess_mode="max",
 )
 
 # Aperturas acumuladas del circuito (cuantas veces se abrio).
@@ -55,6 +74,7 @@ BULKHEAD_IN_FLIGHT = Gauge(
     "gateway_bulkhead_in_flight",
     "Llamadas en vuelo hacia cada servicio (cupo del bulkhead)",
     ["service"],
+    multiprocess_mode="livesum",
 )
 
 # Rechazos del bulkhead, separando saturación real de shedding preventivo.

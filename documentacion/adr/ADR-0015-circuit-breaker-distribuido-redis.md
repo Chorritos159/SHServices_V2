@@ -43,7 +43,7 @@ Además, las consultas de listados pesados (como `GET /tickets/`) sin límite de
         con `socket_timeout=2.0` y el fallback en memoria, pero deja de ser una
         operación de nanosegundos.
 
-## Lo que Redis NO arregló: los CONTADORES de Prometheus
+## Los CONTADORES de Prometheus (detectado y CORREGIDO el 2026-07-18)
 
 Redis comparte el **estado** del breaker (abierto/cerrado), y eso resolvió el
 parpadeo. Pero los **contadores** de Prometheus siguen viviendo en la memoria
@@ -67,10 +67,32 @@ Esta ADR afirmaba *"consistencia absoluta del estado del Circuit Breaker en
 Grafana"*. Es cierto para el **estado** (viene de Redis) y **falso para los
 contadores**.
 
-**Solución conocida:** el modo *multiprocess* de `prometheus_client`
-(`PROMETHEUS_MULTIPROC_DIR`), que agrega los registros de todos los workers
-en un directorio compartido. Es un cambio acotado y está registrado como
-brecha; no se aplicó por estar fuera del alcance de esta entrega.
+**Corregido** activando el modo *multiprocess* de `prometheus_client`: los 8
+workers escriben sus muestras en `/tmp/prometheus` (un `tmpfs`, porque son
+datos efímeros) y el scrape las **agrega**. Los dos *gauges* declaran cómo
+combinarse, porque sumarlos no significaría nada:
+
+| Gauge | Modo | Por qué |
+| :-- | :-- | :-- |
+| `gateway_circuit_state` | `max` | Si CUALQUIER worker lo ve OPEN, el circuito está OPEN. Basta con que un proceso haga fail-fast para que lo esté |
+| `gateway_bulkhead_in_flight` | `livesum` | Las llamadas en vuelo SÍ se suman: es el total real de trabajo en curso |
+
+**Verificado:** 30 peticiones enviadas → **30 contadas**, estable entre
+scrapes, con los 8 procesos escribiendo. Antes: 21 de 30.
+
+### Dos errores que costaron una iteración cada uno
+
+**Limpiar el directorio desde el código de la app.** `app/main.py` lo importa
+CADA worker, así que cada uno borraba los ficheros que los demás ya habían
+escrito y los contadores quedaban a cero. Una variable de entorno como guarda
+tampoco sirve: cada proceso tiene su propia copia. La limpieza va en el
+`command` del contenedor, **antes** de arrancar gunicorn.
+
+**Usar `command: >` con comillas anidadas.** Compose partía mal los argumentos
+y gunicorn arrancaba con **todos sus valores por defecto** (`127.0.0.1:8000`,
+worker `sync`, 1 worker), ignorando las banderas: el Gateway quedaba
+inalcanzable y `unhealthy`. Se pasó a la forma de lista, que entrega cada
+argumento tal cual.
 
 ## Corrección de una afirmación anterior (2026-07-18)
 

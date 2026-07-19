@@ -54,6 +54,24 @@ app.include_router(health.router)
 
 # Observabilidad: expone /metrics para Prometheus (endpoint público, fuera del candado JWT
 # porque el catch-all protegido vive bajo /api/v1/, no en la raíz).
+#
+# MODO MULTIPROCESO: con 8 workers de Gunicorn (ADR-0015) cada proceso tenía su
+# propio registro en memoria y /metrics devolvía SOLO el del worker que
+# contestara el scrape — los contadores subestimaban (medido: 30 peticiones
+# enviadas, 21 reportadas). `prometheus_fastapi_instrumentator` lo resuelve
+# solo cuando existe PROMETHEUS_MULTIPROC_DIR: los workers escriben sus
+# muestras en archivos de ese directorio y el scrape las AGREGA.
+#
+# El directorio se limpia en el `command` del contenedor, ANTES de arrancar
+# gunicorn — NO aquí. Hacerlo en este módulo fue un error que costó una
+# iteración: este archivo lo importa CADA worker, así que cada uno borraba los
+# ficheros que los otros ya habían escrito y los contadores quedaban a cero.
+# Una variable de entorno como guarda tampoco sirve: cada proceso tiene su
+# propia copia y ninguno ve la del vecino.
+_DIR_MULTIPROC = os.getenv("PROMETHEUS_MULTIPROC_DIR")
+if _DIR_MULTIPROC:
+    os.makedirs(_DIR_MULTIPROC, exist_ok=True)
+
 Instrumentator().instrument(app).expose(app)
 
 # 2. Mapa de Microservicios para Docker
