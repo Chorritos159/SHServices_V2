@@ -200,15 +200,15 @@ def demo3(token):
 
 
 def demo4(token):
-    titulo(4, "AUTO-HEALING DE PROCESO — muere un worker y vuelve solo",
-           "ninguno: almacen no esta en el panel de CPU (solo salen los "
-           "servicios instrumentados). La evidencia son los logs de abajo.")
+    print("\n" + "=" * 72)
+    print(" DEMO 4: AUTO-HEALING DE PROCESO — muere un worker y vuelve solo")
+    print("=" * 72)
     print(" Servicio comprometido: ALMACEN (se mata 1 de sus 4 workers)\n")
-    print("  OJO, se honesto en la exposicion: esto NO tumba el contenedor.")
-    print("  Estos servicios corren con `uvicorn --workers 4`. Se mata el worker")
-    print("  que atiende la peticion; el maestro lo respawnea en ~1s y los otros")
-    print("  3 siguen sirviendo, asi que el servicio nunca deja de responder.")
-    print("  Eso es auto-healing a nivel de PROCESO, y es real.\n")
+    print("  Cada servicio corre con `uvicorn --workers 4`: un proceso maestro")
+    print("  supervisa a 4 workers. Aqui se mata de verdad (os._exit) el worker")
+    print("  que atiende la peticion, y se observa que el maestro lo respawnea")
+    print("  en ~1s mientras los otros 3 siguen sirviendo: auto-healing a nivel")
+    print("  de proceso, sin que el servicio deje de responder.\n")
 
     codigo, _ = pedir("http://localhost:8002/_chaos/crash", "POST", timeout=8)
     print(f"  crash provocado ........... HTTP {codigo}")
