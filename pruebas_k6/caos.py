@@ -11,18 +11,40 @@ el runner de Python, que topa en ~105 rps y era él mismo el cuello de botella.
 Esta usa k6, que sostiene ~200 rps sobre este sistema, así que el caos ocurre
 bajo carga de verdad.
 
-CÓMO SE MATA CADA SERVICIO
-Con `POST /_chaos/crash`, que ejecuta `os._exit(1)` dentro del proceso — una
-caída REAL. No se usa `docker stop` porque Docker lo interpreta como una parada
-ordenada y **no dispara `restart: always`**: el servicio no volvería solo, y
-justamente lo que se quiere demostrar es que vuelve sin que nadie haga nada.
+CÓMO SE TUMBA CADA SERVICIO: TOXIPROXY
+El Gateway no habla directo con estos servicios, sino a través de Toxiproxy
+(ver `toxiproxy/toxiproxy.json` y el mapa MICROSERVICIOS del Gateway). Para
+tumbar uno se DESHABILITA su proxy por la API de control (:8474): el Gateway
+deja de poder conectar al instante, igual que si el servicio hubiera muerto,
+pero sin tocar contenedores. Eso lo hace reversible, inmediato y repetible —
+que es justo lo que se quiere de una prueba de caos.
+
+Se descartaron las otras vías, midiendo:
+
+  - `POST /_chaos/crash` mata UN worker de los 4 (`uvicorn --workers 4`), el
+    maestro lo respawnea y los otros 3 siguen atendiendo: el servicio nunca cae
+    y el circuito ni se entera. Se comprobó: `/health` seguía dando 200.
+  - `docker stop` sí tumba el servicio, pero tarda segundos en parar y en
+    volver, y deja al contenedor fuera de su ciclo normal.
+  - Matar el PID 1 desde dentro no funciona: `os.kill(1, SIGKILL)` devuelve 0
+    pero el contenedor sigue con `RestartCount=0`, porque el kernel descarta
+    las señales al PID 1 dentro de su propio namespace.
+  - `docker kill` desde fuera tampoco revive: Docker lo trata como parada
+    pedida por el usuario y NO aplica `restart: always` (quedó `Exited (137)`).
+
+SÉ HONESTO EN LA SUSTENTACIÓN con qué se recupera solo y qué no:
+  - La CONECTIVIDAD la restaura esta prueba (rehabilita el proxy), igual que en
+    la vida real la restauraría el equipo de infra al arreglar la caída.
+  - El CIRCUITO sí vuelve a CLOSED por sí mismo, por la sonda activa
+    (ADR-0014), sin que nadie lo toque: eso es lo que se cronometra abajo, y es
+    la propiedad que se está demostrando.
 
 LO QUE SE MIDE
   1. CONTENCIÓN   — la caída produce 503 con contrato, nunca 500 opacos, y no
                     arrastra a los servicios sanos (sin cascada).
   2. CONTINUIDAD  — el resto del sistema sigue atendiendo durante la caída.
-  3. RECUPERACIÓN — el servicio vuelve SOLO (restart:always) y su circuito se
-                    cierra SOLO (sonda activa, ADR-0014).
+  3. RECUPERACIÓN — restaurada la conectividad, el circuito se cierra SOLO por
+                    la sonda activa (ADR-0014), sin intervención.
 
 Uso:
     python pruebas_k6/caos.py --fase 100k
@@ -54,13 +76,12 @@ from correr import FASES, Muestreador, red_docker  # noqa: E402
 sys.path.insert(0, os.path.join(RAIZ, "pruebas", "lib"))
 from comun import ampliar_rate_limit, restaurar_rate_limit  # noqa: E402
 
-# servicio del Gateway -> (contenedor, puerto publicado para su /_chaos/crash)
+# servicio del Gateway -> (proxy de Toxiproxy, puerto publicado para /health)
 SERVICIOS = {
-    "almacen": ("almacen-service", 8002),
-    "tickets": ("ticket-service", 8001),
-    "diagnosticos": ("diagnostico-service", 8004),
-    "facturas": ("facturacion-service", 8005),
-    "auditoria": ("auditoria-service", 8006),
+    "almacen": ("almacen_proxy", 8002),
+    "tickets": ("ticket_proxy", 8001),
+    "diagnosticos": ("diagnostico_proxy", 8004),
+    "facturas": ("factura_proxy", 8005),
 }
 NOMBRES_ESTADO = {"0": "CLOSED", "1": "HALF_OPEN", "2": "OPEN"}
 
@@ -80,19 +101,30 @@ def circuitos() -> dict:
     return estados
 
 
-def matar(puerto) -> bool:
-    """Provoca un crash REAL del proceso (os._exit(1))."""
+TOXIPROXY_API = "http://localhost:8474"
+
+
+def _proxy(nombre, habilitado) -> bool:
+    """Habilita/deshabilita un proxy. Deshabilitado = el Gateway no conecta."""
+    import urllib.request
+    cuerpo = json.dumps({"enabled": habilitado}).encode()
+    pet = urllib.request.Request(f"{TOXIPROXY_API}/proxies/{nombre}",
+                                 data=cuerpo, method="POST",
+                                 headers={"Content-Type": "application/json"})
     try:
-        import urllib.request
-        urllib.request.urlopen(
-            urllib.request.Request(f"http://localhost:{puerto}/_chaos/crash", method="POST"),
-            timeout=5)
+        urllib.request.urlopen(pet, timeout=5)
         return True
-    except Exception:
-        # El endpoint mata el proceso ~0.5s DESPUES de responder, así que a
-        # veces la conexión se corta antes de leer la respuesta: eso significa
-        # que funcionó, no que fallara.
-        return True
+    except Exception as exc:
+        print(f"  (no se pudo tocar el proxy {nombre}: {exc})")
+        return False
+
+
+def parar(nombre_proxy) -> bool:
+    return _proxy(nombre_proxy, False)
+
+
+def levantar(nombre_proxy) -> bool:
+    return _proxy(nombre_proxy, True)
 
 
 def vivo(puerto) -> bool:
@@ -133,14 +165,16 @@ def main():
     out(f" CAOS BAJO CARGA k6 — fase {args.fase}: {cfg['total']:,} peticiones, {vus} VUs".replace(",", " "))
     out("=" * 72)
     out(f"Se tumbaran, uno a uno y SIN parar el trafico: {', '.join(objetivo)}")
-    out("Cada uno con un crash REAL (os._exit(1)), no `docker stop`: solo asi")
-    out("Docker dispara restart:always y se puede demostrar que vuelve SOLO.")
+    out("Se tumban con TOXIPROXY: se deshabilita su proxy y el Gateway deja de")
+    out("poder conectar al instante, sin tocar contenedores. La conectividad la")
+    out("restaura la prueba; lo que se recupera SOLO es el CIRCUITO, por la")
+    out("sonda activa (ADR-0014).")
     out("")
 
     # La fase tiene que durar MAS que el guion de caos, o k6 termina antes de
     # que caiga el primer servicio y la prueba no mide nada. A ~200 rps:
     #   guion = 45s de calentamiento + por servicio (10s + recuperacion + 20s)
-    segundos_guion = 45 + len(objetivo) * 60
+    segundos_guion = 45 + len(objetivo) * 90
     segundos_fase = cfg["total"] / 200          # estimacion a 200 rps
     if segundos_fase < segundos_guion:
         out(f"AVISO: la fase '{args.fase}' dura ~{segundos_fase/60:.1f} min a 200 rps,")
@@ -179,10 +213,10 @@ def main():
         apuntar("carga estable, antes del caos")
 
         for servicio in objetivo:
-            contenedor, puerto = SERVICIOS[servicio]
-            out(f"\n--- CRASH de {contenedor} (servicio '{servicio}') ---")
-            matar(puerto)
-            apuntar(f"crash de {servicio}")
+            proxy, puerto = SERVICIOS[servicio]
+            out(f"\n--- CAIDA de {contenedor} (servicio '{servicio}') ---")
+            parar(contenedor)
+            apuntar(f"cae {servicio}")
             time.sleep(10)
 
             est = circuitos()
@@ -198,22 +232,28 @@ def main():
             else:
                 out("  OK: ningun otro circuito se contagio")
 
-            # Ahora NO se toca nada: se cronometra cuanto tarda en volver solo.
-            inicio_reco = time.monotonic()
-            while time.monotonic() - inicio_reco < 120 and not vivo(puerto):
-                time.sleep(1)
-            t_vivo = round(time.monotonic() - inicio_reco, 1)
-            out(f"  el proceso volvio SOLO en {t_vivo}s (restart:always)")
+            # 30s fuera: tiempo de sobra para que el circuito abra y se vea la
+            # degradacion con contrato en el trafico que sigue entrando.
+            out("  servicio FUERA; dejandolo caido 30s con el trafico encima...")
+            time.sleep(30)
 
+            out(f"  restaurando la conectividad de '{servicio}'...")
+            inicio_reco = time.monotonic()
+            levantar(proxy)
+            # Con Toxiproxy la conectividad vuelve al instante; no se mide con
+            # /health directo al contenedor porque ese NUNCA cayo (el proxy es
+            # quien cortaba), asi que daria 200 siempre y no probaria nada.
+
+            # ESTO es lo automatico: nadie toca el circuito, se cierra solo.
             while time.monotonic() - inicio_reco < 120 and circuitos().get(servicio) != "CLOSED":
                 time.sleep(1)
             t_circuito = round(time.monotonic() - inicio_reco, 1)
             cerro = circuitos().get(servicio) == "CLOSED"
-            out(f"  su circuito volvio a CLOSED en {t_circuito}s"
-                f"  {'(sonda activa)' if cerro else '— NO se cerro'}")
+            out(f"  su circuito volvio a CLOSED SOLO en {t_circuito}s"
+                f"  {'(sonda activa, ADR-0014)' if cerro else '— NO se cerro'}")
             apuntar(f"{servicio} recuperado")
             if not cerro:
-                fallos.append(f"'{servicio}' no volvio a CLOSED por si solo")
+                fallos.append(f"el circuito de '{servicio}' no volvio a CLOSED por si solo")
 
             out("  dejando estabilizar 20s antes del siguiente...")
             time.sleep(20)
@@ -233,8 +273,9 @@ def main():
         hilo.join(timeout=15)
         restaurar_rate_limit()
         # Cualquier servicio que siguiera caido se levanta, pase lo que pase.
+        # Pase lo que pase, ningun proxy queda deshabilitado.
         for servicio in objetivo:
-            subprocess.run(["docker", "start", SERVICIOS[servicio][0]], capture_output=True)
+            levantar(SERVICIOS[servicio][0])
 
     # ------------------------------------------------------------------
     m = re.search(r"<<<RESUMEN_JSON>>>\s*(\{.*?\})\s*<<<FIN_RESUMEN_JSON>>>",
@@ -285,9 +326,9 @@ def main():
         for f in fallos:
             out(f"   - {f}")
     else:
-        out(" VEREDICTO: OK — con k6 empujando, matar servicios uno a uno")
-        out("            produjo degradacion CON CONTRATO (cero 500), sin")
-        out("            cascada, y cada uno volvio SOLO con su circuito.")
+        out(" VEREDICTO: OK — con k6 empujando, tumbar servicios uno a uno")
+        out("            produjo degradacion CON CONTRATO (cero 500) y sin")
+        out("            cascada; al volver, cada circuito se cerro SOLO.")
     out("=" * 72)
 
     with open(salida_txt, "w", encoding="utf-8") as f:

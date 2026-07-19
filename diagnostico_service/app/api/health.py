@@ -42,22 +42,39 @@ CHAOS_ENABLED = os.getenv("CHAOS_ENABLED", "false").lower() in ("1", "true", "ye
 async def chaos_crash():
     """DEMO de auto-healing (S34): simula un CRASH REAL del servicio.
 
-    A diferencia de `docker stop`/`docker kill`/`docker pause` —que Docker trata
-    como "el usuario pidió parar" y por eso NO disparan `restart: always`—, aquí
-    el propio proceso muere solo con `os._exit(1)` ~0.5s después de responder, y
-    Docker lo revive automáticamente en ~2s.
+    ALCANCE REAL: MATA UN WORKER, NO EL CONTENEDOR. Estos servicios arrancan
+    con `uvicorn --workers 4`, donde el PID 1 es el maestro y los 4 workers son
+    sus hijos. Este `os._exit(1)` mata al worker que atiende esta petición; el
+    maestro lo respawnea en ~1s. Es auto-healing REAL, pero a nivel de PROCESO:
+    el servicio nunca deja de responder, porque los otros 3 workers siguen
+    atendiendo, y por eso el circuito del Gateway ni se entera.
+
+    NO SE PUEDE tumbar el contenedor desde aquí, y se comprobó: `os.kill(1,
+    SIGKILL)` devuelve 0 pero el contenedor sigue con `RestartCount=0`, porque
+    el kernel descarta las señales dirigidas al PID 1 desde dentro de su propio
+    namespace. Tampoco sirve `docker kill` desde fuera: Docker lo trata como
+    parada pedida por el usuario y NO aplica `restart: always` (verificado:
+    quedó en `Exited (137)` sin volver).
+
+    Para demostrar una CAÍDA DE SERVICIO completa —circuito que se abre,
+    degradación con contrato, ausencia de cascada— hay que parar el contenedor
+    desde fuera; eso lo hace `pruebas_k6/caos.py`. Lo que sí se recupera solo
+    allí es el CIRCUITO, que vuelve a CLOSED por la sonda activa (ADR-0014) sin
+    que nadie lo toque.
     """
     if not CHAOS_ENABLED:
         # 404 y no 403: apagado, ni siquiera revelamos que el endpoint existe.
         raise HTTPException(status_code=404, detail="Not Found")
 
     logger.error(
-        "CHAOS: crash provocado por /_chaos/crash; el proceso saldra con os._exit(1).",
+        "CHAOS: crash provocado por /_chaos/crash; muere ESTE worker (os._exit(1)).",
         extra={"campos": {"operation": "chaos_crash", "result": "provocado"}},
     )
+    # Se programa DESPUÉS de responder para que el cliente reciba el aviso.
     asyncio.get_event_loop().call_later(0.5, lambda: os._exit(1))
     return {
         "crashing": True,
         "service": SERVICE_NAME,
-        "mensaje": "El proceso se caera en ~0.5s; restart:always lo revive en unos segundos.",
+        "mensaje": "Este worker muere en ~0.5s; uvicorn lo respawnea en ~1s. "
+                   "El contenedor NO cae: el servicio sigue disponible con los demas workers.",
     }

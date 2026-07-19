@@ -4,5 +4,23 @@
     "listen": "0.0.0.0:8666",
     "upstream": "ticket-service:80",
     "enabled": true
+  },
+  {
+    "name": "almacen_proxy",
+    "listen": "0.0.0.0:8667",
+    "upstream": "almacen-service:80",
+    "enabled": true
+  },
+  {
+    "name": "factura_proxy",
+    "listen": "0.0.0.0:8668",
+    "upstream": "facturacion-service:80",
+    "enabled": true
+  },
+  {
+    "name": "diagnostico_proxy",
+    "listen": "0.0.0.0:8669",
+    "upstream": "diagnostico-service:80",
+    "enabled": true
   }
 ]

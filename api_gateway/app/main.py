@@ -77,10 +77,10 @@ Instrumentator().instrument(app).expose(app)
 # 2. Mapa de Microservicios para Docker
 MICROSERVICIOS = {
     "tickets": "http://toxiproxy:8666",          # <-- vía Toxiproxy (Chaos Engineering)
-    "almacen": "http://almacen-service:80",
+    "almacen": "http://toxiproxy:8667",          # <-- vía Toxiproxy (Chaos Engineering)
     "auth": "http://auth-service:80",
-    "diagnosticos": "http://diagnostico-service:80",
-    "facturas": "http://facturacion-service:80",
+    "diagnosticos": "http://toxiproxy:8669",     # <-- vía Toxiproxy (Chaos Engineering)
+    "facturas": "http://toxiproxy:8668",         # <-- vía Toxiproxy (Chaos Engineering)
     "auditoria": "http://auditoria-service:80",   # <-- lectura de la traza de eventos
     "notificaciones": "http://notificacion-service:80"  # <-- alertas internas por rol
 }

@@ -1,0 +1,47 @@
+========================================================================
+ CAOS BAJO CARGA k6 — fase 100k: 100 000 peticiones  50 VUs
+========================================================================
+Se tumbaran, uno a uno y SIN parar el trafico: almacen
+Se paran con `docker stop`, que es la unica via que deja el servicio
+REALMENTE fuera (ver la cabecera del archivo: las otras se descartaron
+midiendo). El contenedor lo levanta esta prueba; lo que se recupera
+SOLO es el CIRCUITO, por la sonda activa (ADR-0014).
+
+[calentando 45s antes del primer crash]
+
+--- CAIDA de almacen-service (servicio 'almacen') ---
+  circuito de 'almacen': CLOSED  (aun no ha abierto)
+  OK: ningun otro circuito se contagio
+  servicio FUERA; dejandolo caido 30s con el trafico encima...
+  levantando almacen-service (esta parte la hace la prueba)...
+  el servicio responde de nuevo en 0.0s
+  su circuito volvio a CLOSED SOLO en 0.0s  (sonda activa, ADR-0014)
+  dejando estabilizar 20s antes del siguiente...
+
+[fin del guion] Esperando a que k6 termine la fase...
+
+========================================================================
+ QUE SUFRIO EL TRAFICO MIENTRAS CAIAN LOS SERVICIOS
+========================================================================
+  peticiones atendidas ......... 100001
+  p95 / p99 ................... 573 / 815 ms
+  degradadas con contrato ..... 0 (503/504/429)
+  encoladas en el outbox ...... 0
+  ERRORES OPACOS (500) ........ 0
+  CPU pico .................... 513%
+  cola RabbitMQ pico .......... 1581
+
+  OK: CERO errores 500 matando servicios con el trafico encima
+
+========================================================================
+ LINEA DE TIEMPO
+========================================================================
+  t+  45s  carga estable, antes del caos    todos CLOSED
+  t+  45s  cae almacen                      todos CLOSED
+  t+  85s  almacen recuperado               todos CLOSED
+
+========================================================================
+ VEREDICTO: OK — con k6 empujando, tumbar servicios uno a uno
+            produjo degradacion CON CONTRATO (cero 500) y sin
+            cascada; al volver, cada circuito se cerro SOLO.
+========================================================================
