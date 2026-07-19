@@ -22,5 +22,17 @@
     "listen": "0.0.0.0:8669",
     "upstream": "diagnostico-service:80",
     "enabled": true
+  },
+  {
+    "name": "auditoria_proxy",
+    "listen": "0.0.0.0:8670",
+    "upstream": "auditoria-service:80",
+    "enabled": true
+  },
+  {
+    "name": "notificacion_proxy",
+    "listen": "0.0.0.0:8671",
+    "upstream": "notificacion-service:80",
+    "enabled": true
   }
 ]

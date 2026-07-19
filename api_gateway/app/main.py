@@ -81,8 +81,8 @@ MICROSERVICIOS = {
     "auth": "http://auth-service:80",
     "diagnosticos": "http://toxiproxy:8669",     # <-- vía Toxiproxy (Chaos Engineering)
     "facturas": "http://toxiproxy:8668",         # <-- vía Toxiproxy (Chaos Engineering)
-    "auditoria": "http://auditoria-service:80",   # <-- lectura de la traza de eventos
-    "notificaciones": "http://notificacion-service:80"  # <-- alertas internas por rol
+    "auditoria": "http://toxiproxy:8670",         # <-- vía Toxiproxy (Chaos Engineering)
+    "notificaciones": "http://toxiproxy:8671"     # <-- vía Toxiproxy (Chaos Engineering)
 }
 
 # 2.b Política RBAC del Gateway.

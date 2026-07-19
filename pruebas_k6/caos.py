@@ -82,6 +82,8 @@ SERVICIOS = {
     "tickets": ("ticket_proxy", 8001),
     "diagnosticos": ("diagnostico_proxy", 8004),
     "facturas": ("factura_proxy", 8005),
+    "auditoria": ("auditoria_proxy", 8006),
+    "notificaciones": ("notificacion_proxy", 8007),
 }
 NOMBRES_ESTADO = {"0": "CLOSED", "1": "HALF_OPEN", "2": "OPEN"}
 
@@ -141,7 +143,7 @@ def main():
     ap.add_argument("--fase", choices=[f for f in FASES if f != "humo"] + ["humo"],
                     default="100k")
     ap.add_argument("--vus", type=int, help="Sobrescribe la concurrencia")
-    ap.add_argument("--servicios", default="almacen,tickets,facturas",
+    ap.add_argument("--servicios", default="almacen,tickets,facturas,diagnosticos,notificaciones,auditoria",
                     help="Cuales tumbar, separados por coma")
     args = ap.parse_args()
 

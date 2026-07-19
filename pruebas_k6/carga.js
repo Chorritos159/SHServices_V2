@@ -119,40 +119,156 @@ export default function (datos) {
     latencia_lectura.add(res.timings.duration);
     clasificar(res);
     check(res, { "lectura sin 500": (r) => r.status !== 500 });
-  } else if (Math.random() < 0.6) {
-    // Escritura A: crear ticket de VENTA (no engorda la cola del tecnico).
-    const res = http.post(
-      `${GATEWAY}/api/v1/tickets/tickets/`,
-      JSON.stringify({
-        datosCliente: `Cliente k6 ${__VU}-${__ITER}`,
-        documento_cliente: `${10000000 + (__VU * 1000 + __ITER) % 89999999}`,
-        telefono_cliente: "999000111",
-        tipoOperacion: "VENTA",
-        prioridad: "MEDIA",
-      }),
-      cabeceras,
-    );
-    escrituras.add(1);
-    latencia_escritura.add(res.timings.duration);
-    clasificar(res);
-    check(res, { "ticket sin 500": (r) => r.status !== 500 });
   } else {
-    // Escritura B: alta de producto (dispara evento -> auditoria y notificaciones).
-    const res = http.post(
-      `${GATEWAY}/api/v1/almacen/almacen/productos`,
-      JSON.stringify({
-        nombre: `CARGA-k6 ${__VU}-${__ITER}`,
-        categoria: "REPUESTO",
-        sede: SEDE,
-        stock_inicial: 5,
-        precio_unitario: 10.0,
-      }),
-      cabeceras,
-    );
-    escrituras.add(1);
-    latencia_escritura.add(res.timings.duration);
-    clasificar(res);
-    check(res, { "producto sin 500": (r) => r.status !== 500 });
+    const rand = Math.random();
+    if (rand < 0.33) {
+      // Escritura A: crear ticket de VENTA (no engorda la cola del tecnico).
+      const res = http.post(
+        `${GATEWAY}/api/v1/tickets/tickets/`,
+        JSON.stringify({
+          datosCliente: `Cliente k6 ${__VU}-${__ITER}`,
+          documento_cliente: `${10000000 + (__VU * 1000 + __ITER) % 89999999}`,
+          telefono_cliente: "999000111",
+          tipoOperacion: "VENTA",
+          prioridad: "MEDIA",
+        }),
+        cabeceras,
+      );
+      escrituras.add(1);
+      latencia_escritura.add(res.timings.duration);
+      clasificar(res);
+      check(res, { "ticket sin 500": (r) => r.status !== 500 });
+    } else if (rand < 0.66) {
+      // Escritura B: alta de producto (dispara evento -> auditoria y notificaciones).
+      const res = http.post(
+        `${GATEWAY}/api/v1/almacen/almacen/productos`,
+        JSON.stringify({
+          nombre: `CARGA-k6 ${__VU}-${__ITER}`,
+          categoria: "REPUESTO",
+          sede: SEDE,
+          stock_inicial: 5,
+          precio_unitario: 10.0,
+        }),
+        cabeceras,
+      );
+      escrituras.add(1);
+      latencia_escritura.add(res.timings.duration);
+      clasificar(res);
+      check(res, { "producto sin 500": (r) => r.status !== 500 });
+    } else {
+      // Escritura C: Flujo completo de Soporte (conecta todos los servicios y genera todos los datos)
+      // 1. Alta de un repuesto para el diagnóstico
+      const repuestoRes = http.post(
+        `${GATEWAY}/api/v1/almacen/almacen/productos`,
+        JSON.stringify({
+          nombre: `CARGA-k6-Rep-${__VU}-${__ITER}`,
+          categoria: "REPUESTO",
+          sede: SEDE,
+          stock_inicial: 10,
+          precio_unitario: 25.0,
+        }),
+        cabeceras,
+      );
+      escrituras.add(1);
+      latencia_escritura.add(repuestoRes.timings.duration);
+      clasificar(repuestoRes);
+      check(repuestoRes, { "producto k6 sin 500": (r) => r.status !== 500 });
+
+      if (repuestoRes.status === 201) {
+        const repuestoCod = repuestoRes.json("codigo");
+
+        // 2. Crear un ticket de SOPORTE
+        const ticketRes = http.post(
+          `${GATEWAY}/api/v1/tickets/tickets/`,
+          JSON.stringify({
+            datosCliente: `Cliente k6-Soporte ${__VU}-${__ITER}`,
+            documento_cliente: `${10000000 + (__VU * 1000 + __ITER) % 89999999}`,
+            telefono_cliente: "999888777",
+            tipoOperacion: "SOPORTE",
+            prioridad: "ALTA",
+            equipo: "Laptop Gamer K6",
+            numero_serie: `SN-K6-${__VU}-${__ITER}`,
+            caracteristicas_falla: "Pantalla azul recurrente bajo carga",
+          }),
+          cabeceras,
+        );
+        escrituras.add(1);
+        latencia_escritura.add(ticketRes.timings.duration);
+        clasificar(ticketRes);
+        check(ticketRes, { "ticket k6 sin 500": (r) => r.status !== 500 });
+
+        if (ticketRes.status === 201) {
+          const ticketId = ticketRes.json("idTicket");
+
+          // 3. Tomar el ticket (asignación)
+          const tomarRes = http.post(
+            `${GATEWAY}/api/v1/diagnosticos/asignaciones/tomar`,
+            JSON.stringify({
+              id_ticket: ticketId,
+              datos_cliente: `Cliente k6-Soporte ${__VU}-${__ITER}`,
+              equipo: "Laptop Gamer K6",
+              numero_serie: `SN-K6-${__VU}-${__ITER}`,
+              prioridad: "ALTA",
+              tipo_operacion: "SOPORTE",
+            }),
+            cabeceras,
+          );
+          escrituras.add(1);
+          latencia_escritura.add(tomarRes.timings.duration);
+          clasificar(tomarRes);
+          check(tomarRes, { "asignacion k6 sin 500": (r) => r.status !== 500 });
+
+          if (tomarRes.status === 201) {
+            // 4. Registrar diagnóstico
+            const diagnosticoRes = http.post(
+              `${GATEWAY}/api/v1/diagnosticos/diagnosticos/`,
+              JSON.stringify({
+                idTicket: ticketId,
+                fallaDetectada: "Falla de memoria RAM detectada",
+                mano_obra: 50.0,
+                precio_reparacion: 75.0,
+                repuestos: [{
+                  codigo_repuesto: repuestoCod,
+                  descripcion: "Memoria RAM",
+                  cantidad: 1,
+                  precio_unitario: 25.0
+                }],
+              }),
+              cabeceras,
+            );
+            escrituras.add(1);
+            latencia_escritura.add(diagnosticoRes.timings.duration);
+            clasificar(diagnosticoRes);
+            check(diagnosticoRes, { "diagnostico k6 sin 500": (r) => r.status !== 500 });
+
+            if (diagnosticoRes.status === 201) {
+              // 5. Emitir factura y garantía
+              const facturaRes = http.post(
+                `${GATEWAY}/api/v1/facturas/facturas/`,
+                JSON.stringify({
+                  idTicket: ticketId,
+                  sede: SEDE,
+                  montoManoObra: 50.0,
+                  montoRepuestos: 25.0,
+                  metodoPago: "TARJETA",
+                  lineas: [],
+                  tipoOperacion: "SOPORTE",
+                  documentoCliente: `${10000000 + (__VU * 1000 + __ITER) % 89999999}`,
+                  equipo: "Laptop Gamer K6",
+                  numeroSerie: `SN-K6-${__VU}-${__ITER}`,
+                  descripcion: "Falla de memoria RAM detectada",
+                }),
+                cabeceras,
+              );
+              escrituras.add(1);
+              latencia_escritura.add(facturaRes.timings.duration);
+              clasificar(facturaRes);
+              check(facturaRes, { "factura k6 sin 500": (r) => r.status !== 500 });
+            }
+          }
+        }
+      }
+    }
   }
 }
 

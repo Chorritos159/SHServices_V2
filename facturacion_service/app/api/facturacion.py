@@ -111,7 +111,9 @@ async def emitir_comprobante(
             op.campos["idFactura"] = existente.id
             op.mensaje = (f"Factura ya existia para el ticket {factura.idTicket} ({existente.id}); "
                           "se devuelve la existente (idempotencia).")
-            return _respuesta_desde_db(existente, db)
+            resp = _respuesta_desde_db(existente, db)
+            db.close()
+            return resp
 
         # 1. Detalle de lineas (POS): calcula subtotales y su total.
         lineas_out = []
@@ -168,7 +170,9 @@ async def emitir_comprobante(
             op.campos["idFactura"] = existente.id
             op.mensaje = (f"Carrera de idempotencia resuelta para el ticket {factura.idTicket}; "
                           f"se devuelve {existente.id}.")
-            return _respuesta_desde_db(existente, db)
+            resp = _respuesta_desde_db(existente, db)
+            db.close()
+            return resp
 
         db.refresh(nueva_factura)
 
@@ -201,7 +205,7 @@ async def emitir_comprobante(
             mensaje=evento_payload,
         )
 
-        return FacturaResponse(
+        resp = FacturaResponse(
             idFactura=id_factura,
             idTicket=factura.idTicket,
             montoManoObra=factura.montoManoObra,
@@ -214,3 +218,5 @@ async def emitir_comprobante(
             idGarantia=garantia.id if garantia is not None else None,
             garantiaVence=(garantia.fecha_vencimiento.isoformat() + "Z") if garantia is not None else None,
         )
+        db.close()
+        return resp

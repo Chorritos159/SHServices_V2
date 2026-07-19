@@ -45,6 +45,13 @@ class CircuitBreaker:
         self._local_sonda_en_vuelo = False
         self._local_aperturas = 0
 
+        # Al inicializar (o reiniciar el worker/contenedor), limpiamos cualquier
+        # estado sucio de la sonda en vuelo en Redis para evitar quedar atrapados en HALF_OPEN.
+        try:
+            self.sonda_en_vuelo = False
+        except Exception:
+            pass
+
     @property
     def redis_key(self):
         return f"cb:{self.nombre}"

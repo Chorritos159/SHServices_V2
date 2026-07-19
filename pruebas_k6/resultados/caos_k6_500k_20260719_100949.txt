@@ -1,0 +1,35 @@
+========================================================================
+ CAOS BAJO CARGA k6 — fase 500k: 500 000 peticiones  200 VUs
+========================================================================
+Se tumbaran, uno a uno y SIN parar el trafico: almacen, tickets, facturas
+Se tumban con TOXIPROXY: se deshabilita su proxy y el Gateway deja de
+poder conectar al instante, sin tocar contenedores. La conectividad la
+restaura la prueba; lo que se recupera SOLO es el CIRCUITO, por la
+sonda activa (ADR-0014).
+
+[calentando 45s antes del primer crash]
+
+Interrumpido: pidiendo a k6 el resumen parcial...
+
+========================================================================
+ QUE SUFRIO EL TRAFICO MIENTRAS CAIAN LOS SERVICIOS
+========================================================================
+  peticiones atendidas ......... 54
+  p95 / p99 ................... 1171 / 1199 ms
+  degradadas con contrato ..... 0 (503/504/429)
+  encoladas en el outbox ...... 0
+  ERRORES OPACOS (500) ........ 0
+  CPU pico .................... 445%
+  cola RabbitMQ pico .......... 0
+
+  OK: CERO errores 500 matando servicios con el trafico encima
+
+========================================================================
+ LINEA DE TIEMPO
+========================================================================
+
+========================================================================
+ VEREDICTO: OK — con k6 empujando, tumbar servicios uno a uno
+            produjo degradacion CON CONTRATO (cero 500) y sin
+            cascada; al volver, cada circuito se cerro SOLO.
+========================================================================

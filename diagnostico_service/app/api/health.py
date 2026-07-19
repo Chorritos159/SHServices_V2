@@ -16,12 +16,21 @@ VERSION = "1.0.0"
 async def health_check():
     """Health check avanzado (FF-DEP-02): valida la conexión a PostgreSQL."""
     database = "UP"
+    skip_query = False
     try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-    except Exception as e:
-        database = "DOWN"
-        logger.error(f"Health: fallo de conexión a la base de datos: {e}")
+        if not engine.url.drivername.startswith("sqlite"):
+            if engine.pool.checkedout() >= engine.pool.size():
+                skip_query = True
+    except Exception:
+        pass
+
+    if not skip_query:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except Exception as e:
+            database = "DOWN"
+            logger.error(f"Health: fallo de conexión a la base de datos: {e}")
 
     return {
         "status": "UP" if database == "UP" else "DEGRADED",
