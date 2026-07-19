@@ -57,7 +57,7 @@ Objetivos por percentil, con la carga real esperada del negocio (≤ 20 rps,
 | Consulta puntual sin carga | < 100 ms | < 200 ms | ~35 ms |
 
 **Degradación aceptada bajo carga alta** (por encima de ~40 rps, fuera del
-régimen normal): p95 hasta **2 s** con error rate < 1 %. Medido a nivel 500k/1M:
+régimen normal): p95 hasta **3 s** con error rate < 1 %. Medido a nivel 500k/1M:
 p95 1,53–1,58 s con 0–0,1 % de error. Por encima de eso actúa el rate limiting.
 
 ## 4. Rate limiting: qué es y por qué existe

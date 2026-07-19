@@ -214,8 +214,8 @@ def main():
 
         for servicio in objetivo:
             proxy, puerto = SERVICIOS[servicio]
-            out(f"\n--- CAIDA de {contenedor} (servicio '{servicio}') ---")
-            parar(contenedor)
+            out(f"\n--- CAIDA de '{servicio}' (proxy {proxy} deshabilitado) ---")
+            parar(proxy)
             apuntar(f"cae {servicio}")
             time.sleep(10)
 
