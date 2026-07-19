@@ -1,0 +1,7 @@
+== Reporte: gen_solo (2026-07-18T22:56:33) ==
+objetivo(etiqueta)=solo  nodos=8  bloque=40  bloques_enviados=72  ventana=25s
+duracion_real=27.4s  throughput=105.2 rps
+exitosas=2876/2880 (99.9%)
+codigos: HTTP 200: 2876  HTTP ERR: 4
+latencia ms: p50=1385.2 p90=2217.9 p95=2345.7 p99=2561.1 max=2779.0
+reporte JSON: pruebas_reales/resultados\gen_solo_20260718_225633.json

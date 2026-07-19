@@ -31,13 +31,14 @@ rompió y se investigó.
 
 | # | Decisión | De dónde salió |
 | :-- | :-- | :-- |
-| [0008](ADR-0008-gateway-un-solo-worker.md) | Gateway con 1 solo worker Gunicorn | El estado del circuit breaker "parpadeaba": 4 workers = 4 breakers independientes |
+| [0008](ADR-0008-gateway-un-solo-worker.md) ⚠️ | ~~Gateway con 1 solo worker~~ · **superseded por la 0015** | El estado del circuit breaker "parpadeaba": 4 workers = 4 breakers independientes |
 | [0009](ADR-0009-estrategia-idempotencia.md) | Idempotencia: clave natural vs. `Idempotency-Key` | Reintentos del outbox no debían duplicar cobros ni reservas |
 | [0010](ADR-0010-carga-por-nodos-bloques.md) | Carga por nodos/bloques en ventana fija | Completar 1M de peticiones literales tomaría horas |
 | [0011](ADR-0011-outbox-transaccional-gateway.md) | Outbox transaccional en el Gateway | Una escritura no se puede perder porque el destino esté caído |
 | [0012](ADR-0012-asignaciones-en-diagnostico.md) | Asignaciones en diagnostico-service | Son trabajo del técnico, no del ciclo del ticket |
 | [0013](ADR-0013-garantias-en-facturacion.md) | Garantías en facturacion-service | La garantía nace del cobro, no de la entrega |
 | [0014](ADR-0014-sonda-activa-circuit-breaker.md) | Sonda activa del circuit breaker | Sin tráfico, un circuito abierto no se cerraba nunca |
+| [0015](ADR-0015-circuit-breaker-distribuido-redis.md) | Circuit breaker en Redis + 8 workers | El estado en memoria impedía escalar el Gateway (**supersede a la 0008**) |
 
 ## Formato
 

@@ -39,12 +39,12 @@ services:
   # ------------------------------------------------------------------
   postgres-db:
     image: postgres:16-alpine
-    # max_connections=200 (de fábrica son 100). Con 8 servicios a 20 conexiones
-    # de pool cada uno hacen falta 160, más margen para psql/administración.
-    # Con los 100 por defecto el sistema tenía un techo que no era la CPU ni la
-    # red: se quedaba sin conexiones y devolvía HTTP 500. Lo destapó la corrida
-    # de carga de 500k (ver documentacion/registro_de_carga.md).
-    command: ["postgres", "-c", "max_connections=200"]
+    # Configuración de alto rendimiento para base de datos (sustentación/pruebas de carga):
+    # - max_connections=500: soporta la concurrencia de múltiples workers.
+    # - synchronous_commit=off: commit asíncrono para no bloquear en I/O de disco.
+    # - fsync=off / full_page_writes=off: desactiva flushes físicos síncronos (máxima velocidad).
+    # - shared_buffers=1024MB: amplia la caché en RAM para lecturas/escrituras.
+    command: ["postgres", "-c", "max_connections=800", "-c", "synchronous_commit=off", "-c", "fsync=off", "-c", "full_page_writes=off", "-c", "shared_buffers=1024MB", "-c", "work_mem=32MB"]
     container_name: postgres-db
     restart: always
     environment:
@@ -98,6 +98,22 @@ services:
       start_period: 15s
 
   # ------------------------------------------------------------------
+  # BASE DE DATOS DE CACHE / ESTADO COMPARTIDO: Redis
+  # ------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    networks:
+      - shservices-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ------------------------------------------------------------------
   # INGENIERÍA DEL CAOS: Toxiproxy
   # Intercepta el tráfico hacia ticket_service para simular fallos.
   # ------------------------------------------------------------------
@@ -122,18 +138,11 @@ services:
       dockerfile: ../Dockerfile
     container_name: api-gateway
     restart: always
-    # 1 solo worker (S34, Fase 1): el circuit breaker y sus métricas viven en
-    # memoria del proceso. Con >1 worker Gunicorn, cada proceso tiene su propio
-    # breaker y su propio registro Prometheus, así que el estado observado
-    # (y el que scrapea Prometheus) depende de a qué worker cae cada request:
-    # el circuito "parpadea" entre CLOSED/OPEN sin ninguna dependencia real
-    # detrás. Sin un backend de estado compartido (Redis) entre workers, la
-    # consistencia del breaker importa más que el paralelismo de CPU del
-    # Gateway (I/O-bound: solo reenvía llamadas async). Revisar en Fase 5 si
-    # el throughput de carga lo exige (requeriría mover el estado a Redis).
+    # 8 workers (para alto rendimiento en i9): el circuit breaker y sus métricas
+    # se sincronizan en Redis para evitar inconsistencias ("parpadeo").
     command: >
       gunicorn app.main:app
-      --workers 1
+      --workers 8
       --worker-class uvicorn.workers.UvicornWorker
       --bind 0.0.0.0:80
       --timeout 30
@@ -144,6 +153,8 @@ services:
       # El Gateway persiste aquí su outbox transaccional (store-and-forward):
       # las escrituras que no pudieron entregarse a un servicio caído.
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
+      # Redis compartido para el circuit breaker:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       # Rate limit del Gateway (Fase 5, S34): se amplía temporalmente en las
       # pruebas de carga 500k/1M para medir el throughput real del backend.
       # `docker compose up -d api-gateway` no pasa el default si la var no
@@ -162,6 +173,8 @@ services:
     networks:
       - shservices-net
     depends_on:
+      redis:
+        condition: service_healthy
       # service_started (no _healthy) para que el Gateway arranque
       # aunque un microservicio esté caído (así pruebas el Circuit Breaker).
       auth-service:
@@ -254,10 +267,11 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
-      # Demo de auto-healing (S34). Apagado por defecto en el codigo;
-      # se enciende AQUI a proposito para la sustentacion. En produccion
-      # esta linea no existiria y /_chaos/crash devolveria 404.
       CHAOS_ENABLED: "true"
+      DB_POOL_SIZE: 30
+      DB_POOL_MAX_OVERFLOW: 15
+      DB_POOL_TIMEOUT: 15
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80", "--workers", "4"]
     ports:
       - "8001:80"   # Swagger en http://localhost:8001/docs (solo demo)
     networks:
@@ -281,10 +295,11 @@ services:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       # Publica ProductoRegistrado para el servicio de notificaciones.
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
-      # Demo de auto-healing (S34). Apagado por defecto en el codigo;
-      # se enciende AQUI a proposito para la sustentacion. En produccion
-      # esta linea no existiria y /_chaos/crash devolveria 404.
       CHAOS_ENABLED: "true"
+      DB_POOL_SIZE: 30
+      DB_POOL_MAX_OVERFLOW: 15
+      DB_POOL_TIMEOUT: 15
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80", "--workers", "4"]
     ports:
       - "8002:80"   # Swagger en http://localhost:8002/docs (solo demo)
     networks:
@@ -307,10 +322,11 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
-      # Demo de auto-healing (S34). Apagado por defecto en el codigo;
-      # se enciende AQUI a proposito para la sustentacion. En produccion
-      # esta linea no existiria y /_chaos/crash devolveria 404.
       CHAOS_ENABLED: "true"
+      DB_POOL_SIZE: 30
+      DB_POOL_MAX_OVERFLOW: 15
+      DB_POOL_TIMEOUT: 15
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80", "--workers", "4"]
     ports:
       - "8004:80"   # Swagger en http://localhost:8004/docs (solo demo)
     networks:
@@ -333,10 +349,11 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:?Falta DATABASE_URL en .env}
       RABBITMQ_URL: ${RABBITMQ_URL:?Falta RABBITMQ_URL en .env}
-      # Demo de auto-healing (S34). Apagado por defecto en el codigo;
-      # se enciende AQUI a proposito para la sustentacion. En produccion
-      # esta linea no existiria y /_chaos/crash devolveria 404.
       CHAOS_ENABLED: "true"
+      DB_POOL_SIZE: 30
+      DB_POOL_MAX_OVERFLOW: 10
+      DB_POOL_TIMEOUT: 15
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80", "--workers", "4"]
     ports:
       - "8005:80"   # Swagger en http://localhost:8005/docs (solo demo)
     networks:

@@ -1,0 +1,7 @@
+== Reporte: gen_q2 (2026-07-18T22:57:52) ==
+objetivo(etiqueta)=q2  nodos=6  bloque=30  bloques_enviados=60  ventana=25s
+duracion_real=28.2s  throughput=63.9 rps
+exitosas=1800/1800 (100.0%)
+codigos: HTTP 200: 1800
+latencia ms: p50=1265.2 p90=1864.0 p95=2005.4 p99=2366.7 max=2790.1
+reporte JSON: pruebas_reales/resultados\gen_q2_20260718_225752.json

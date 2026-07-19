@@ -1,0 +1,7 @@
+== Reporte: carga_100k_real (2026-07-18T20:57:32) ==
+objetivo(etiqueta)=100k-real  nodos=8  bloque=30  bloques_enviados=2943  ventana=3600s
+duracion_real=2006.8s  throughput=49.9 rps
+exitosas=96202/100179 (96.0%)
+codigos: HTTP 200: 60671  HTTP 201: 33025  HTTP 202: 2506  HTTP 500: 114  HTTP 503: 3134  HTTP 504: 307  HTTP ERR: 422
+latencia ms: p50=1238.0 p90=2760.0 p95=3188.4 p99=4163.5 max=10366.4
+reporte JSON: C:\Users\diego\OneDrive\Escritorio\ArquiFinal\SHServices_V2_Yassir\SHServices_V2\pruebas_reales\resultados\carga_100k_real_20260718_205732.json

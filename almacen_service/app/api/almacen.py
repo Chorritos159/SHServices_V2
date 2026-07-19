@@ -1,6 +1,10 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+import time
+import random
 from app.models.schemas import (
     ProductoCreate, ProductoResponse, ReservaRequest, ProductoInventario, VentaRequest,
 )
@@ -21,18 +25,18 @@ def _trazar(request: Request) -> str:
 
 
 @router.get("/productos", response_model=list[ProductoInventario], tags=["Inventario"])
-async def listar_productos(request: Request, db: Annotated[Session, Depends(get_db)]):
+async def listar_productos(request: Request, db: Annotated[Session, Depends(get_db)], limite: int = Query(200, ge=1, le=500)):
     """Devuelve TODO el inventario (para que el Admin no este 'a ciegas')."""
     _trazar(request)
     with logger.operacion("listar_inventario") as op:
-        productos = db.query(ProductoDB).order_by(ProductoDB.sede, ProductoDB.codigo).all()
+        productos = db.query(ProductoDB).order_by(ProductoDB.sede, ProductoDB.codigo).limit(limite).all()
         op.campos["totalProductos"] = len(productos)
         op.mensaje = f"Listado de inventario entregado: {len(productos)} producto(s)."
         return productos
 
 
 @router.get("/productos/venta", response_model=list[ProductoInventario], tags=["Inventario"])
-async def listar_productos_venta(request: Request, db: Annotated[Session, Depends(get_db)]):
+async def listar_productos_venta(request: Request, db: Annotated[Session, Depends(get_db)], limite: int = Query(200, ge=1, le=500)):
     """Catálogo vendible para el POS de Caja: lo que ESTA sede puede vender hoy.
 
     Se diferencia de `GET /productos` (que devuelve todo el inventario, para el
@@ -61,6 +65,7 @@ async def listar_productos_venta(request: Request, db: Annotated[Session, Depend
             .filter(ProductoDB.categoria == "PRODUCTO_VENTA")
             .filter(ProductoDB.stock_disponible > 0)
             .order_by(ProductoDB.nombre)
+            .limit(limite)
             .all()
         )
         op.campos["totalProductos"] = len(productos)
@@ -72,18 +77,26 @@ def _siguiente_codigo(db: Session, categoria: str) -> str:
     """Siguiente codigo secuencial, con el prefijo que corresponde a la categoria.
 
     `REP-` para repuestos y `PRD-` para productos de venta, cada uno con su
-    propia secuencia. Antes todo nacia como `REP-`, asi que un artículo de
-    mostrador terminaba llamandose `REP-321` y en el catalogo de venta parecia
-    un repuesto: el codigo dejaba de decir la verdad sobre lo que es.
+    propia secuencia.
+    Optimizado: obtiene únicamente la fila con el código de mayor longitud y valor,
+    evitando transferir y procesar miles de registros en memoria (GIL/RAM bottleneck).
     """
     prefijo = "PRD" if categoria.upper() == "PRODUCTO_VENTA" else "REP"
-    codigos = db.query(ProductoDB.codigo).filter(ProductoDB.codigo.like(f"{prefijo}-%")).all()
-    numeros = []
-    for (c,) in codigos:
-        sufijo = c.split("-")[-1]
-        if sufijo.isdigit():
-            numeros.append(int(sufijo))
-    siguiente = (max(numeros) + 1) if numeros else 1
+    fila_max = (
+        db.query(ProductoDB.codigo)
+        .filter(ProductoDB.codigo.like(f"{prefijo}-%"))
+        .order_by(func.length(ProductoDB.codigo).desc(), ProductoDB.codigo.desc())
+        .first()
+    )
+    if not fila_max:
+        return f"{prefijo}-001"
+    
+    ultimo_codigo = fila_max[0]
+    sufijo = ultimo_codigo.split("-")[-1]
+    if sufijo.isdigit():
+        siguiente = int(sufijo) + 1
+    else:
+        siguiente = 1
     return f"{prefijo}-{siguiente:03d}"
 
 
@@ -98,20 +111,36 @@ async def crear_producto(
     correlation_id = _trazar(request)
 
     with logger.operacion("crear_producto", event="ProductoRegistrado.v1") as op:
-        codigo = _siguiente_codigo(db, producto.categoria)
-        nuevo_producto = ProductoDB(
-            codigo=codigo,
-            nombre=producto.nombre,
-            categoria=producto.categoria.upper(),
-            sede=producto.sede.upper(),
-            stock_disponible=producto.stock_inicial,
-            stock_reservado=0,
-            precio_unitario=producto.precio_unitario,
-        )
-        db.add(nuevo_producto)
-        db.commit()
-        db.refresh(nuevo_producto)
+        intentos = 0
+        nuevo_producto = None
+        while intentos < 5:
+            try:
+                codigo = _siguiente_codigo(db, producto.categoria)
+                nuevo_producto = ProductoDB(
+                    codigo=codigo,
+                    nombre=producto.nombre,
+                    categoria=producto.categoria.upper(),
+                    sede=producto.sede.upper(),
+                    stock_disponible=producto.stock_inicial,
+                    stock_reservado=0,
+                    precio_unitario=producto.precio_unitario,
+                )
+                db.add(nuevo_producto)
+                db.commit()
+                db.refresh(nuevo_producto)
+                break
+            except IntegrityError:
+                db.rollback()
+                intentos += 1
+                if intentos == 5:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="No se pudo asignar un codigo unico de producto tras 5 intentos debido a colisiones concurrentes."
+                    )
+                # Pequeño retardo aleatorio (jitter) para evitar colisiones consecutivas
+                time.sleep(random.uniform(0.01, 0.05))
 
+        codigo = nuevo_producto.codigo
         op.campos.update({
             "codigo": codigo,
             "sede": nuevo_producto.sede,

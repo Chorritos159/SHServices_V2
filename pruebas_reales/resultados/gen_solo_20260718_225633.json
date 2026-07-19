@@ -1,0 +1,31 @@
+{
+  "prueba": "gen_solo",
+  "fecha": "2026-07-18T22:56:33",
+  "objetivo_etiqueta": "solo",
+  "total_objetivo": null,
+  "modo_corte": "ventana de tiempo",
+  "modo": "solo lecturas",
+  "nodos": 8,
+  "bloque": 40,
+  "bloques_enviados": 72,
+  "duracion_objetivo_seg": 25,
+  "rutas": [
+    "health"
+  ],
+  "duracion_real_seg": 27.4,
+  "throughput_rps": 105.2,
+  "enviadas": 2880,
+  "exitosas": 2876,
+  "tasa_exito": 0.9986,
+  "codigos": {
+    "200": 2876,
+    "ERR": 4
+  },
+  "latencia_ms": {
+    "p50": 1385.2,
+    "p90": 2217.9,
+    "p95": 2345.7,
+    "p99": 2561.1,
+    "max": 2779.0
+  }
+}

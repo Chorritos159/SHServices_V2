@@ -291,6 +291,27 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | 13 | `python pruebas/13_carga_100k_real.py` | **100.000 peticiones REALES**, contadas una a una — no es una etiqueta ni una extrapolación, es el contador. Imprime avance con % y minutos restantes para poder dejarla sola. Sirve además para ver si el throughput se degrada en una sesión larga | **~45 min** |
 | — | `python pruebas/generar_informe.py` | **Genera el informe completo** en `documentacion/informe_de_pruebas.md`: lee la última corrida de cada prueba y arma tabla de carga, caos, auto-recuperación y veredicto. Lo que no se haya corrido sale como *(sin corrida)*, no como cero | ~1 s |
 
+### Pruebas Reales de Alto Rendimiento (1190+ RPS con Redis)
+
+Estas pruebas están ubicadas en la carpeta `pruebas_reales/` y están diseñadas para ejecutarse con la configuración de alto rendimiento activa (Gateway a 8 workers y Redis como estado compartido):
+
+| Comando | Qué prueba | Descripción / Configuración |
+| :--- | :--- | :--- |
+| `python pruebas_reales/carga_lecturas.py [--total N]` | **Carga Real de Solo Lecturas** | Mide el techo teórico del Gateway y la red sin persistencia en disco. Por defecto corre 100.000 peticiones (`--total 100000`). |
+| `python pruebas_reales/carga_100k.py` | **Carga Mixta Real 100k** | Corre y completa **literalmente 100.000 peticiones** de lectura/escritura (8 nodos x bloques de 30). |
+| `python pruebas_reales/carga_500k.py` | **Carga Mixta Real 500k** | Corre y completa **literalmente 500.000 peticiones** (12 nodos x bloques de 40). |
+| `python pruebas_reales/carga_1M.py` | **Carga Mixta Real 1M** | Corre y completa **literalmente 1.000.000 de peticiones** (16 nodos x bloques de 50). |
+| `python pruebas_reales/caos_real.py [--nivel X]` | **Caos Real y Auto-recuperación** | Inicia carga real sostenida (100k, 500k o 1M) y tumba servicios en caliente con `POST /_chaos/crash`. Valida auto-healing (Docker revive con `restart: always` y la Gateway reconecta sola vía Redis sin intervención manual). |
+
+**Instrucciones de ejecución:**
+1. Asegúrate de detener SonarQube para liberar CPU: `docker compose stop sonarqube` (si está de fondo).
+2. Limpia los datos de carga acumulados para no sesgar las consultas de listados: `python pruebas/limpiar_datos_carga.py --borrar`.
+3. Lanza la prueba elegida desde la raíz del proyecto. Por ejemplo:
+   ```bash
+   python pruebas_reales/carga_100k.py
+   python pruebas_reales/caos_real.py --nivel 100k
+   ```
+
 **Todas las pruebas tocan todos los servicios.** La E2E (8) recorre el flujo
 completo por los 8 servicios; las de carga (3-5) reparten el tráfico entre
 tickets, almacén, auditoría y notificaciones (rotan por sus endpoints GET),

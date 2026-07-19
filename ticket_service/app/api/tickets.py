@@ -1,5 +1,5 @@
 from typing import Annotated
-from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -181,7 +181,7 @@ async def crear_ticket(
 
 
 @router.get("/pendientes", response_model=list[TicketPendiente], tags=["Tickets"])
-async def listar_pendientes(request: Request, db: Annotated[Session, Depends(get_db)]):
+async def listar_pendientes(request: Request, db: Annotated[Session, Depends(get_db)], limite: int = Query(200, ge=1, le=500)):
     """
     Lista los tickets EN_COLA (la bandeja del técnico).
 
@@ -195,6 +195,7 @@ async def listar_pendientes(request: Request, db: Annotated[Session, Depends(get
         db.query(TicketDB)
         .filter(TicketDB.estado == "EN_COLA")
         .order_by(TicketDB.fecha_registro)
+        .limit(limite)
         .all()
     )
     logger.info(f"Tickets pendientes (EN_COLA) solicitados: {len(tickets)}.")
@@ -202,16 +203,16 @@ async def listar_pendientes(request: Request, db: Annotated[Session, Depends(get
 
 
 @router.get("/", response_model=list[TicketPendiente], tags=["Tickets"])
-async def listar_tickets(request: Request, db: Annotated[Session, Depends(get_db)]):
+async def listar_tickets(request: Request, db: Annotated[Session, Depends(get_db)], limite: int = Query(200, ge=1, le=500)):
     """Lista TODOS los tickets (más recientes primero)."""
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     logger.extra["correlation_id"] = correlation_id
-    tickets = db.query(TicketDB).order_by(TicketDB.fecha_registro.desc()).all()
+    tickets = db.query(TicketDB).order_by(TicketDB.fecha_registro.desc()).limit(limite).all()
     return tickets
 
 
 @router.get("/por-estado/{estado}", response_model=list[TicketPendiente], tags=["Tickets"])
-async def listar_por_estado(estado: str, request: Request, db: Annotated[Session, Depends(get_db)]):
+async def listar_por_estado(estado: str, request: Request, db: Annotated[Session, Depends(get_db)], limite: int = Query(200, ge=1, le=500)):
     """
     Filtra tickets por estado (ej. DIAGNOSTICADO para la bandeja de Entregas y Cobros).
     Filtro por RUTA (no ?query) porque el Gateway descarta los query strings.
@@ -222,6 +223,7 @@ async def listar_por_estado(estado: str, request: Request, db: Annotated[Session
         db.query(TicketDB)
         .filter(TicketDB.estado == estado.upper())
         .order_by(TicketDB.fecha_registro.desc())
+        .limit(limite)
         .all()
     )
     logger.info(f"Tickets en estado '{estado.upper()}': {len(tickets)}.")

@@ -1,0 +1,7 @@
+== Reporte: gen_q4 (2026-07-18T22:57:52) ==
+objetivo(etiqueta)=q4  nodos=6  bloque=30  bloques_enviados=60  ventana=25s
+duracion_real=27.9s  throughput=64.6 rps
+exitosas=1797/1800 (99.8%)
+codigos: HTTP 200: 1797  HTTP ERR: 3
+latencia ms: p50=1415.8 p90=1862.3 p95=1979.0 p99=2235.0 max=2525.3
+reporte JSON: pruebas_reales/resultados\gen_q4_20260718_225752.json

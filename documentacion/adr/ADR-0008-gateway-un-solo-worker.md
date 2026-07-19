@@ -1,6 +1,14 @@
 # ADR-0008 — API Gateway con 1 solo worker Gunicorn
 
-**Estado:** Aceptada · **Fecha:** 2026-07-16 · **Fase:** S34, Fase 1
+**Estado:** ⚠️ **SUPERSEDED por [ADR-0015](ADR-0015-circuit-breaker-distribuido-redis.md)** (2026-07-18) · **Fecha:** 2026-07-16 · **Fase:** S34, Fase 1
+
+> **Esta decisión ya no está vigente.** El Gateway corre hoy con **8 workers**,
+> no con 1. Fue posible porque ADR-0015 movió el estado del circuit breaker a
+> Redis, que es exactamente la condición que esta ADR puso en su apartado
+> "Revisión futura": *"no volver a múltiples workers en memoria sin ese
+> cambio"*. Se mantiene el documento porque explica **por qué** el estado
+> compartido era imprescindible — sin ese contexto, la 0015 parece una
+> optimización cualquiera en vez de la resolución de un problema concreto.
 
 ## Contexto
 

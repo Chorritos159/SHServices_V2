@@ -1,0 +1,7 @@
+== Reporte: gen_p2 (2026-07-18T22:57:02) ==
+objetivo(etiqueta)=p2  nodos=8  bloque=40  bloques_enviados=64  ventana=25s
+duracion_real=28.3s  throughput=90.6 rps
+exitosas=2557/2560 (99.9%)
+codigos: HTTP 200: 2557  HTTP ERR: 3
+latencia ms: p50=1716.3 p90=2578.3 p95=2738.9 p99=3011.5 max=3373.8
+reporte JSON: pruebas_reales/resultados\gen_p2_20260718_225702.json

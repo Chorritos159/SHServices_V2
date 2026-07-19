@@ -1,6 +1,6 @@
 # Informe de pruebas — SHServices V2
 
-> Generado automáticamente el **18/07/2026 16:58** con
+> Generado automáticamente el **18/07/2026 19:11** con
 > `python pruebas/generar_informe.py`, leyendo la última corrida de cada
 > prueba en `pruebas/resultados/`. Ningún número está escrito a mano.
 
@@ -12,10 +12,10 @@ que es justo la variable que se quiere medir.
 
 | Nivel | Peticiones (éxito) | Throughput | p95 | p99 | Error rate | CPU/Mem | Cola |
 | :-- | --: | --: | --: | --: | --: | :-- | --: |
-| 780 (línea base) | 766 (100.0%) | 29.9 rps | 327.0 ms | 433.7 ms | 0.0% | 175.3% / 141 MiB | 5 |
+| 780 (línea base) | 876 (100.0%) | 34.3 rps | 178.7 ms | 236.2 ms | 0.0% | *(monitor)* | *(monitor)* |
 | 100k | 8051 (99.0%) | 41.0 rps | 1468.9 ms | 1994.9 ms | 1.0% | 175.3% / 141 MiB | 5 |
 | 500k | 20106 (98.8%) | 42.1 rps | 2026.6 ms | 2462.1 ms | 1.2% | 139.4% / 177 MiB | 2 |
-| 1M | *(sin corrida)* | | | | | | |
+| 1M | 25144 (95.5%) | 28.9 rps | 3053.4 ms | 4145.7 ms | 4.5% | 146.1% / 213 MiB | 9 |
 | 100k REAL | *(sin corrida)* | | | | | | |
 
 > **CPU/Mem** y **Cola** salen de `pruebas/monitor_recursos.py`, que se
@@ -24,9 +24,10 @@ que es justo la variable que se quiere medir.
 
 ### Códigos de respuesta por nivel
 
-- **780 (línea base)**: `{'200': 491, '201': 275}`
+- **780 (línea base)**: `{'200': 553, '201': 323}`
 - **100k**: `{'200': 5062, '201': 2911, '409': 3, 'ERR': 75}`
 - **500k**: `{'200': 12794, '201': 7069, '409': 17, 'ERR': 226}`
+- **1M**: `{'200': 15105, '201': 8607, '202': 306, '409': 32, '500': 1, '503': 467, '504': 65, 'ERR': 561}`  ← **atención**
 
 ### Cómo se lee cada código
 
@@ -156,9 +157,9 @@ Los 8 servicios hicieron su parte:
 ```
 OK  auth-service: emitio los 3 tokens
     OK  api-gateway: enruto los dos flujos (sin el, nada habria respondido)
-    OK  ticket-service: creo y movio el ticket TICK-PIU-4250059D hasta ENTREGADO
+    OK  ticket-service: creo y movio el ticket TICK-PIU-6475C7BE95DD hasta ENTREGADO
     OK  diagnostico-service: registro la asignacion y el diagnostico
-    OK  almacen-service: reservo repuesto (2->1), ingreso PRD-021 y vendio 2
+    OK  almacen-service: reservo repuesto (14->13), ingreso PRD-024 y vendio 2
     OK  facturacion-service: cobro el SOPORTE (con garantia) y la VENTA (sin garantia)
     OK  auditoria-service: registro 6 evento(s) del flujo
     OK  notificacion-service: alerto al tecnico y dio al ADMIN la vista completa

@@ -1,0 +1,31 @@
+{
+  "prueba": "gen_q4",
+  "fecha": "2026-07-18T22:57:52",
+  "objetivo_etiqueta": "q4",
+  "total_objetivo": null,
+  "modo_corte": "ventana de tiempo",
+  "modo": "solo lecturas",
+  "nodos": 6,
+  "bloque": 30,
+  "bloques_enviados": 60,
+  "duracion_objetivo_seg": 25,
+  "rutas": [
+    "health"
+  ],
+  "duracion_real_seg": 27.9,
+  "throughput_rps": 64.6,
+  "enviadas": 1800,
+  "exitosas": 1797,
+  "tasa_exito": 0.9983,
+  "codigos": {
+    "200": 1797,
+    "ERR": 3
+  },
+  "latencia_ms": {
+    "p50": 1415.8,
+    "p90": 1862.3,
+    "p95": 1979.0,
+    "p99": 2235.0,
+    "max": 2525.3
+  }
+}

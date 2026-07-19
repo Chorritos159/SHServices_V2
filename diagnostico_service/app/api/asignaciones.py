@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_serializer
 from sqlalchemy.orm import Session
@@ -189,7 +189,7 @@ async def tomar_ticket(
 
 
 @router.get("/mias", response_model=list[AsignacionOut], tags=["Asignaciones"])
-async def mis_asignaciones(request: Request, db: Annotated[Session, Depends(get_db)]):
+async def mis_asignaciones(request: Request, db: Annotated[Session, Depends(get_db)], limite: int = Query(200, ge=1, le=500)):
     """Bandeja 'Mis Tickets' del técnico. Se sirve SOLO desde diagnostico-service,
     sin depender del ticket-service (resiliencia)."""
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
@@ -201,6 +201,7 @@ async def mis_asignaciones(request: Request, db: Annotated[Session, Depends(get_
         db.query(AsignacionDB)
         .filter(AsignacionDB.tecnico == tecnico)
         .order_by(AsignacionDB.fecha_tomado.desc())
+        .limit(limite)
         .all()
     )
     logger.info(f"'Mis Tickets' de {tecnico}: {len(asignaciones)} asignacion(es).")
@@ -208,7 +209,7 @@ async def mis_asignaciones(request: Request, db: Annotated[Session, Depends(get_
 
 
 @router.get("/", response_model=list[AsignacionOut], tags=["Asignaciones"])
-async def todas_las_asignaciones(request: Request, db: Annotated[Session, Depends(get_db)]):
+async def todas_las_asignaciones(request: Request, db: Annotated[Session, Depends(get_db)], limite: int = Query(200, ge=1, le=500)):
     """Vista de ADMIN: todos los tickets tomados y quién los atiende."""
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
     rol = request.headers.get("x-user-rol", "").upper()
@@ -217,6 +218,6 @@ async def todas_las_asignaciones(request: Request, db: Annotated[Session, Depend
             status_code=403,
             detail="Solo un administrador puede ver todas las asignaciones.",
         )
-    asignaciones = db.query(AsignacionDB).order_by(AsignacionDB.fecha_tomado.desc()).all()
+    asignaciones = db.query(AsignacionDB).order_by(AsignacionDB.fecha_tomado.desc()).limit(limite).all()
     logger.info(f"Admin consulta todas las asignaciones: {len(asignaciones)}.")
     return asignaciones

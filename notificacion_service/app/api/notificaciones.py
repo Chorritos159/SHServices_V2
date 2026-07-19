@@ -1,5 +1,5 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
 from sqlalchemy.orm import Session
 from app.models.schemas import NotificacionOut
 from app.models.notificacion import NotificacionDB
@@ -16,7 +16,7 @@ def _rol_del_token(request: Request) -> str:
 
 
 @router.get("/mis-alertas", response_model=list[NotificacionOut], tags=["Notificaciones"])
-async def mis_alertas(request: Request, db: Annotated[Session, Depends(get_db)]):
+async def mis_alertas(request: Request, db: Annotated[Session, Depends(get_db)], limite: int = Query(200, ge=1, le=500)):
     """Devuelve las notificaciones NO leídas del rol del usuario (según el JWT)."""
     rol = _rol_del_token(request)
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
@@ -26,6 +26,7 @@ async def mis_alertas(request: Request, db: Annotated[Session, Depends(get_db)])
         db.query(NotificacionDB)
         .filter(NotificacionDB.rol_destino == rol, NotificacionDB.leida == False)  # noqa: E712
         .order_by(NotificacionDB.created_at.desc())
+        .limit(limite)
         .all()
     )
     return alertas

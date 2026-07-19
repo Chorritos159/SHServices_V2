@@ -1,0 +1,31 @@
+{
+  "prueba": "gen_q3",
+  "fecha": "2026-07-18T22:57:51",
+  "objetivo_etiqueta": "q3",
+  "total_objetivo": null,
+  "modo_corte": "ventana de tiempo",
+  "modo": "solo lecturas",
+  "nodos": 6,
+  "bloque": 30,
+  "bloques_enviados": 60,
+  "duracion_objetivo_seg": 25,
+  "rutas": [
+    "health"
+  ],
+  "duracion_real_seg": 27.8,
+  "throughput_rps": 64.7,
+  "enviadas": 1800,
+  "exitosas": 1795,
+  "tasa_exito": 0.9972,
+  "codigos": {
+    "200": 1795,
+    "ERR": 5
+  },
+  "latencia_ms": {
+    "p50": 1188.1,
+    "p90": 1907.4,
+    "p95": 2078.0,
+    "p99": 2517.7,
+    "max": 2875.3
+  }
+}

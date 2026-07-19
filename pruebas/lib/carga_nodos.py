@@ -190,7 +190,7 @@ def construir_mezcla():
 
 
 async def nodo(indice, urls, headers, bloque, fin_ts, resultados, latencias, candado,
-               bloques_enviados, mezcla=None, base="", total_objetivo=0):
+               bloques_enviados, mezcla=None, base="", total_objetivo=0, pausa=0.2):
     """Un nodo: manda bloques sucesivos (concurrentes DENTRO del bloque,
     secuenciales ENTRE bloques) hasta que se acaba el tiempo de la corrida.
 
@@ -238,7 +238,7 @@ async def nodo(indice, urls, headers, bloque, fin_ts, resultados, latencias, can
                 nivel_backoff = min(nivel_backoff + 1, len(BACKOFF_SEQ) - 1)
             else:
                 nivel_backoff = 0
-                espera = 0.2 + random.uniform(0, 0.2)  # pausa corta entre bloques limpios
+                espera = pausa + random.uniform(0, pausa / 2) if pausa > 0 else 0  # pausa corta entre bloques limpios
 
             restante = fin_ts - time.monotonic()
             if restante <= 0:
@@ -307,14 +307,17 @@ async def correr(args):
 
     tareas_nodos = [
         nodo(i, urls, headers, args.bloque, fin_ts, resultados, latencias, candado,
-             bloques_enviados, mezcla, base, args.total)
+             bloques_enviados, mezcla, base, args.total, args.pausa)
         for i in range(args.nodos)
     ]
-    await asyncio.gather(
-        *tareas_nodos,
-        progreso(resultados, candado, fin_ts, bloques_enviados, inicio, args.nodos,
-                 args.bloque, args.total),
-    )
+    try:
+        await asyncio.gather(
+            *tareas_nodos,
+            progreso(resultados, candado, fin_ts, bloques_enviados, inicio, args.nodos,
+                     args.bloque, args.total),
+        )
+    except KeyboardInterrupt:
+        print(f"\n[WARNING] Generador {args.nombre} interrumpido por usuario. Guardando reporte parcial...")
 
     duracion = time.monotonic() - inicio
     ordenadas = sorted(latencias)
@@ -394,6 +397,8 @@ def main():
     p.add_argument("--mixto", type=int, default=0,
                    help="1 = mezcla lecturas Y ESCRITURAS tocando TODOS los servicios "
                         "(incluye una cadena crear->tomar->diagnosticar->cobrar).")
+    p.add_argument("--pausa", type=float, default=0.2,
+                   help="Pausa base entre bloques limpios (en segundos). Por defecto 0.2s.")
     args = p.parse_args()
     asyncio.run(correr(args))
 

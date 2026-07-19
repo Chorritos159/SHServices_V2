@@ -13,8 +13,8 @@ class TicketDB(Base):
     sede = Column(String, nullable=False)
     usuario_registro = Column(String, nullable=False)
     prioridad = Column(String, nullable=False)
-    estado = Column(String, nullable=False, default="EN_COLA")
-    fecha_registro = Column(DateTime, default=datetime.datetime.utcnow)
+    estado = Column(String, nullable=False, default="EN_COLA", index=True)
+    fecha_registro = Column(DateTime, default=datetime.datetime.utcnow, index=True)
 
     # --- Campos enriquecidos (Help Desk / POS) ---
     documento_cliente = Column(String, nullable=True)       # DNI / RUC

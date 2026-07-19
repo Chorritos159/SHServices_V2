@@ -1,0 +1,36 @@
+{
+  "prueba": "carga_100k_real_proc_6_222441",
+  "fecha": "2026-07-18T22:33:37",
+  "objetivo_etiqueta": "100k-real-multi",
+  "total_objetivo": 12500,
+  "modo_corte": "conteo",
+  "modo": "mixto (lecturas + escrituras, todos los servicios)",
+  "nodos": 12,
+  "bloque": 5,
+  "bloques_enviados": 2222,
+  "duracion_objetivo_seg": 900,
+  "rutas": [
+    "api/v1/tickets/tickets/",
+    "api/v1/almacen/almacen/productos",
+    "api/v1/auditoria/auditoria/eventos",
+    "api/v1/notificaciones/notificaciones/mis-alertas"
+  ],
+  "duracion_real_seg": 535.2,
+  "throughput_rps": 23.5,
+  "enviadas": 12583,
+  "exitosas": 12506,
+  "tasa_exito": 0.9939,
+  "codigos": {
+    "200": 7998,
+    "201": 4507,
+    "202": 1,
+    "ERR": 77
+  },
+  "latencia_ms": {
+    "p50": 1429.3,
+    "p90": 2219.1,
+    "p95": 2518.2,
+    "p99": 3312.7,
+    "max": 6332.7
+  }
+}

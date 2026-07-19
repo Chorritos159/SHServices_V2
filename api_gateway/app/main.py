@@ -282,6 +282,8 @@ RATE_LIMITER = TokenBucket(
     tasa_por_seg=float(os.getenv("RATE_LIMIT_RPS", "20")),
 )
 
+global_client: httpx.AsyncClient | None = None
+
 
 def _prioridad(service: str, metodo: str) -> str:
     """Bajo contención se protege primero lo crítico del negocio (S34)."""
@@ -314,6 +316,15 @@ def _debe_loggear_rutina() -> bool:
         return True
     metricas.LOGS_MUESTREADOS.inc()
     return False
+
+
+class _DummyContext:
+    def __init__(self, client):
+        self.client = client
+    async def __aenter__(self):
+        return self.client
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: str,
@@ -358,7 +369,7 @@ async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: s
         return _encolar_o_error(service, path, metodo, body, headers, error_503)
 
     intento = 0
-    async with httpx.AsyncClient() as client:
+    async with _DummyContext(global_client or httpx.AsyncClient()) as client:
         while True:
             intento += 1
             try:
@@ -537,6 +548,11 @@ async def bucle_sonda_breakers():
 # circuitos se cierran solos cuando el servicio revive.
 @app.on_event("startup")
 async def _iniciar_outbox():
+    global global_client
+    # pool_size amplio para absorber la concurrencia de todos los workers sin bloquear.
+    limits = httpx.Limits(max_connections=1000, max_keepalive_connections=500)
+    global_client = httpx.AsyncClient(limits=limits)
+
     try:
         outbox.crear_tablas()
     except Exception as exc:
@@ -544,6 +560,13 @@ async def _iniciar_outbox():
                      extra={"campos": {"operation": "outbox_init", "result": "error"}})
     _lanzar_en_fondo(outbox.bucle_drenaje(MICROSERVICIOS, BREAKERS))
     _lanzar_en_fondo(bucle_sonda_breakers())
+
+
+@app.on_event("shutdown")
+async def _cerrar_cliente_global():
+    global global_client
+    if global_client:
+        await global_client.aclose()
 
 
 def _encolar_o_error(service: str, path: str, metodo: str, body: bytes,
@@ -802,7 +825,7 @@ async def login_por_gateway(request: Request):
         return _auth_no_disponible(correlation_id, breaker)
 
     try:
-        async with httpx.AsyncClient() as client:
+        async with _DummyContext(global_client or httpx.AsyncClient()) as client:
             resp = await client.post(
                 f"{MICROSERVICIOS['auth']}/api/v1/auth/login",
                 json=credenciales,
@@ -897,7 +920,14 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
             content={"error": "Permisos insuficientes: solo un ADMIN puede realizar esta operación."},
         )
 
-    url_destino = f"{MICROSERVICIOS[service]}/api/v1/{path}"
+    # El QUERY STRING se reenvía con la petición. Sin esto, el Gateway lo
+    # descartaba en silencio y ningún parámetro llegaba al servicio: pedir
+    # `?limite=10` devolvía el valor por defecto y `?limite=9999` no daba el
+    # 422 del tope. Afectaba a TODOS los parámetros de consulta —paginación,
+    # filtros, búsquedas—, y era invisible porque la respuesta seguía siendo
+    # un 200 con datos plausibles.
+    query = request.url.query
+    url_destino = f"{MICROSERVICIOS[service]}/api/v1/{path}" + (f"?{query}" if query else "")
     correlation_id = request.state.correlation_id
     
     # Extraer el body y preparar cabeceras para el microservicio interno

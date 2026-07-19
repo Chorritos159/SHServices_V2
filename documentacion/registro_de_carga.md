@@ -45,16 +45,16 @@ peticiones (0% de rechazos) y el resultado mida capacidad, no el limitador.
 | Nivel | Nodos | Bloque | Ventana | Prueba |
 | :-- | :-- | :-- | :-- | :-- |
 | 780 (baseline) | — (20 hilos) | — | ~15 s | `02_carga_780.py` |
-| 100k | 3 | 12 | 2 min | `03_carga_100k.py` |
-| 500k | 4 | 16 | 5 min | `04_carga_500k.py` |
-| 1M | 5 | 16 | 10 min | `05_carga_1M.py` |
+| 100k | 96 | 5 | ~9.1 min | `carga_100k.py` |
+| 500k | 128 | 5 | ~8.5 min | `carga_500k.py` |
+| 1M | 160 | 5 | ~10.5 min | `carga_1M.py` |
 
 ## Tabla de registro
 
 | Fase | Throughput | p95 | p99 | Error rate | CPU/Mem (api-gateway) | Queue depth | Resultado |
 | :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
 | 780 (baseline, límites normales) | *(pendiente)* | | | | | | |
-| 100k | *(pendiente de corrida)* | | | | | | |
+| 100k | 182.75 rps | 1024 ms | 1327 ms | 0.5% | 709% / 660 MiB | 23337 | Exitosa, procesamiento masivo con auto-healing y sin error de pool. |
 | 500k | *(pendiente de corrida)* | | | | | | |
 | 1M | *(pendiente de corrida)* | | | | | | |
 
@@ -253,3 +253,72 @@ enseñar cosas que una ventana de 3 minutos no puede ver:
 > todo sin paginar. Si se arranca con la base ya llena, la corrida se degrada
 > por el VOLUMEN DE DATOS y no por la carga — que es justo lo que no se quiere
 > medir.
+
+---
+
+## El generador de carga era el cuello de botella (2026-07-18)
+
+Tras mover el circuit breaker a Redis y escalar el Gateway a **8 workers**
+(ADR-0015), se midió otra vez el techo con el endpoint trivial `/health`, que
+no toca base de datos ni proxy y por tanto aísla al Gateway:
+
+| Configuración | Throughput |
+| :-- | --: |
+| 1 worker | 96 rps |
+| **8 workers + Redis** | **108 rps** |
+
+**Multiplicar los workers por 8 dio un 12% más, no 12×.** Eso descartaba al
+Gateway como cuello de botella y obligaba a buscar en otro sitio.
+
+### La prueba que lo aclaró
+
+Se lanzaron varios procesos generadores **en paralelo** contra el mismo
+endpoint. Si el límite fuera del servidor, el total no subiría:
+
+| Generadores | Throughput total |
+| --: | --: |
+| 1 | 105 rps |
+| 2 | 171 rps |
+| 4 | **257 rps** — y seguía subiendo |
+
+El total **escala con el número de generadores**, así que el techo que se venía
+midiendo era el del **cliente**, no el del sistema. Un único proceso de
+`carga_nodos.py` (Python + asyncio) no pasa de ~105 rps.
+
+### Qué significa esto para todas las mediciones anteriores
+
+Los throughputs de este documento —29, 37, 42 rps— **describen al generador
+tanto como al sistema**. No son falsos: son el rendimiento *observado con esa
+herramienta*. Pero no son el techo del sistema, y presentarlos como tal sería
+un error.
+
+Lo que sí se puede afirmar con lo medido:
+
+- El sistema sostiene **al menos 257 rps** en lecturas, sin saturarse.
+- Su techo real **no se conoce**, porque no se ha medido con un generador
+  capaz de superarlo.
+- Las conclusiones sobre **resiliencia** (contención, cero 500, recuperación
+  automática, ausencia de cascada) **no se ven afectadas**: esas no dependen
+  del volumen, sino de cómo reacciona el sistema al fallo.
+
+### Por qué Python asyncio se queda corto como generador
+
+El generador vive en un solo proceso con GIL: cada respuesta hay que
+deserializarla, medirla y contabilizarla en Python, y eso compite con el propio
+envío. Herramientas como **k6** (escrita en Go) usan hilos ligeros del runtime
+sin GIL y pueden mantener miles de peticiones concurrentes por proceso.
+
+**Es la explicación más probable de que otra implementación reportara ~1.190
+rps**: no necesariamente un backend más rápido, sino un generador que no era el
+límite. Comparar throughputs medidos con herramientas distintas compara, en
+buena parte, las herramientas.
+
+### Cómo cerrar esto correctamente
+
+Dos caminos, ambos honestos:
+
+1. **Varios generadores en paralelo** (lo ya hecho): suma el throughput de N
+   procesos. Funciona y no añade dependencias, pero es incómodo de coordinar.
+2. **Adoptar k6** para las corridas de alto volumen y dejar los scripts de
+   Python para las pruebas funcionales y de caos, donde el volumen no importa
+   y sí importa poder escribir lógica de negocio.

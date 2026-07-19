@@ -7,8 +7,8 @@ class ProductoDB(Base):
 
     codigo = Column(String, primary_key=True, index=True) # Ej: REP-001
     nombre = Column(String, nullable=False)
-    categoria = Column(String, nullable=False) # "REPUESTO" o "PRODUCTO_VENTA"
-    sede = Column(String, nullable=False) # "PIURA"
+    categoria = Column(String, nullable=False, index=True) # "REPUESTO" o "PRODUCTO_VENTA"
+    sede = Column(String, nullable=False, index=True) # "PIURA"
     stock_disponible = Column(Integer, default=0, nullable=False)
     stock_reservado = Column(Integer, default=0, nullable=False)
     precio_unitario = Column(Float, default=0.0, nullable=False)  # precio de venta (POS)
