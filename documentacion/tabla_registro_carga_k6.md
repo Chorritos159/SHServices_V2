@@ -5,4 +5,4 @@
 
 | Fase | Throughput | p95 | p99 | Error rate | CPU/Mem | Queue depth | Resultado |
 | :-- | --: | --: | --: | --: | :-- | --: | :-- |
-| **humo** | 166 rps | 284 ms | 401 ms | 0.00% | 315% / 518 MiB | 101 | cero errores 500. cola RabbitMQ hasta 101 mensajes: los consumidores se quedaron atrás. |  <!-- 20260718_231245 -->
+| **humo** | 153 rps | 257 ms | 336 ms | 0.00% | 320% / 546 MiB | 13 | cero errores 500. |  <!-- 20260718_232243 -->

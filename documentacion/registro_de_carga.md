@@ -322,3 +322,66 @@ Dos caminos, ambos honestos:
 2. **Adoptar k6** para las corridas de alto volumen y dejar los scripts de
    Python para las pruebas funcionales y de caos, donde el volumen no importa
    y sí importa poder escribir lógica de negocio.
+
+---
+
+## Lo que destapó k6: el consumidor ahogando a su propia API (2026-07-18)
+
+Al medir con k6 —que empuja mucho más que el generador de Python— apareció
+esto en `notificacion-service`:
+
+```
+level="ERROR" service="exception-handler"
+message="Pool de conexiones agotado en GET /api/v1/notificaciones/mis-alertas"
+errorType="PoolTimeout"  httpStatus=503
+```
+
+Y en el Gateway, la consecuencia:
+
+```
+level="WARNING" message="Circuito OPEN para 'notificaciones': fail-fast"
+```
+
+### Dos causas, y la segunda es de diseño
+
+**1. Una consulta sin el índice adecuado.** `GET /mis-alertas` filtra por
+`(rol_destino, leida)` y ordena por `created_at DESC`. Había índices sueltos en
+las dos primeras columnas pero **ninguno en `created_at`**, así que PostgreSQL
+filtraba y luego **ordenaba en memoria** todo lo que pasara el filtro. Con
+**46.627 notificaciones** acumuladas:
+
+```
+ANTES:  Bitmap Heap Scan -> 11.139 filas -> top-N heapsort     9.8 ms
+DESPUÉS: Index Scan Backward, para en el LIMIT               0.248 ms
+```
+
+**40× más rápido** con un índice compuesto `(rol_destino, leida, created_at)`.
+
+**2. El servicio hace doble trabajo con un solo pool.** `notificacion-service`
+atiende la API HTTP **y** consume eventos de RabbitMQ en el mismo proceso, y el
+consumidor abre una sesión por notificación. Bajo carga, consumidor y API
+compiten por las mismas 20 conexiones hasta agotarlas.
+
+Se subió su pool (y el de `auditoria-service`, que también consume) a 25+25.
+**La solución de fondo sería separar el consumidor en su propio proceso**, con
+su propio pool: así una avalancha de eventos no puede dejar sin conexiones a la
+API que consulta el usuario. Queda registrado como brecha.
+
+### Por qué había 46.627 notificaciones
+
+Es efecto directo de la decisión de que **el ADMIN reciba copia de todos los
+eventos**. Es correcto funcionalmente —el admin supervisa las dos sedes— pero
+significa que cada evento del sistema escribe al menos una fila. Bajo carga
+sintética eso se multiplica rápido.
+
+No se cambia la decisión: en operación real el volumen de eventos es órdenes de
+magnitud menor. Pero conviene saber que **esa tabla crece con el tráfico** y
+necesitará una política de retención (archivar o borrar leídas con antigüedad).
+
+### Resultado tras los dos arreglos
+
+| | Antes | Después |
+| :-- | --: | --: |
+| Queue depth pico | 101 | **13** |
+| Errores 503 | sí (circuito abierto) | **0** |
+| Errores 500 | 0 | **0** |

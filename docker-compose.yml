@@ -381,6 +381,14 @@ services:
       # se enciende AQUI a proposito para la sustentacion. En produccion
       # esta linea no existiria y /_chaos/crash devolveria 404.
       CHAOS_ENABLED: "true"
+      # Pool MAS GRANDE que el resto: este servicio hace doble trabajo en el
+      # mismo proceso —atiende la API HTTP y consume eventos de RabbitMQ— y el
+      # consumidor abre una sesion por notificacion. Bajo carga, el consumidor
+      # y la API compiten por el mismo pool y lo agotan: la corrida con k6 dio
+      # "PoolTimeout / Pool de conexiones agotado" en GET /mis-alertas y el
+      # circuito de 'notificaciones' llego a abrirse.
+      DB_POOL_SIZE: "25"
+      DB_POOL_MAX_OVERFLOW: "25"
     ports:
       - "8006:80"   # Swagger en http://localhost:8006/docs (solo demo)
     networks:
@@ -411,6 +419,14 @@ services:
       # se enciende AQUI a proposito para la sustentacion. En produccion
       # esta linea no existiria y /_chaos/crash devolveria 404.
       CHAOS_ENABLED: "true"
+      # Pool MAS GRANDE que el resto: este servicio hace doble trabajo en el
+      # mismo proceso —atiende la API HTTP y consume eventos de RabbitMQ— y el
+      # consumidor abre una sesion por notificacion. Bajo carga, el consumidor
+      # y la API compiten por el mismo pool y lo agotan: la corrida con k6 dio
+      # "PoolTimeout / Pool de conexiones agotado" en GET /mis-alertas y el
+      # circuito de 'notificaciones' llego a abrirse.
+      DB_POOL_SIZE: "25"
+      DB_POOL_MAX_OVERFLOW: "25"
     # Permite que los webhooks lleguen a un receptor corriendo en el HOST
     # (p. ej. http://host.docker.internal:9100 para probar en local).
     extra_hosts:

@@ -193,14 +193,44 @@ def main():
     muestreador.start()
     inicio = time.monotonic()
 
-    proc = subprocess.run(
-        ["docker", "run", "--rm", "-i", "--network", red,
+    # Nombre fijo del contenedor: hace falta para poder pararlo con SIGINT
+    # desde fuera si el usuario interrumpe (ver más abajo).
+    nombre_contenedor = f"k6-{args.fase}-{marca}"
+    interrumpido = False
+
+    print("Corriendo. Puedes cortar con Ctrl+C: k6 emitirá el resumen de lo")
+    print("que llevara hecho hasta ese momento y se mostrará igualmente.\n")
+
+    proceso = subprocess.Popen(
+        ["docker", "run", "--rm", "-i", "--name", nombre_contenedor,
+         "--network", red,
          "-e", f"TOTAL={cfg['total']}", "-e", f"VUS={vus}",
          "-e", f"MAX_DURACION={cfg['max']}",
          "grafana/k6:latest", "run", "-"],
         stdin=open(os.path.join(AQUI, "carga.js"), "rb"),
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace",
     )
+
+    try:
+        salida, err = proceso.communicate()
+    except KeyboardInterrupt:
+        # Ctrl+C: se manda SIGINT AL CONTENEDOR, no se mata el proceso local.
+        # k6 atiende SIGINT parando los VUs de forma ordenada y ejecutando
+        # `handleSummary`, así que el resumen de lo ya hecho sí se emite. Un
+        # `kill` directo perdería todas las mediciones de la corrida.
+        interrumpido = True
+        print("\n\nInterrumpido. Pidiendo a k6 que cierre y emita el resumen parcial...")
+        subprocess.run(["docker", "kill", "--signal=SIGINT", nombre_contenedor],
+                       capture_output=True)
+        try:
+            salida, err = proceso.communicate(timeout=45)
+        except subprocess.TimeoutExpired:
+            proceso.kill()
+            salida, err = proceso.communicate()
+
+    proc = subprocess.CompletedProcess(
+        args=[], returncode=proceso.returncode, stdout=salida or "", stderr=err or "")
     duracion = time.monotonic() - inicio
     restaurar_rate_limit()
     muestreador.parar.set()
@@ -284,6 +314,21 @@ def main():
     print(f"  CPU pico/prom .... {rec['cpu_pico']:.0f}% / {rec['cpu_prom']:.0f}%"
           if rec["cpu_pico"] else "  CPU ............. sin muestras")
     print()
+
+    if interrumpido:
+        print("=" * 70)
+        print(" CORRIDA INTERRUMPIDA — estadisticas parciales")
+        print("=" * 70)
+        print(f"  Se completaron {m['total']:,} de {cfg['total']:,} peticiones "
+              f"({m['total']/cfg['total']*100:.1f}%).".replace(",", " "))
+        print("  Los numeros de arriba son REALES pero PARCIALES.")
+        print()
+        print("  NO se anade la fila a la tabla: mezclar una corrida a medias")
+        print("  con las completas haria la tabla incomparable. El JSON si se")
+        print("  guarda, por si quieres consultarlo.")
+        print()
+        print(f"  JSON: {salida_json}")
+        sys.exit(0)
 
     # Acumula la fila en el documento, sin borrar las corridas anteriores.
     nuevo = not os.path.exists(TABLA)
