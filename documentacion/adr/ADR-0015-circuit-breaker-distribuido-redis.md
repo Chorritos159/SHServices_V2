@@ -27,8 +27,8 @@ Además, las consultas de listados pesados (como `GET /tickets/`) sin límite de
 ## Consecuencias
 
 *   **Positivas:**
-    *   El estado del Circuit Breaker es **consistente entre los 8 workers**: ya
-        no "parpadea" ni depende de a qué proceso cayó la petición. Esto es lo
+    *   El **estado** del Circuit Breaker es **consistente entre los 8 workers**:
+        ya no "parpadea" ni depende de a qué proceso cayó la petición. Esto es lo
         que desbloquea escalar el Gateway sin perder la garantía de resiliencia,
         y era la condición que ADR-0008 puso para poder hacerlo.
     *   Latencias de listados estables (**67 ms** medidos en `GET /tickets/`
@@ -42,6 +42,35 @@ Además, las consultas de listados pesados (como `GET /tickets/`) sin límite de
     *   Cada evaluación del breaker pasa a ser una llamada de red. Se mitiga
         con `socket_timeout=2.0` y el fallback en memoria, pero deja de ser una
         operación de nanosegundos.
+
+## Lo que Redis NO arregló: los CONTADORES de Prometheus
+
+Redis comparte el **estado** del breaker (abierto/cerrado), y eso resolvió el
+parpadeo. Pero los **contadores** de Prometheus siguen viviendo en la memoria
+de cada worker:
+
+`gateway_proxy_requests_total`, `gateway_retries_total`,
+`gateway_circuit_opens_total`, `gateway_rate_limit_rejects_total`,
+`gateway_bulkhead_rejects_total`...
+
+Cada uno de los 8 procesos lleva su propio registro, y `/metrics` devuelve el
+del worker que conteste el scrape. **Comprobado:** se mandaron 30 peticiones y
+el contador reportó **21**, de forma estable entre scrapes — no es un retraso,
+es que solo se ve una fracción.
+
+**Consecuencia para Grafana:** todos los paneles basados en esos contadores
+**subestiman** el volumen real. No están "rotos" —las tendencias y las formas
+siguen siendo válidas— pero sus valores absolutos no se pueden citar como
+cifras del sistema.
+
+Esta ADR afirmaba *"consistencia absoluta del estado del Circuit Breaker en
+Grafana"*. Es cierto para el **estado** (viene de Redis) y **falso para los
+contadores**.
+
+**Solución conocida:** el modo *multiprocess* de `prometheus_client`
+(`PROMETHEUS_MULTIPROC_DIR`), que agrega los registros de todos los workers
+en un directorio compartido. Es un cambio acotado y está registrado como
+brecha; no se aplicó por estar fuera del alcance de esta entrega.
 
 ## Corrección de una afirmación anterior (2026-07-18)
 

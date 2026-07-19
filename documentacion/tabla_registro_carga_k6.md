@@ -5,4 +5,4 @@
 
 | Fase | Throughput | p95 | p99 | Error rate | CPU/Mem | Queue depth | Resultado |
 | :-- | --: | --: | --: | --: | :-- | --: | :-- |
-| **humo** | 153 rps | 257 ms | 336 ms | 0.00% | 320% / 546 MiB | 13 | cero errores 500. |  <!-- 20260718_232243 -->
+| **humo** | 158 rps | 293 ms | 401 ms | 0.00% | 356% / 521 MiB | 19 | cero errores 500. |  <!-- 20260718_233836 -->

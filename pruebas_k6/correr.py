@@ -80,13 +80,49 @@ def red_docker() -> str:
 
 
 class Muestreador(threading.Thread):
-    """Muestrea CPU/Mem del gateway y la profundidad de cola durante la corrida."""
+    """Muestrea CPU/Mem del gateway y la profundidad de cola durante la corrida.
 
-    def __init__(self, intervalo=5):
+    Además de acumular para el resumen, imprime una línea cada `cada_n`
+    muestras: en una corrida larga interesa ver si la CPU se está clavando o
+    si la cola empieza a crecer, no enterarse 40 minutos después.
+    """
+
+    def __init__(self, intervalo=5, cada_n=4, objetivo=0):
         super().__init__(daemon=True)
         self.intervalo = intervalo
+        self.cada_n = cada_n        # imprime 1 de cada N muestras (~20 s)
+        self.objetivo = objetivo    # peticiones que espera la corrida
+        self.base_peticiones = None  # contador del gateway al arrancar
         self.parar = threading.Event()
         self.cpu, self.mem, self.cola = [], [], []
+        self.inicio = time.monotonic()
+
+    def _informar(self):
+        """Pulso del sistema mientras corre: CPU, memoria y cola.
+
+        NO se muestra un contador de peticiones a proposito. La via evidente
+        seria `gateway_proxy_requests_total` de /metrics, pero con 8 workers
+        de Gunicorn cada proceso lleva su PROPIO registro de Prometheus y el
+        scrape devuelve el del worker que conteste: se comprobo mandando 30
+        peticiones y leyendo 21. Un porcentaje de avance calculado sobre eso
+        seria falso, y un dato falso es peor que ninguno.
+
+        El progreso real lo da k6 en su resumen final; aqui lo util es ver si
+        la CPU se esta clavando o si la cola empieza a crecer, que son las dos
+        senales que anticipan un problema en una corrida larga.
+        """
+        if not self.cpu:
+            return
+        transcurrido = time.monotonic() - self.inicio
+        cola_actual = self.cola[-1] if self.cola else "?"
+        cola_pico = max(self.cola) if self.cola else "?"
+        tendencia = ""
+        if len(self.cola) >= 4 and self.cola[-1] > self.cola[-4] * 1.5:
+            tendencia = "  <-- la cola CRECE"
+        print(f"  [t+{transcurrido/60:.1f} min]  "
+              f"CPU {self.cpu[-1]:.0f}% (pico {max(self.cpu):.0f}%)  "
+              f"Mem {self.mem[-1]:.0f} MiB  "
+              f"cola {cola_actual} (pico {cola_pico}){tendencia}", flush=True)
 
     def run(self):
         while not self.parar.is_set():
@@ -116,6 +152,8 @@ class Muestreador(threading.Thread):
                 self.cola.append(total)
             except Exception:
                 pass
+            if len(self.cpu) % self.cada_n == 0:
+                self._informar()
             self.parar.wait(self.intervalo)
 
     def resumen(self):
@@ -189,7 +227,7 @@ def main():
     from comun import ampliar_rate_limit, restaurar_rate_limit  # noqa: E402
     ampliar_rate_limit()
 
-    muestreador = Muestreador()
+    muestreador = Muestreador(objetivo=cfg['total'])
     muestreador.start()
     inicio = time.monotonic()
 
@@ -212,8 +250,61 @@ def main():
         text=True, encoding="utf-8", errors="replace",
     )
 
+    # PROGRESO EN VIVO. k6 escribe su barra de avance en stderr y el resumen
+    # (handleSummary) en stdout. Se muestra stderr segun llega y se guarda
+    # stdout en silencio para parsearlo al final.
+    #
+    # Se hace con hilos y no con `communicate()` porque este ultimo BLOQUEA
+    # hasta que el proceso termina: en una corrida de 40 minutos no verias
+    # absolutamente nada hasta el final, que es justo lo que pasaba antes.
+    buffer_salida = []
+
+    def bombear_stdout():
+        for linea in proceso.stdout:
+            buffer_salida.append(linea)
+
+    def bombear_stderr():
+        """Muestra el progreso de k6 según llega.
+
+        Se lee CARÁCTER a carácter y se corta tanto en `\\n` como en `\\r`:
+        k6 dibuja su barra de avance reescribiendo la misma línea con retorno
+        de carro, así que iterando por líneas (`for l in stderr`) no aparece
+        nada hasta que la corrida termina — que es exactamente lo que pasaba.
+
+        Para no inundar la consola en una corrida de 40 minutos, solo se
+        imprime una de cada varias actualizaciones.
+        """
+        actual, n = [], 0
+        while True:
+            car = proceso.stderr.read(1)
+            if not car:
+                break
+            if car in ("\n", "\r"):
+                texto = "".join(actual).strip()
+                actual = []
+                if not texto:
+                    continue
+                es_progreso = "%" in texto and "VUs" in texto
+                if es_progreso:
+                    n += 1
+                    if n % 8 == 0:            # ~1 de cada 8 refrescos
+                        print(f"  {texto}", flush=True)
+                else:
+                    # Avisos y errores de k6: siempre se muestran.
+                    print(f"  {texto}", flush=True)
+            else:
+                actual.append(car)
+
+    hilo_out = threading.Thread(target=bombear_stdout, daemon=True)
+    hilo_err = threading.Thread(target=bombear_stderr, daemon=True)
+    hilo_out.start()
+    hilo_err.start()
+
     try:
-        salida, err = proceso.communicate()
+        proceso.wait()
+        hilo_out.join(timeout=10)
+        hilo_err.join(timeout=10)
+        salida, err = "".join(buffer_salida), ""
     except KeyboardInterrupt:
         # Ctrl+C: se manda SIGINT AL CONTENEDOR, no se mata el proceso local.
         # k6 atiende SIGINT parando los VUs de forma ordenada y ejecutando
@@ -224,10 +315,13 @@ def main():
         subprocess.run(["docker", "kill", "--signal=SIGINT", nombre_contenedor],
                        capture_output=True)
         try:
-            salida, err = proceso.communicate(timeout=45)
+            proceso.wait(timeout=45)
         except subprocess.TimeoutExpired:
             proceso.kill()
-            salida, err = proceso.communicate()
+            proceso.wait()
+        hilo_out.join(timeout=15)
+        hilo_err.join(timeout=5)
+        salida, err = "".join(buffer_salida), ""
 
     proc = subprocess.CompletedProcess(
         args=[], returncode=proceso.returncode, stdout=salida or "", stderr=err or "")
