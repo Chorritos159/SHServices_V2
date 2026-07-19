@@ -81,6 +81,13 @@ const RUTAS_LECTURA = [
   "/api/v1/almacen/almacen/productos?limite=50",
   "/api/v1/auditoria/auditoria/eventos",
   "/api/v1/notificaciones/notificaciones/mis-alertas",
+  // Facturas y diagnosticos TIENEN que estar aqui. Sin trafico hacia ellos su
+  // circuito no puede abrirse nunca: la prueba de caos tumbaba 'facturas' y el
+  // panel lo mostraba CLOSED todo el rato, no porque aguantara, sino porque
+  // nadie lo estaba llamando. Se vio comparando con almacen y tickets, que si
+  // abrian.
+  "/api/v1/facturas/garantias/",
+  "/api/v1/diagnosticos/asignaciones/",
 ];
 
 /** Clasifica la respuesta en las metricas que alimentan la tabla. */
