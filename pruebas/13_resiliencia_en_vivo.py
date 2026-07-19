@@ -201,7 +201,8 @@ def demo3(token):
 
 def demo4(token):
     titulo(4, "AUTO-HEALING DE PROCESO — muere un worker y vuelve solo",
-           "panel 'CPU por servicio' (se ve el respawn)")
+           "ninguno: almacen no esta en el panel de CPU (solo salen los "
+           "servicios instrumentados). La evidencia son los logs de abajo.")
     print(" Servicio comprometido: ALMACEN (se mata 1 de sus 4 workers)\n")
     print("  OJO, se honesto en la exposicion: esto NO tumba el contenedor.")
     print("  Estos servicios corren con `uvicorn --workers 4`. Se mata el worker")
