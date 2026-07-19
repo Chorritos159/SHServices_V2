@@ -65,6 +65,26 @@ def _respuesta_desde_db(f: FacturaDB, db: Session = None) -> FacturaResponse:
     )
 
 
+@router.get("/", tags=["Facturación"])
+async def listar_facturas(db: Annotated[Session, Depends(get_db)], limite: int = 200):
+    """Listado de comprobantes, el mas reciente primero.
+
+    Existe para la vista "Consulta de Garantias y Facturas": las VENTAS de
+    mostrador no emiten garantia (solo el SOPORTE la lleva), asi que sin este
+    listado una venta hecha con ticket-service caido —cuya factura referencia
+    un id VENTA-XXX propio— no aparecia en ninguna consulta del panel.
+    """
+    limite = max(1, min(limite, 500))
+    filas = (db.query(FacturaDB).order_by(FacturaDB.fecha_emision.desc())
+             .limit(limite).all())
+    return [{
+        "idFactura": f.id, "idTicket": f.id_ticket,
+        "montoTotal": f.monto_total, "metodoPago": f.metodo_pago,
+        "fechaEmision": f.fecha_emision.isoformat() if f.fecha_emision else None,
+        "esVenta": (f.id_ticket or "").startswith("VENTA-"),
+    } for f in filas]
+
+
 @router.post("/", response_model=FacturaResponse, status_code=201, tags=["Facturación"])
 async def emitir_comprobante(
     factura: FacturaCreate,

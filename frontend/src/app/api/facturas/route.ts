@@ -6,6 +6,18 @@ import { gateway } from "@/lib/api/gateway";
  * BFF: emisión de comprobantes (facturación).
  * Mapea a POST /api/v1/facturas/facturas/ (service=facturas, path=facturas/).
  */
+export async function GET() {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+  try {
+    const { data, status } = await gateway.get("/facturas/facturas/");
+    return NextResponse.json(data, { status });
+  } catch (err) {
+    const e = err as { status?: number; data?: unknown };
+    return NextResponse.json(e.data ?? { error: "Facturación no disponible." }, { status: e.status ?? 503 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   const session = await getSession();
   if (!session) {
