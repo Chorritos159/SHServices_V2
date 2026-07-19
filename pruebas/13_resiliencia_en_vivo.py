@@ -12,8 +12,6 @@ prueban. Está pensada para proyectarla mientras se explica.
      agota su timeout y reintenta.
   3. BULKHEAD — se lanzan más llamadas concurrentes que huecos tiene el
      mamparo, y las que sobran se rechazan sin tumbar al servicio.
-  5. QUEUE DEPTH — una rafaga de escrituras encola mas rapido de lo que los
-     consumidores procesan; la cola sube y luego DRENA sola.
   4. AUTO-HEALING DE PROCESO — se mata un worker de uvicorn y el maestro lo
      respawnea; el servicio NUNCA deja de responder.
 
@@ -235,73 +233,9 @@ def demo4(token):
             print(f"    {linea[:130]}")
 
 
-def cola():
-    """Mensajes pendientes por cola, leidos de RabbitMQ."""
-    # Por la API HTTP y NO por `rabbitmqctl`: ese tarda ~60s en responder, y
-    # para entonces los consumidores ya habian drenado la cola, asi que la
-    # demo siempre marcaba 0 y no probaba nada.
-    import base64
-    pet = urllib.request.Request("http://localhost:15672/api/queues")
-    pet.add_header("Authorization", "Basic " +
-                   base64.b64encode(b"guest:guest").decode())
-    try:
-        colas = json.loads(urllib.request.urlopen(pet, timeout=6).read())
-    except Exception:
-        return 0, "(no se pudo leer RabbitMQ)"
-    total, detalle = 0, []
-    for c in colas:
-        n = c.get("messages", 0) or 0
-        total += n
-        detalle.append(f"{c.get('name')}={n}")
-    return total, ", ".join(detalle)
-
-
-def demo5(token):
-    titulo(5, "QUEUE DEPTH — la cola sube y DRENA sola",
-           "panel 'Queue depth' y 'Consumer lag' (seccion RabbitMQ)")
-    print(" Servicio comprometido: ninguno. Se satura a los CONSUMIDORES.")
-    print(" Cada alta de producto publica un evento a RabbitMQ que auditoria y")
-    print(" notificaciones tienen que procesar. Si se publica mas rapido de lo")
-    print(" que consumen, la cola CRECE: eso es el desacoplamiento absorbiendo")
-    print(" el exceso en vez de romperse.")
-    print("")
-
-    antes, _d = cola()
-    print(f"  cola al empezar ........... {antes} mensajes")
-    print("  lanzando 1200 altas de producto en rafaga (60 a la vez)...")
-
-    def alta(i):
-        c, _b = pedir(f"{GW}/api/v1/almacen/almacen/productos", "POST", {
-            "nombre": f"CARGA-demo5 {i}", "categoria": "REPUESTO",
-            "sede": "PIURA", "stock_inicial": 5, "precio_unitario": 10.0,
-        }, token=token, timeout=30)
-        return c
-
-    with ThreadPoolExecutor(max_workers=60) as ex:
-        list(ex.map(alta, range(1200)))
-
-    pico, detalle = cola()
-    print(f"  cola justo despues ........ {pico} mensajes  ({detalle})")
-    if pico > antes:
-        print("  >>> LA COLA SUBIO: mira el panel 'Queue depth' en Grafana <<<")
-    else:
-        print("  (los consumidores fueron mas rapidos que la rafaga; sube la")
-        print("   cantidad o mira 'Consumer lag', que es mas sensible)")
-
-    print("\n  Ahora NADIE hace nada: se observa como drena sola.")
-    for _ in range(12):
-        time.sleep(5)
-        actual, _d = cola()
-        print(f"    quedan {actual} mensajes")
-        if actual == 0:
-            break
-    print("\n  Esa curva que sube y vuelve a cero es el argumento: bajo rafaga")
-    print("  el sistema NO rechaza ni pierde eventos, los encola y los drena.")
-
-
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--demo", type=int, choices=[1, 2, 3, 4, 5],
+    ap.add_argument("--demo", type=int, choices=[1, 2, 3, 4],
                     help="Correr solo una (por defecto: las cuatro)")
     args = ap.parse_args()
 
@@ -310,8 +244,8 @@ def main():
         print("No se pudo iniciar sesion. Esta todo levantado? (docker compose ps)")
         sys.exit(1)
 
-    demos = {1: demo1, 2: demo2, 3: demo3, 4: demo4, 5: demo5}
-    elegidas = [args.demo] if args.demo else [1, 2, 3, 4, 5]
+    demos = {1: demo1, 2: demo2, 3: demo3, 4: demo4}
+    elegidas = [args.demo] if args.demo else [1, 2, 3, 4]
     try:
         for n in elegidas:
             demos[n](token)
