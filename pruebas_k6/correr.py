@@ -97,34 +97,62 @@ class Muestreador(threading.Thread):
         self.cpu, self.mem, self.cola = [], [], []
         self.inicio = time.monotonic()
 
-    def _informar(self):
-        """Pulso del sistema mientras corre: CPU, memoria y cola.
+    def _peticiones_servidas(self):
+        """Peticiones que lleva atendidas el Gateway.
 
-        NO se muestra un contador de peticiones a proposito. La via evidente
-        seria `gateway_proxy_requests_total` de /metrics, pero con 8 workers
-        de Gunicorn cada proceso lleva su PROPIO registro de Prometheus y el
-        scrape devuelve el del worker que conteste: se comprobo mandando 30
-        peticiones y leyendo 21. Un porcentaje de avance calculado sobre eso
-        seria falso, y un dato falso es peor que ninguno.
-
-        El progreso real lo da k6 en su resumen final; aqui lo util es ver si
-        la CPU se esta clavando o si la cola empieza a crecer, que son las dos
-        senales que anticipan un problema en una corrida larga.
+        Este contador ES FIABLE desde que las metricas van en modo
+        multiproceso (ADR-0015): antes, con 8 workers, /metrics devolvia el
+        registro de UN worker y subestimaba (30 enviadas -> 21 leidas), asi que
+        no se podia usar para calcular avance.
         """
+        try:
+            import urllib.request
+            texto = urllib.request.urlopen("http://localhost:8000/metrics",
+                                           timeout=8).read().decode()
+        except Exception:
+            return None
+        total = 0.0
+        for linea in texto.splitlines():
+            if linea.startswith("gateway_proxy_requests_total"):
+                try:
+                    total += float(linea.rsplit(" ", 1)[-1])
+                except ValueError:
+                    pass
+        return total
+
+    def _informar(self):
+        """Pulso del sistema mientras corre: avance, CPU, memoria y cola."""
         if not self.cpu:
             return
         transcurrido = time.monotonic() - self.inicio
+
+        avance = ""
+        servidas = self._peticiones_servidas()
+        if servidas is not None:
+            if self.base_peticiones is None:
+                self.base_peticiones = servidas
+            hechas = max(0, int(servidas - self.base_peticiones))
+            rps = hechas / transcurrido if transcurrido else 0
+            pct = hechas / self.objetivo * 100 if self.objetivo else 0
+            faltan = max(0, self.objetivo - hechas)
+            eta = faltan / rps / 60 if rps > 0 else 0
+            avance = f"{hechas}/{self.objetivo} ({pct:.1f}%) ~{rps:.0f} rps ETA {eta:.0f} min | "
+
         cola_actual = self.cola[-1] if self.cola else "?"
         cola_pico = max(self.cola) if self.cola else "?"
         tendencia = ""
         if len(self.cola) >= 4 and self.cola[-1] > self.cola[-4] * 1.5:
             tendencia = "  <-- la cola CRECE"
-        print(f"  [t+{transcurrido/60:.1f} min]  "
-              f"CPU {self.cpu[-1]:.0f}% (pico {max(self.cpu):.0f}%)  "
-              f"Mem {self.mem[-1]:.0f} MiB  "
-              f"cola {cola_actual} (pico {cola_pico}){tendencia}", flush=True)
+        print(f"  [t+{transcurrido/60:.1f} min] {avance}"
+              f"CPU {self.cpu[-1]:.0f}%  cola {cola_actual} (pico {cola_pico}){tendencia}",
+              flush=True)
 
     def run(self):
+        # La referencia se toma AL ARRANCAR, no en el primer informe: si no,
+        # la primera linea siempre diria 0% aunque ya se hubieran servido
+        # miles de peticiones.
+        self.base_peticiones = self._peticiones_servidas()
+        self.inicio = time.monotonic()
         while not self.parar.is_set():
             try:
                 r = subprocess.run(

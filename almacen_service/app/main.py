@@ -40,4 +40,20 @@ app.include_router(almacen.router, prefix="/api/v1/almacen", tags=["Almacén"])
 
 @app.on_event("startup")
 async def startup_event():
+    # Las secuencias que numeran los códigos de producto (REP-001, PRD-001).
+    # Se crean aquí y no en una migración porque este proyecto genera el
+    # esquema con `create_all`, que no sabe de secuencias sueltas. Es
+    # idempotente: si ya existen, solo se comprueba que no vayan por detrás
+    # del máximo actual.
+    from app.core.database import SessionLocal
+    from app.api.almacen import _asegurar_secuencias
+    db = SessionLocal()
+    try:
+        _asegurar_secuencias(db)
+        logger.info("Secuencias de codigos de producto listas (REP / PRD).")
+    except Exception as exc:      # nunca impedir el arranque por esto
+        logger.error(f"No se pudieron preparar las secuencias de codigos: {exc}")
+    finally:
+        db.close()
+
     logger.info("El Servicio de Almacén e Inventario ha arrancado exitosamente.")

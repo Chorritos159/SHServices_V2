@@ -1,6 +1,6 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, Query
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import time
@@ -73,31 +73,48 @@ async def listar_productos_venta(request: Request, db: Annotated[Session, Depend
         return productos
 
 
-def _siguiente_codigo(db: Session, categoria: str) -> str:
-    """Siguiente codigo secuencial, con el prefijo que corresponde a la categoria.
+# Una SECUENCIA de PostgreSQL por prefijo. `nextval()` es atómico: dos
+# peticiones simultáneas nunca reciben el mismo número, ni siquiera dentro de
+# la misma transacción.
+_SECUENCIAS = {"REP": "seq_codigo_repuesto", "PRD": "seq_codigo_producto_venta"}
 
-    `REP-` para repuestos y `PRD-` para productos de venta, cada uno con su
-    propia secuencia.
-    Optimizado: obtiene únicamente la fila con el código de mayor longitud y valor,
-    evitando transferir y procesar miles de registros en memoria (GIL/RAM bottleneck).
+
+def _asegurar_secuencias(db: Session) -> None:
+    """Crea las secuencias si no existen, arrancando tras el máximo actual.
+
+    Idempotente: `IF NOT EXISTS` y `setval` solo se aplican al crearlas, así
+    que no pisa la numeración en arranques posteriores.
+    """
+    for prefijo, secuencia in _SECUENCIAS.items():
+        db.execute(text(f"CREATE SEQUENCE IF NOT EXISTS {secuencia}"))
+        db.execute(text(f"""
+            SELECT setval('{secuencia}', GREATEST(
+                (SELECT COALESCE(MAX(CAST(substring(codigo from '[0-9]+$') AS INT)), 0)
+                   FROM inventario WHERE codigo LIKE '{prefijo}-%'),
+                (SELECT last_value FROM {secuencia})
+            ))
+        """))
+    db.commit()
+
+
+def _siguiente_codigo(db: Session, categoria: str) -> str:
+    """Siguiente código secuencial (REP-001, PRD-001...) sin carreras.
+
+    POR QUE UNA SECUENCIA Y NO `SELECT MAX(codigo) + 1`
+    Leer el máximo y sumarle uno es un `read-then-write`: entre la lectura y el
+    INSERT, otra petición puede haber leído lo mismo. Con 50 usuarios virtuales
+    concurrentes eso pasa constantemente — la corrida de k6 lo destapó con
+    "No se pudo asignar un codigo unico tras 5 intentos debido a colisiones
+    concurrentes", devuelto además como HTTP 500.
+
+    Reintentar no lo arregla: solo reduce la probabilidad, y bajo carga alta
+    los 5 reintentos también se agotan. `nextval()` es ATÓMICO: el motor
+    garantiza que dos llamadas nunca devuelven el mismo valor, así que no hay
+    carrera que resolver ni bucle de reintentos que agotar.
     """
     prefijo = "PRD" if categoria.upper() == "PRODUCTO_VENTA" else "REP"
-    fila_max = (
-        db.query(ProductoDB.codigo)
-        .filter(ProductoDB.codigo.like(f"{prefijo}-%"))
-        .order_by(func.length(ProductoDB.codigo).desc(), ProductoDB.codigo.desc())
-        .first()
-    )
-    if not fila_max:
-        return f"{prefijo}-001"
-    
-    ultimo_codigo = fila_max[0]
-    sufijo = ultimo_codigo.split("-")[-1]
-    if sufijo.isdigit():
-        siguiente = int(sufijo) + 1
-    else:
-        siguiente = 1
-    return f"{prefijo}-{siguiente:03d}"
+    numero = db.execute(text(f"SELECT nextval('{_SECUENCIAS[prefijo]}')")).scalar()
+    return f"{prefijo}-{numero:03d}"
 
 
 @router.post("/productos", response_model=ProductoResponse, status_code=201, tags=["Inventario"])
@@ -111,36 +128,35 @@ async def crear_producto(
     correlation_id = _trazar(request)
 
     with logger.operacion("crear_producto", event="ProductoRegistrado.v1") as op:
-        intentos = 0
-        nuevo_producto = None
-        while intentos < 5:
-            try:
-                codigo = _siguiente_codigo(db, producto.categoria)
-                nuevo_producto = ProductoDB(
-                    codigo=codigo,
-                    nombre=producto.nombre,
-                    categoria=producto.categoria.upper(),
-                    sede=producto.sede.upper(),
-                    stock_disponible=producto.stock_inicial,
-                    stock_reservado=0,
-                    precio_unitario=producto.precio_unitario,
-                )
-                db.add(nuevo_producto)
-                db.commit()
-                db.refresh(nuevo_producto)
-                break
-            except IntegrityError:
-                db.rollback()
-                intentos += 1
-                if intentos == 5:
-                    raise HTTPException(
-                        status_code=500,
-                        detail="No se pudo asignar un codigo unico de producto tras 5 intentos debido a colisiones concurrentes."
-                    )
-                # Pequeño retardo aleatorio (jitter) para evitar colisiones consecutivas
-                time.sleep(random.uniform(0.01, 0.05))
-
-        codigo = nuevo_producto.codigo
+        # SIN bucle de reintentos: `_siguiente_codigo` usa una secuencia de
+        # PostgreSQL y `nextval()` no puede colisionar. El bucle anterior
+        # existía porque el código se calculaba con `MAX(codigo) + 1`, que sí
+        # produce carreras; bajo 50 usuarios concurrentes agotaba los 5
+        # intentos y devolvía un 500.
+        codigo = _siguiente_codigo(db, producto.categoria)
+        nuevo_producto = ProductoDB(
+            codigo=codigo,
+            nombre=producto.nombre,
+            categoria=producto.categoria.upper(),
+            sede=producto.sede.upper(),
+            stock_disponible=producto.stock_inicial,
+            stock_reservado=0,
+            precio_unitario=producto.precio_unitario,
+        )
+        db.add(nuevo_producto)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Si aun asi chocara (p. ej. alguien inserto ese codigo a mano),
+            # es un CONFLICTO, no una averia: 409 y no 500.
+            db.rollback()
+            op.result = RECHAZADO
+            op.mensaje = f"El codigo {codigo} ya existia al insertar."
+            raise HTTPException(
+                status_code=409,
+                detail=f"El codigo de producto '{codigo}' ya esta en uso. Reintenta la operacion.",
+            )
+        db.refresh(nuevo_producto)
         op.campos.update({
             "codigo": codigo,
             "sede": nuevo_producto.sede,
