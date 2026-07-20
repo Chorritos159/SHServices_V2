@@ -173,6 +173,13 @@ async def crear_ticket(
         "trace_id": correlation_id,
         "datos": {"idTicket": ticket_id, "sede": sede, "estado": estado_inicial}
     }
+    # Se SUELTA la conexion antes de encolar la tarea de fondo. FastAPI mantiene
+    # viva la sesion de `get_db` hasta que TODAS las background tasks terminan:
+    # si publicar en RabbitMQ tardaba, la conexion seguia retenida sin usarse y
+    # el pool se agotaba bajo carga. La respuesta ya esta construida, asi que
+    # cerrar aqui no afecta a la serializacion.
+    db.close()
+
     background_tasks.add_task(
         publicar_evento, exchange_name="tickets.eventos", routing_key="ticket.creado", mensaje=evento_payload
     )

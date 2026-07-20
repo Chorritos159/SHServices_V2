@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Float, Text
+from sqlalchemy import Column, String, DateTime, Float, Text, Index
 from app.core.database import Base
 import datetime
 
@@ -22,6 +22,17 @@ class TicketDB(Base):
     equipo = Column(String, nullable=True)                  # Marca/modelo del equipo
     numero_serie = Column(String, nullable=True, index=True)  # serie (opcional) para garantías fiables
     caracteristicas_falla = Column(Text, nullable=True)     # Descripción larga de la falla
+
+    __table_args__ = (
+        # Las dos consultas mas usadas filtran por estado y ORDENAN por fecha
+        # (cola del tecnico, listados por estado). Con dos indices sueltos
+        # PostgreSQL filtra por uno y ordena en memoria; el compuesto resuelve
+        # filtro y orden de una pasada.
+        Index("ix_tickets_estado_fecha", "estado", "fecha_registro"),
+        # Busqueda por cliente desde recepcion y para garantias.
+        Index("ix_tickets_documento", "documento_cliente"),
+    )
+
     precio_estimado = Column(Float, nullable=True)          # Presupuesto estimado (opcional)
 
     # Repuestos reservados en el diagnóstico (JSON). Los usa la máquina de estados

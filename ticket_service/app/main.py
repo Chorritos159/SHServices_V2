@@ -50,6 +50,23 @@ Instrumentator().instrument(app).expose(app)
 
 @app.on_event("startup")
 async def startup_event():
+    # Indices de las consultas calientes. Van aqui y no en `create_all` porque
+    # este solo crea indices al CREAR la tabla: en una base que ya existe (la de
+    # cualquier despliegue en marcha) no los anadiria nunca. IF NOT EXISTS lo
+    # hace idempotente, asi que es seguro en cada arranque.
+    try:
+        from sqlalchemy import text as _sql
+        from app.core.database import engine as _engine
+        with _engine.begin() as _conn:
+            _conn.execute(_sql(
+                "CREATE INDEX IF NOT EXISTS ix_tickets_estado_fecha "
+                "ON tickets (estado, fecha_registro)"))
+            _conn.execute(_sql(
+                "CREATE INDEX IF NOT EXISTS ix_tickets_documento "
+                "ON tickets (documento_cliente)"))
+    except Exception as _exc:      # nunca impedir el arranque por un indice
+        logger.error(f"No se pudieron preparar los indices de tickets: {_exc}")
+
     # Consumidor de eventos: es quien pasa el ticket a DIAGNOSTICADO cuando el
     # tecnico registra su diagnostico. Se guarda la referencia a la tarea porque
     # asyncio solo mantiene weakrefs: sin ella el recolector puede cancelarla.
