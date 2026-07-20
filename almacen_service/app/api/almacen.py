@@ -1,5 +1,7 @@
+import json
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -9,8 +11,9 @@ from app.models.schemas import (
     ProductoCreate, ProductoResponse, ReservaRequest, ProductoInventario, VentaRequest,
 )
 from app.models.inventario import ProductoDB
+from app.models.idempotencia import IdempotenciaDB
 from app.core.database import get_db
-from app.core.logger import get_logger, NO_ENCONTRADO, RECHAZADO
+from app.core.logger import get_logger, NO_ENCONTRADO, RECHAZADO, DUPLICADO
 from app.core.rabbitmq import publicar_evento
 
 router = APIRouter()
@@ -117,6 +120,43 @@ def _siguiente_codigo(db: Session, categoria: str) -> str:
     return f"{prefijo}-{numero:03d}"
 
 
+def _respuesta_idempotente(db: Session, clave: str | None):
+    """Si la clave ya se proceso, devuelve la respuesta original tal cual.
+
+    Sin esto, un reintento (el cliente pulsa dos veces, o el outbox del Gateway
+    reenvia tras una caida) repetia el efecto: producto dado de alta dos veces,
+    stock descontado dos veces.
+    """
+    if not clave:
+        return None
+    previo = db.query(IdempotenciaDB).filter(IdempotenciaDB.clave == clave).first()
+    if previo is None:
+        return None
+    return JSONResponse(status_code=previo.status_code,
+                        content=json.loads(previo.respuesta_json))
+
+
+def _guardar_idempotencia(db: Session, clave: str | None, operacion: str,
+                          status_code: int, cuerpo: dict) -> None:
+    """Deja constancia de la clave y su respuesta. Nunca tumba la operacion.
+
+    Va DESPUES del commit del efecto: si fallara al guardar la clave, es
+    preferible perder la proteccion de idempotencia que perder la venta o el
+    alta que ya se confirmo.
+    """
+    if not clave:
+        return
+    try:
+        db.add(IdempotenciaDB(clave=clave, operacion=operacion,
+                              status_code=status_code,
+                              respuesta_json=json.dumps(cuerpo, default=str)))
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(f"No se pudo registrar la Idempotency-Key '{clave}': {exc}")
+
+
+
 @router.post("/productos", response_model=ProductoResponse, status_code=201, tags=["Inventario"])
 async def crear_producto(
     producto: ProductoCreate,
@@ -126,6 +166,19 @@ async def crear_producto(
 ):
     """Ingresa un producto nuevo al almacen. El codigo se autogenera (REP-001, REP-002...)."""
     correlation_id = _trazar(request)
+
+    # Idempotencia (S34): si el servicio se cae ENTRE el commit y la respuesta,
+    # el cliente reintenta y el producto se daba de alta dos veces. Con la misma
+    # Idempotency-Key se devuelve la respuesta original sin repetir el alta.
+    clave_idem = request.headers.get("idempotency-key")
+    repetida = _respuesta_idempotente(db, clave_idem)
+    if repetida is not None:
+        logger.info(
+            f"Idempotency-Key '{clave_idem}' ya procesada; se devuelve el producto original.",
+            extra={"campos": {"operation": "crear_producto",
+                              "event": "ProductoRegistrado.v1", "result": DUPLICADO}},
+        )
+        return repetida
 
     with logger.operacion("crear_producto", event="ProductoRegistrado.v1") as op:
         # SIN bucle de reintentos: `_siguiente_codigo` usa una secuencia de
@@ -174,6 +227,15 @@ async def crear_producto(
             publicar_evento, exchange_name="tickets.eventos",
             routing_key="producto.registrado", mensaje=evento_payload,
         )
+
+        cuerpo = {
+            "codigo": nuevo_producto.codigo, "nombre": nuevo_producto.nombre,
+            "categoria": nuevo_producto.categoria, "sede": nuevo_producto.sede,
+            "stock_disponible": nuevo_producto.stock_disponible,
+            "stock_reservado": nuevo_producto.stock_reservado,
+            "precio_unitario": nuevo_producto.precio_unitario,
+        }
+        _guardar_idempotencia(db, clave_idem, "crear_producto", 201, cuerpo)
         return nuevo_producto
 
 
@@ -181,6 +243,16 @@ async def crear_producto(
 async def reservar_stock(reserva: ReservaRequest, request: Request, db: Annotated[Session, Depends(get_db)]):
     """Reserva un repuesto para una Orden de Servicio en una sede especifica."""
     _trazar(request)
+
+    # Idempotencia (S34): el tecnico pulsaba varias veces "agregar repuesto" y
+    # cada pulsacion movia stock otra vez. Con la misma Idempotency-Key se
+    # devuelve el resultado de la primera y NO se vuelve a mover nada.
+    clave_idem = request.headers.get("idempotency-key")
+    repetida = _respuesta_idempotente(db, clave_idem)
+    if repetida is not None:
+        logger.info(f"Idempotency-Key '{clave_idem}' ya procesada; reserva no repetida.",
+                    extra={"campos": {"operation": "reservar_stock", "result": DUPLICADO}})
+        return repetida
 
     with logger.operacion(
         "reservar_stock",
@@ -219,7 +291,9 @@ async def reservar_stock(reserva: ReservaRequest, request: Request, db: Annotate
         op.campos["stockDisponible"] = item.stock_disponible
         op.mensaje = (f"Reservadas {reserva.cantidad}x {item.codigo} ({item.nombre}); "
                       f"quedan {item.stock_disponible} disponible(s).")
-        return _estado_stock("RESERVA_CONFIRMADA", item)
+        cuerpo = _estado_stock("RESERVA_CONFIRMADA", item)
+        _guardar_idempotencia(db, clave_idem, "reservar_stock", 200, cuerpo)
+        return cuerpo
 
 
 def _buscar_bloqueado(db: Session, codigo: str, sede: str) -> ProductoDB:
@@ -317,6 +391,14 @@ async def descontar_stock(mov: ReservaRequest, request: Request, db: Annotated[S
     `POST /venta`, que las descuenta todas en una sola transacción.
     """
     _trazar(request)
+
+    clave_idem = request.headers.get("idempotency-key")
+    repetida = _respuesta_idempotente(db, clave_idem)
+    if repetida is not None:
+        logger.info(f"Idempotency-Key '{clave_idem}' ya procesada; descuento no repetido.",
+                    extra={"campos": {"operation": "descontar_stock", "result": DUPLICADO}})
+        return repetida
+
     with logger.operacion(
         "descontar_stock", codigo=mov.codigo_producto, sede=mov.sede.upper(), cantidad=mov.cantidad,
     ) as op:
@@ -338,7 +420,9 @@ async def descontar_stock(mov: ReservaRequest, request: Request, db: Annotated[S
         op.campos["stockDisponible"] = item.stock_disponible
         op.mensaje = (f"Venta directa: descontadas {mov.cantidad}x {item.codigo}; "
                       f"disponibles: {item.stock_disponible}.")
-        return _estado_stock("STOCK_DESCONTADO", item)
+        cuerpo = _estado_stock("STOCK_DESCONTADO", item)
+        _guardar_idempotencia(db, clave_idem, "descontar_stock", 200, cuerpo)
+        return cuerpo
 
 
 @router.post("/venta", tags=["Operaciones de Stock"])
@@ -361,6 +445,15 @@ async def descontar_venta(venta: VentaRequest, request: Request, db: Annotated[S
             status_code=401,
             detail="Tu token no trae la sede. Vuelve a iniciar sesion.",
         )
+
+    # Idempotencia: si caja reintenta el cobro (doble clic, o el BFF reenvia
+    # tras un timeout), el carrito NO se descuenta dos veces del inventario.
+    clave_idem = request.headers.get("idempotency-key")
+    repetida = _respuesta_idempotente(db, clave_idem)
+    if repetida is not None:
+        logger.info(f"Idempotency-Key '{clave_idem}' ya procesada; venta no repetida.",
+                    extra={"campos": {"operation": "descontar_venta", "result": DUPLICADO}})
+        return repetida
 
     with logger.operacion(
         "descontar_venta", sede=sede, lineas=len(venta.lineas),
@@ -405,4 +498,6 @@ async def descontar_venta(venta: VentaRequest, request: Request, db: Annotated[S
         op.campos.update({"unidades": unidades, "productos": len(items)})
         op.mensaje = (f"Venta de mostrador en {sede}: {unidades} unidad(es) de "
                       f"{len(items)} producto(s) descontadas del inventario.")
-        return {"status": "STOCK_DESCONTADO", "sede": sede, "lineas": detalle}
+        cuerpo = {"status": "STOCK_DESCONTADO", "sede": sede, "lineas": detalle}
+        _guardar_idempotencia(db, clave_idem, "descontar_venta", 200, cuerpo)
+        return cuerpo

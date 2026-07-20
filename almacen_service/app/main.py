@@ -10,8 +10,12 @@ from app.core.logger import get_logger
 from app.core.database import engine
 from app.core.seed import seed_inventario_base
 from app.models.inventario import Base
+# Se importa AUNQUE no se use por nombre: sin esto la clase no queda registrada
+# en el metadata de Base y `create_all` no crea la tabla de idempotencia.
+from app.models import idempotencia  # noqa: F401
 
-# Crear la tabla 'inventario' en Postgres si no existe
+# Crear las tablas del almacen en Postgres si no existen
+# (inventario + idempotencia_almacen).
 Base.metadata.create_all(bind=engine)
 
 # Migración NO destructiva: agrega el precio de venta si aún no existe (idempotente).
