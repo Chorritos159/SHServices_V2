@@ -184,7 +184,14 @@ async def drenar_una_vez(microservicios: dict, breakers: dict | None = None) -> 
             db.query(OutboxDB)
             .filter(OutboxDB.estado == PENDIENTE)
             .filter((OutboxDB.proximo_reintento_en == None) | (OutboxDB.proximo_reintento_en <= ahora))  # noqa: E711
-            .order_by(OutboxDB.creado_en.asc())
+            # FIFO ESTRICTO: `creado_en` y, como desempate, el `id`
+            # autoincremental. Con solo `creado_en`, dos peticiones que caen en
+            # el mismo instante quedaban a criterio de PostgreSQL, y al drenar
+            # podia entregarse antes la SEGUNDA. Se noto con dos tecnicos
+            # tomando el mismo ticket con diagnostico caido: ganaba el que
+            # llegaba despues. El `id` es autoincremental, asi que refleja el
+            # orden real de insercion y rompe el empate sin ambiguedad.
+            .order_by(OutboxDB.creado_en.asc(), OutboxDB.id.asc())
             .limit(50)
             .all()
         )
@@ -192,14 +199,36 @@ async def drenar_una_vez(microservicios: dict, breakers: dict | None = None) -> 
         db.close()
 
     entregados = 0
+    # Servicios cuya cabeza de cola ya fallo en ESTE ciclo. Ver abajo por que
+    # bloquea al resto de su servicio.
+    atascados: set[str] = set()
+
     for p in pendientes:
         # Si el circuito del servicio sigue abierto, no malgastamos el intento.
         if breakers is not None:
             br = breakers.get(p.servicio)
             if br is not None and getattr(br, "estado", "CLOSED") == "OPEN":
+                atascados.add(p.servicio)
                 continue
 
+        # BLOQUEO DE CABEZA POR SERVICIO. Si una escritura anterior de este
+        # mismo servicio no se pudo entregar, las siguientes ESPERAN su turno.
+        #
+        # Sin esto el orden se rompia justo cuando el servicio volvia: la
+        # primera peticion se intentaba mientras aun arrancaba y fallaba, y la
+        # segunda —intentada medio segundo despues— lo encontraba vivo y
+        # ganaba. Se vio con dos tecnicos tomando el mismo ticket: tomaba
+        # primero el tecnico01 y el ticket acababa asignado a quien pulso
+        # DESPUES. Una cola store-and-forward tiene que respetar el orden de
+        # llegada, o deja de ser una cola.
+        if p.servicio in atascados:
+            continue
+
         nuevo_estado, status_http, detalle = await _entregar(p, microservicios)
+        if nuevo_estado != ENTREGADO:
+            # No se pudo: su servicio queda atascado hasta el proximo ciclo,
+            # para que nadie se le adelante.
+            atascados.add(p.servicio)
 
         db = SessionLocal()
         try:
