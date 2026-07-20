@@ -543,12 +543,21 @@ demostrada; son ampliaciones funcionales.
 
 ## Brechas conocidas
 
-| Brecha | Detalle | Por qué se aceptó así |
-| :-- | :-- | :-- |
-| Gateway de 1 solo worker | Limita el throughput a ~85-90 rps (CPU de un núcleo saturado bajo carga) | El circuit breaker vive en memoria del proceso; con >1 worker cada uno tendría su propio breaker y el estado "parpadearía" entre CLOSED/OPEN según a qué worker cae cada request. Corregir de raíz requeriría mover el estado a Redis — evaluado y postergado por priorizar la corrección del mecanismo sobre el throughput bruto |
-| Gateway como punto único de fallo | Si el Gateway completo cae, cae todo el tráfico de negocio | Sin redundancia/réplicas en esta entrega (un solo host de demo); mitigado parcialmente por `restart: always`, no por alta disponibilidad real |
-| Fallas no cubiertas por las fichas de caos | Consumidor lento, base de datos lenta, error de contrato, fallo parcial explícito (ver `documentacion/fichas_falla_controlada.md`, tabla final) | Fuera del alcance de esta fase; el código de orquestación (`diagnostico-service`) ya maneja fallos parciales por repuesto individual, pero no se verificó como ficha de caos dedicada |
-| `.env` con valores de demo | Los secretos de `.env` (no versionado) son los mismos usados durante todo el desarrollo, no rotados para producción real | Proyecto académico de sustentación, no un despliegue productivo |
+Estas son las limitaciones que reconozco del proyecto. La lista completa, con
+el riesgo de cada una y qué haría falta para cerrarla, está en
+**[documentacion/brechas_finales.md](documentacion/brechas_finales.md)** — ese
+documento es la fuente única, y aquí resumo solo las de mayor peso:
+
+| Brecha | Por qué se aceptó |
+| :-- | :-- |
+| **Gateway como punto único de fallo** | Sin réplicas en esta entrega (un solo host de demo). Mitigado en parte por `restart: always`, no por alta disponibilidad real |
+| **Tráfico interno sin TLS** | Es tráfico este-oeste dentro de la red Docker, sin puertos publicados. Cifrarlo exigiría una CA interna y rotación de certificados por servicio, es decir mTLS vía service mesh |
+| **Los microservicios confían en las cabeceras `X-User-*`** | Quien alcance un servicio directo podría falsificar identidad. Aceptado porque solo el Gateway es alcanzable en un despliegue real; en la demo los puertos se publican para poder enseñar cada Swagger |
+| **Cobertura de pruebas del 4,2 %** | La verificación se apoya en pruebas de integración y de carga de punta a punta, no en unitarias. Subirla es el siguiente paso natural |
+| **El caos derriba servicios de uno en uno** | No se prueban caídas simultáneas ni orden aleatorio, que es donde aparecen los fallos que de verdad tumban sistemas |
+| **Alcance funcional de servicios y frontend** | El alcance se fijó en el flujo de negocio completo y la resiliencia; falta el CRUD de gestión y, en la web, paginación, filtros y edición |
+| **Secretos de `.env` sin rotar** | Valores de demo, no aptos para un despliegue real |
+
 
 ## Más documentación
 
