@@ -9,6 +9,11 @@ observabilidad y gobierno documentado (S26/S29/S31/S34).
 > página responde exactamente lo que hace falta para levantar el sistema,
 > operarlo y auditarlo.
 
+### Documentacion clave
+
+- [Los 12 mecanismos de resiliencia](documentacion/resiliencia.md) — que es cada uno, en que archivo y linea vive, y **por que** se eligio cada valor.
+- [Fichas contractuales de la API](documentacion/fichas_contractuales.md) — contrato de los 11 endpoints principales.
+
 ## Cómo levantar el entorno
 
 ```bash
