@@ -173,6 +173,13 @@ async def registrar_diagnostico(
                 "sede": sede,
                 "estadoReserva": estado_reserva,
                 "precioReparacion": diagnostico.precio_reparacion,
+                # Los repuestos VIAJAN en el evento. Sin ellos, ticket-service
+                # no sabe que confirmar al entregar y el stock se queda
+                # reservado para siempre (reservado pero nunca descontado).
+                "repuestos": [
+                    {"codigo_producto": r.codigo_repuesto, "cantidad": r.cantidad}
+                    for r in diagnostico.repuestos
+                ],
             },
         }
         background_tasks.add_task(

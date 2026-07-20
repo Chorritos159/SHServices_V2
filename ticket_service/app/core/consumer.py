@@ -72,9 +72,19 @@ def _marcar_diagnosticado(datos: dict) -> None:
 
         anterior = ticket.estado
         ticket.estado = ESTADO_LISTO
+
+        # Se guardan los repuestos que el diagnostico reservo. Es lo que luego
+        # usa POST /{id}/entregar para CONFIRMAR (descontar de verdad) el stock.
+        # Sin esto la lista quedaba vacia, `_mover_stock` no llamaba a nadie y
+        # los repuestos se quedaban reservados y nunca descontados.
+        repuestos = datos.get("repuestos") or []
+        if repuestos:
+            ticket.repuestos_reservados = json.dumps(repuestos)
+
         db.commit()
         logger.info(
-            f"Ticket {id_ticket}: {anterior} -> {ESTADO_LISTO} por el diagnostico del tecnico.",
+            f"Ticket {id_ticket}: {anterior} -> {ESTADO_LISTO} "
+            f"({len(repuestos)} repuesto(s) reservado(s) anotados).",
             extra={"campos": {"operation": "consumir_diagnostico",
                               "event": "DiagnosticoRegistrado.v1", "result": "exito",
                               "idTicket": id_ticket}},

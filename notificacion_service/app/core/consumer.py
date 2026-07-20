@@ -98,8 +98,15 @@ def _enrutar(routing_key: str, payload: dict):
         if datos.get("estado") == "EN_COLA":
             _guardar("TECNICO", f"Nuevo equipo en cola: {ref}", ref, evento, trace_id)
 
-    elif routing_key == "ticket.listo":
+    elif routing_key in ("ticket.listo", "ticket.diagnosticado"):
         # El equipo ya fue diagnosticado: Recepción puede cobrar y entregar.
+        #
+        # OJO con las DOS claves. Quien publica al terminar el diagnostico es
+        # `diagnostico-service`, y su routing key es `ticket.diagnosticado`, NO
+        # `ticket.listo`. Mientras aqui solo se miraba `ticket.listo`, esta rama
+        # no se ejecutaba nunca: a CAJA no le llegaba nada y solo aparecia la
+        # copia de supervision del ADMIN (la del punto 2 de abajo). Se noto tras
+        # una caida por caos, pero pasaba SIEMPRE, con o sin caos.
         _guardar("CAJA", f"Equipo listo para cobro y entrega: {ref}", ref, evento, trace_id)
 
     # 2. Copia de supervisión para ADMIN, pase lo que pase.
