@@ -304,6 +304,20 @@ consumidores es la siguiente palanca, y está identificada gracias a esta métri
 | 12 | Consumer lag | RabbitMQ + Grafana | panel *Consumer lag* |
 
 **Cómo demostrarlos en vivo:** `python pruebas/13_resiliencia_en_vivo.py`
-(4 demos cortas: sonda activa, timeout+retry, bulkhead y respawn de worker).
+(8 demos cortas). Cada una demuestra un mecanismo concreto de esta lista:
+
+| Demo | Mecanismo que demuestra |
+| :-- | :-- |
+| `--demo 1` | **Circuit breaker** (#5) y su **sonda activa**: el circuito se cierra solo |
+| `--demo 2` | **Timeout** (#1), **retry con backoff** (#2) y **jitter** (#3) |
+| `--demo 3` | **Bulkhead** (#6) y **dropping/shedding** (#9) |
+| `--demo 4` | Auto-healing de proceso: el maestro de uvicorn respawnea al worker |
+| `--demo 5` | **Idempotencia** (#4): tres envíos iguales, una sola fila |
+| `--demo 6` | **Buffering** (#8) y **fallback** (#10): el backlog se procesa al volver |
+| `--demo 7` | **Queue depth** (#11) y **consumer lag** (#12), en dos fases |
+| `--demo 8` | **Circuit breaker** (#5) completo: 503, fail-fast y cierre automático |
+
+Los mecanismos #7 (backpressure) se observa en las corridas de carga, donde el
+rate limit responde 429 al superar el umbral.
 Para verlos bajo carga real con servicios cayéndose:
 `python pruebas_k6/caos.py --fase 100k --vus 200`.

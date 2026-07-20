@@ -454,14 +454,14 @@ y la reponen internamente, ya a salvo.
 
 | N | Mecanismo | Qué se ve | Resultado medido |
 | :-- | :-- | :-- | :-- |
-| **1** | Sonda activa (circuit breaker) | El circuito abre, se restaura la conectividad y nadie lo toca | Se cierra **solo en 16 s** |
-| **2** | Timeout + retry con backoff | Se inyectan 9 s de latencia; el Gateway corta y reintenta | `intento 1/4, backoff 3,57 s` |
-| **3** | Bulkhead | 40 llamadas concurrentes contra un servicio lento | Las que no caben salen con 503 |
-| **4** | Auto-healing de proceso | Se mata un worker de uvicorn | 12/12 sondeos OK: el maestro lo respawnea |
-| **5** | Idempotencia | El mismo alta 3 veces con la misma clave | **1 sola fila** en la base de datos |
-| **6** | Buffering / backlog | Se para `ticket-service` y el técnico diagnostica igual | El ticket se cierra **solo en 4 s** al volver |
-| **7** | Queue depth y consumer lag | Dos fases: `pause` congela al consumidor (sube el **lag**) y `stop` lo mata (sube el **depth**) | Fase A: lag 226. Fase B: depth 254. Ambas drenan solas |
-| **8** | Circuit breaker completo | Tráfico real contra un servicio caído | Múltiples 503, fail-fast y cierre automático |
+| **1** | **Circuit breaker + sonda activa** | El circuito abre, se restaura la conectividad y nadie lo toca | Se cierra **solo en 16 s** |
+| **2** | **Timeout, retry y jitter** | Se inyectan 9 s de latencia; el Gateway corta y reintenta | `intento 1/4, backoff 3,57 s` |
+| **3** | **Bulkhead y shedding** | 40 llamadas concurrentes contra un servicio lento | Las que no caben salen con 503 |
+| **4** | **Auto-healing de proceso** | Se mata un worker de uvicorn | 12/12 sondeos OK: el maestro lo respawnea |
+| **5** | **Idempotencia** | El mismo alta 3 veces con la misma clave | **1 sola fila** en la base de datos |
+| **6** | **Buffering y fallback** | Se para `ticket-service` y el técnico diagnostica igual | El ticket se cierra **solo en 4 s** al volver |
+| **7** | **Queue depth y consumer lag** | Dos fases: `pause` congela al consumidor (sube el **lag**) y `stop` lo mata (sube el **depth**) | Fase A: lag 226. Fase B: depth 254. Ambas drenan solas |
+| **8** | **Circuit breaker completo** | Tráfico real contra un servicio caído | Múltiples 503, fail-fast y cierre automático |
 
 Sin `--demo` se ejecutan las ocho seguidas. Cada una restaura lo que tocó, así
 que se pueden lanzar en cualquier orden.
