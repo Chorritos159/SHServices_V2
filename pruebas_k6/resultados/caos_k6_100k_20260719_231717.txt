@@ -1,0 +1,101 @@
+========================================================================
+ CAOS BAJO CARGA k6 — fase 100k: 100 000 peticiones  50 VUs
+========================================================================
+Se tumbaran, uno a uno y SIN parar el trafico: almacen, tickets, facturas, diagnosticos, notificaciones, auditoria
+Se tumban con TOXIPROXY: se deshabilita su proxy y el Gateway deja de
+poder conectar al instante, sin tocar contenedores. La conectividad la
+restaura la prueba; lo que se recupera SOLO es el CIRCUITO, por la
+sonda activa (ADR-0014).
+
+AVISO: la fase '100k' dura ~8.3 min a 200 rps,
+       menos que el guion de caos (~9.8 min). k6 acabaria
+       antes de tumbar todo y la prueba no mediria el caos bajo carga.
+       Usa --fase 100k o superior.
+
+[calentando 45s antes del primer crash]
+
+--- CAIDA de 'almacen' (proxy almacen_proxy deshabilitado) ---
+  circuito de 'almacen': OPEN  OK (aislado)
+  OK: ningun otro circuito se contagio
+  servicio FUERA; dejandolo caido 30s con el trafico encima...
+  restaurando la conectividad de 'almacen'...
+  su circuito volvio a CLOSED SOLO en 9.9s  (sonda activa, ADR-0014)
+  dejando estabilizar 20s antes del siguiente...
+
+--- CAIDA de 'tickets' (proxy ticket_proxy deshabilitado) ---
+  circuito de 'tickets': OPEN  OK (aislado)
+  OK: ningun otro circuito se contagio
+  servicio FUERA; dejandolo caido 30s con el trafico encima...
+  restaurando la conectividad de 'tickets'...
+  su circuito volvio a CLOSED SOLO en 10.0s  (sonda activa, ADR-0014)
+  dejando estabilizar 20s antes del siguiente...
+
+--- CAIDA de 'facturas' (proxy factura_proxy deshabilitado) ---
+  circuito de 'facturas': OPEN  OK (aislado)
+  OK: ningun otro circuito se contagio
+  servicio FUERA; dejandolo caido 30s con el trafico encima...
+  restaurando la conectividad de 'facturas'...
+  su circuito volvio a CLOSED SOLO en 10.9s  (sonda activa, ADR-0014)
+  dejando estabilizar 20s antes del siguiente...
+
+--- CAIDA de 'diagnosticos' (proxy diagnostico_proxy deshabilitado) ---
+  circuito de 'diagnosticos': OPEN  OK (aislado)
+  OK: ningun otro circuito se contagio
+  servicio FUERA; dejandolo caido 30s con el trafico encima...
+  restaurando la conectividad de 'diagnosticos'...
+  su circuito volvio a CLOSED SOLO en 10.3s  (sonda activa, ADR-0014)
+  dejando estabilizar 20s antes del siguiente...
+
+--- CAIDA de 'notificaciones' (proxy notificacion_proxy deshabilitado) ---
+  circuito de 'notificaciones': OPEN  OK (aislado)
+  OK: ningun otro circuito se contagio
+  servicio FUERA; dejandolo caido 30s con el trafico encima...
+  restaurando la conectividad de 'notificaciones'...
+  su circuito volvio a CLOSED SOLO en 10.8s  (sonda activa, ADR-0014)
+  dejando estabilizar 20s antes del siguiente...
+
+--- CAIDA de 'auditoria' (proxy auditoria_proxy deshabilitado) ---
+  circuito de 'auditoria': OPEN  OK (aislado)
+  OK: ningun otro circuito se contagio
+  servicio FUERA; dejandolo caido 30s con el trafico encima...
+  restaurando la conectividad de 'auditoria'...
+  su circuito volvio a CLOSED SOLO en 10.4s  (sonda activa, ADR-0014)
+  dejando estabilizar 20s antes del siguiente...
+
+[fin del guion] Esperando a que k6 termine la fase...
+
+========================================================================
+ QUE SUFRIO EL TRAFICO MIENTRAS CAIAN LOS SERVICIOS
+========================================================================
+  peticiones atendidas ......... 131993
+  p95 / p99 ................... 896 / 1207 ms
+  degradadas con contrato ..... 4652 (503/504/429)
+  encoladas en el outbox ...... 4932
+  ERRORES OPACOS (500) ........ 0
+  CPU pico .................... 542%
+  cola RabbitMQ pico .......... 23344
+
+  OK: CERO errores 500 matando servicios con el trafico encima
+
+========================================================================
+ LINEA DE TIEMPO
+========================================================================
+  t+  45s  carga estable, antes del caos    todos CLOSED
+  t+  45s  cae almacen                      todos CLOSED
+  t+  96s  almacen recuperado               todos CLOSED
+  t+ 116s  cae tickets                      todos CLOSED
+  t+ 166s  tickets recuperado               todos CLOSED
+  t+ 186s  cae facturas                     todos CLOSED
+  t+ 238s  facturas recuperado              todos CLOSED
+  t+ 258s  cae diagnosticos                 todos CLOSED
+  t+ 308s  diagnosticos recuperado          todos CLOSED
+  t+ 329s  cae notificaciones               todos CLOSED
+  t+ 380s  notificaciones recuperado        todos CLOSED
+  t+ 400s  cae auditoria                    todos CLOSED
+  t+ 451s  auditoria recuperado             todos CLOSED
+
+========================================================================
+ VEREDICTO: OK — con k6 empujando, tumbar servicios uno a uno
+            produjo degradacion CON CONTRATO (cero 500) y sin
+            cascada; al volver, cada circuito se cerro SOLO.
+========================================================================
