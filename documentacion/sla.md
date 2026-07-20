@@ -103,10 +103,44 @@ ráfaga de 40**. Al superarlo: `429 Too Many Requests` + cabecera `Retry-After`.
    `Retry-After` es *backpressure*: el cliente sabe qué pasó y cuándo reintentar.
    Un timeout genérico no dice nada.
 
+**De dónde sale exactamente el 20.** No es un número redondo elegido al azar:
+
+| Dato | Valor | Fuente |
+| :-- | :-- | :-- |
+| Usuarios concurrentes reales | 5 (2 recepciones, 2 técnicos, 1 admin) | Alcance del negocio |
+| Peticiones por usuario en uso activo | ~1 cada segundo | Un listado y una acción por pantalla |
+| Demanda real estimada | **~5 rps** | 5 × 1 |
+| Margen de seguridad aplicado | ×4 | Para picos y crecimiento |
+| **Límite configurado** | **20 rps** | 5 × 4 |
+| Ráfaga permitida | 40 (2× el límite) | Absorbe un pico de 2 s sin castigar |
+
+El criterio es proteger **sin estorbar**: el límite tiene que estar muy por
+encima del uso legítimo y muy por debajo de lo que tumba el sistema. Con 20 rps
+hay un factor 4 de holgura frente al uso real y un factor 10 de margen frente a
+la capacidad medida (~200 rps).
+
 **Consecuencia asumida:** las pruebas de carga (100k/500k/1M) **amplían
 temporalmente** el rate limit y el bulkhead, porque su objetivo es medir la
 capacidad real del backend y no el techo del propio limitador. Se restauran al
 terminar cada corrida (ver `registro_de_carga.md`).
+
+### Limitación conocida: el límite efectivo no es 20 rps
+
+Hay que decirlo porque afecta a lo anterior. El token bucket vive **en memoria
+de cada worker** y el Gateway corre con **8**, así que cada uno lleva su propia
+cuenta: el límite efectivo es **~8 × 20 = 160 rps**, no los 20 configurados.
+
+Se detectó midiendo, al construir la demo 9: una ráfaga sostenida de 40 rps
+durante 12,6 s no produjo **ni un solo 429**, cuando con 20 rps reales deberían
+haberse rechazado ~200 peticiones.
+
+Es el mismo problema que tenía el circuit breaker antes del ADR-0015 (cada
+worker con su propio estado); al migrarlo a Redis se migró el breaker pero no el
+rate limit. Queda registrado como **brecha 24**, y su gemelo en el contador de
+intentos de login como **brecha 25**.
+
+Mientras tanto, la contención real la aporta el **bulkhead**, que sí funciona
+por servicio y sí rechaza con 503 cuando se llena.
 
 ## 5. Otros límites que sostienen el SLA
 
