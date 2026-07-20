@@ -171,7 +171,7 @@ de caos.
 
 ---
 
-## 7. Backpressure (rate limit)
+## 7. Backpressure (implementado con rate limit, bulkhead y shedding)
 
 | | |
 |---|---|
@@ -190,6 +190,36 @@ usuarios pulsando a la vez) sin castigar el uso normal.
 
 Devuelve **429**, que es una respuesta con contrato: le dice al cliente "vuelve a
 intentarlo", no "me rompí".
+
+### Backpressure y rate limit no son lo mismo
+
+Los uso juntos y por eso conviene separarlos, porque son cosas de distinto nivel:
+
+- **Backpressure es la ESTRATEGIA**: cuando el sistema no da abasto, empuja
+  hacia atrás al que produce en vez de aceptar trabajo que no podrá hacer.
+  Aceptarlo todo y morir despacio es peor que rechazar pronto y seguir vivo.
+- **El rate limit es UNA IMPLEMENTACIÓN de esa estrategia**, la que actúa en la
+  puerta de entrada. Hay más.
+
+En este sistema el backpressure se aplica en **tres capas**, cada una con su
+propio criterio y su propia respuesta:
+
+| Capa | Mecanismo | Criterio | Respuesta | Dónde |
+| :-- | :-- | :-- | :-- | :-- |
+| **Entrada** | Rate limit (token bucket) | Ritmo de llegada, mires como mires el estado del sistema | `429` | `core/ratelimit.py` |
+| **Por servicio** | Bulkhead | Llamadas en vuelo hacia ESE servicio | `503` | `main.py:267` |
+| **Por prioridad** | Shedding | Ocupación alta: se reserva cupo para lo crítico | `503` | `main.py:131` |
+
+La diferencia práctica: el **rate limit** rechaza aunque el sistema esté ocioso,
+porque solo mira el reloj; el **bulkhead** deja pasar todo lo que quepa aunque
+lleguen mil por segundo, porque solo mira cuántas hay en vuelo. Por eso hacen
+falta los dos: uno protege contra ráfagas, el otro contra lentitud.
+
+**No confundir con buffering (#8).** El buffering *absorbe* el exceso guardándolo
+(cola, outbox) para procesarlo después; el backpressure lo *rechaza*. Se elige
+uno u otro según si la operación puede esperar: una escritura de negocio se
+encola (202), una lectura de más se rechaza (429). Perder una consulta no cuesta
+nada; perder un cobro sí.
 
 ---
 
@@ -309,12 +339,12 @@ consumidores es la siguiente palanca, y está identificada gracias a esta métri
 | Demo | Mecanismo que demuestra |
 | :-- | :-- |
 | `--demo 1` | **Circuit breaker** (#5) y su **sonda activa**: el circuito se cierra solo |
-| `--demo 2` | **Timeout** (#1), **retry con backoff** (#2) y **jitter** (#3) |
-| `--demo 3` | **Bulkhead** (#6) y **dropping/shedding** (#9) |
+| `--demo 2` | **Timeout** (#1): corta a los 4 s · **Retry** (#2): reintenta 3 veces · **Jitter** (#3): separa esos reintentos |
+| `--demo 3` | **Bulkhead** (#6): limita llamadas EN VUELO por servicio · **Shedding** (#9): con el cupo casi lleno, sacrifica lo de baja prioridad |
 | `--demo 4` | Auto-healing de proceso: el maestro de uvicorn respawnea al worker |
 | `--demo 5` | **Idempotencia** (#4): tres envíos iguales, una sola fila |
-| `--demo 6` | **Buffering** (#8) y **fallback** (#10): el backlog se procesa al volver |
-| `--demo 7` | **Queue depth** (#11) y **consumer lag** (#12), en dos fases |
+| `--demo 6` | **Buffering** (#8): el evento espera en la cola · **Fallback** (#10): mientras tanto la operación responde con contrato en vez de fallar |
+| `--demo 7` | **Queue depth** (#11): mensajes ESPERANDO, nadie los recoge · **Consumer lag** (#12): mensajes ENTREGADOS que nadie confirma. Se provocan distinto: `stop` sube el primero, `pause` el segundo |
 | `--demo 8` | **Circuit breaker** (#5) completo: 503, fail-fast y cierre automático |
 
 | `--demo 9` | **Backpressure** (#7): ráfaga contra el token bucket del Gateway |
