@@ -19,6 +19,9 @@ import time
 from datetime import datetime, timedelta
 
 router = APIRouter()
+# Centinela: clave reservada pero con el trabajo aun sin terminar.
+IDEM_EN_CURSO = -1
+
 logger = get_logger("ticket-service")   # con guion, como los otros 8 servicios
 
 # URL interna del almacén (red Docker). El ticket_service orquesta el stock aquí.
@@ -83,16 +86,41 @@ async def crear_ticket(
     # de envío. Si el cliente lo manda y ya se procesó, se devuelve la MISMA
     # respuesta sin crear un ticket nuevo. Si no lo manda, se comporta como
     # antes (sin deduplicar) — el header es opt-in.
+    # La clave se RESERVA antes de crear nada, no se comprueba y luego se
+    # guarda. Comprobar-y-luego-actuar NO es atomico: cuando el circuito abre,
+    # el Gateway reintenta hasta 4 veces con la MISMA clave, y los reintentos
+    # entraban antes de que el primero llegara a registrarla. Resultado medido:
+    # el tercer envio creaba 4 tickets, uno por intento del retry.
+    #
+    # Con el INSERT primero, el indice unico de PostgreSQL arbitra: solo UNA
+    # peticion consigue la clave y las demas chocan con IntegrityError, que es
+    # la senal de que otro ya se encargo.
     clave_idem = request.headers.get("idempotency-key")
     if clave_idem:
-        previo = db.query(IdempotenciaDB).filter(IdempotenciaDB.clave == clave_idem).first()
-        if previo:
-            logger.info(
-                f"Idempotency-Key '{clave_idem}' ya procesada; se devuelve la respuesta original.",
-                extra={"campos": {"operation": "crear_ticket", "event": "TicketCreado.v1",
-                                   "result": "duplicado"}},
-            )
-            return JSONResponse(status_code=previo.status_code, content=json.loads(previo.respuesta_json))
+        try:
+            db.add(IdempotenciaDB(
+                clave=clave_idem, operacion="crear_ticket",
+                status_code=IDEM_EN_CURSO, respuesta_json="{}",
+            ))
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            previo = db.query(IdempotenciaDB).filter(
+                IdempotenciaDB.clave == clave_idem).first()
+            if previo is not None and previo.status_code != IDEM_EN_CURSO:
+                logger.info(
+                    f"Idempotency-Key '{clave_idem}' ya procesada; se devuelve la respuesta original.",
+                    extra={"campos": {"operation": "crear_ticket", "event": "TicketCreado.v1",
+                                      "result": "duplicado"}},
+                )
+                return JSONResponse(status_code=previo.status_code,
+                                    content=json.loads(previo.respuesta_json))
+            if previo is not None:
+                # El gemelo sigue trabajando: 409 y no un ticket duplicado.
+                raise HTTPException(
+                    status_code=409,
+                    detail="Ese mismo registro se esta procesando ahora mismo; espera el resultado.",
+                )
 
     # 1. Preparar los datos (la sede sale del token, no del cliente)
     estado_inicial = "EN_COLA" if ticket.tipoOperacion == "SOPORTE" else "VENTA_REGISTRADA"
@@ -150,22 +178,19 @@ async def crear_ticket(
         tipoOperacionRegistrada=ticket.tipoOperacion
     )
 
-    # Guarda el registro de idempotencia DESPUÉS de confirmar el ticket, para
-    # no bloquear la creación si esta escritura tuviera algún problema.
+    # Completa la clave YA RESERVADA con la respuesta real, para que los
+    # reintentos posteriores la devuelvan en vez de crear otro ticket.
     if clave_idem:
-        db.add(IdempotenciaDB(
-            clave=clave_idem, operacion="crear_ticket",
-            status_code=201, respuesta_json=respuesta.model_dump_json(),
-        ))
         try:
-            db.commit()
-        except IntegrityError:
-            # Carrera: la misma clave llegó dos veces en paralelo. El ticket
-            # de ESTA petición ya quedó creado (no se puede deshacer sin
-            # complicar la máquina de estados); se deja como está — el
-            # siguiente reintento con la misma clave sí encontrará un
-            # registro y no creará un tercero.
+            fila = db.query(IdempotenciaDB).filter(
+                IdempotenciaDB.clave == clave_idem).first()
+            if fila is not None:
+                fila.status_code = 201
+                fila.respuesta_json = respuesta.model_dump_json()
+                db.commit()
+        except Exception as exc:
             db.rollback()
+            logger.warning(f"No se pudo cerrar la Idempotency-Key '{clave_idem}': {exc}")
 
     # 3. Disparar el Evento a RabbitMQ
     evento_payload = {

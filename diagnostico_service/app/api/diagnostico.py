@@ -16,6 +16,9 @@ from app.core.logger import get_logger, NO_ENCONTRADO, RECHAZADO, DUPLICADO
 from app.core.rabbitmq import publicar_evento
 
 router = APIRouter()
+# Centinela: clave reservada pero con el trabajo aun sin terminar.
+IDEM_EN_CURSO = -1
+
 logger = get_logger("diagnostico-service")
 
 # URL interna del servicio de almacén (red Docker).
@@ -44,9 +47,24 @@ async def registrar_diagnostico(
     # reintento (p. ej. del outbox del Gateway tras una caída) NO debe volver a
     # reservar ni crear otro diagnóstico. Con la misma Idempotency-Key se
     # devuelve la MISMA respuesta sin repetir el efecto.
+    # Se RESERVA la clave antes de trabajar: comprobar-y-luego-guardar no es
+    # atomico y, cuando el circuito abre, el Gateway reintenta hasta 4 veces
+    # con la MISMA clave. Los reintentos entraban antes de que el primero la
+    # registrara y cada uno reservaba stock otra vez.
     clave_idem = request.headers.get("idempotency-key")
     if clave_idem:
-        previo = db.query(IdempotenciaDB).filter(IdempotenciaDB.clave == clave_idem).first()
+        try:
+            db.add(IdempotenciaDB(
+                clave=clave_idem, operacion="registrar_diagnostico",
+                status_code=IDEM_EN_CURSO, respuesta_json="{}",
+            ))
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+        previo = db.query(IdempotenciaDB).filter(
+            IdempotenciaDB.clave == clave_idem).first()
+        if previo is not None and previo.status_code == IDEM_EN_CURSO:
+            previo = None      # la clave es NUESTRA: toca hacer el trabajo
         if previo:
             logger.info(
                 f"Idempotency-Key '{clave_idem}' ya procesada; se devuelve el diagnostico original.",
@@ -199,18 +217,19 @@ async def registrar_diagnostico(
             fecha=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat() + "Z",
         )
 
-        # Registro de idempotencia DESPUÉS de confirmar (para no bloquear el
-        # diagnóstico si esta escritura fallara). Un reintento con la misma
-        # clave ya no reservará stock ni creará otro diagnóstico.
+        # Completa la clave YA RESERVADA con la respuesta real, para que un
+        # reintento la devuelva en vez de reservar stock y diagnosticar otra vez.
         if clave_idem:
-            db.add(IdempotenciaDB(
-                clave=clave_idem, operacion="registrar_diagnostico",
-                status_code=201, respuesta_json=respuesta.model_dump_json(),
-            ))
             try:
-                db.commit()
-            except IntegrityError:
-                db.rollback()  # carrera: la misma clave llegó en paralelo
+                fila = db.query(IdempotenciaDB).filter(
+                    IdempotenciaDB.clave == clave_idem).first()
+                if fila is not None:
+                    fila.status_code = 201
+                    fila.respuesta_json = respuesta.model_dump_json()
+                    db.commit()
+            except Exception as exc:
+                db.rollback()
+                logger.warning(f"No se pudo cerrar la Idempotency-Key '{clave_idem}': {exc}")
 
         return respuesta
 
