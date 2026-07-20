@@ -20,7 +20,6 @@ logger = get_logger("diagnostico-service")
 
 # URL interna del servicio de almacén (red Docker).
 ALMACEN_SERVICE_URL = "http://almacen-service:80/api/v1/almacen"
-TICKET_SERVICE_URL = "http://ticket-service:80/api/v1/tickets/tickets"
 
 
 @router.post("/", response_model=DiagnosticoResponse, status_code=201, tags=["Diagnóstico Técnico"])
@@ -75,50 +74,6 @@ async def registrar_diagnostico(
                 detail=(f"El ticket '{diagnostico.idTicket}' ya tiene un diagnostico registrado. "
                         "No se puede registrar otro."),
             )
-
-        # 0.b El ticket TIENE que existir y poder confirmarse. Es una
-        # dependencia DURA a proposito: no se diagnostica un equipo cuyo ticket
-        # no se puede verificar. Sin esta comprobacion se podia registrar un
-        # diagnostico contra un idTicket inventado, reservando stock real por
-        # un trabajo que no existe.
-        #
-        # CONTRAPARTIDA, y hay que decirla: esto acopla el diagnostico a
-        # ticket-service. Con tickets caido el tecnico NO puede diagnosticar y
-        # recibe un 503 claro, en vez de guardarlo y sincronizar despues. Es una
-        # decision de negocio (integridad por encima de disponibilidad), no un
-        # descuido: se prefiere que el tecnico espere a que el sistema arrastre
-        # reservas de stock contra tickets que quiza no existan.
-        async with httpx.AsyncClient() as client:
-            try:
-                r_ticket = await client.get(
-                    f"{TICKET_SERVICE_URL}/{diagnostico.idTicket}",
-                    headers={"x-correlation-id": correlation_id},
-                    timeout=5.0,
-                )
-            except httpx.RequestError as exc:
-                op.campos["dependency"] = "ticket-service"
-                op.mensaje_error = f"No se pudo verificar el ticket {diagnostico.idTicket}: {exc}"
-                raise HTTPException(
-                    status_code=503,
-                    detail=("El servicio de Tickets no esta disponible, asi que no se puede "
-                            "verificar este ticket. El diagnostico NO se guardo: no se ha "
-                            "reservado ningun repuesto. Intentalo de nuevo en unos segundos."),
-                )
-
-            if r_ticket.status_code == 404:
-                op.result = RECHAZADO
-                op.mensaje = f"Diagnostico rechazado: el ticket {diagnostico.idTicket} no existe."
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"El ticket '{diagnostico.idTicket}' no existe.",
-                )
-            if r_ticket.status_code >= 500:
-                op.campos["dependency"] = "ticket-service"
-                raise HTTPException(
-                    status_code=503,
-                    detail=("El servicio de Tickets respondio con un error, asi que no se puede "
-                            "verificar este ticket. El diagnostico NO se guardo."),
-                )
 
         # 1. Reservar stock en almacén por CADA repuesto de la lista.
         estado_reserva = "SIN_REPUESTOS" if not diagnostico.repuestos else "RESERVA_CONFIRMADA"
