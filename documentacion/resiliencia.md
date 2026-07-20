@@ -317,7 +317,13 @@ consumidores es la siguiente palanca, y está identificada gracias a esta métri
 | `--demo 7` | **Queue depth** (#11) y **consumer lag** (#12), en dos fases |
 | `--demo 8` | **Circuit breaker** (#5) completo: 503, fail-fast y cierre automático |
 
-Los mecanismos #7 (backpressure) se observa en las corridas de carga, donde el
-rate limit responde 429 al superar el umbral.
+| `--demo 9` | **Backpressure** (#7): ráfaga contra el token bucket del Gateway |
+
+**Sobre la demo 9, con honestidad.** No produce 429. Al construirla descubrí que
+el token bucket vive en memoria de **cada worker**, y el Gateway corre con 8: el
+límite efectivo es ~160 rps y no los 20 configurados. Es el mismo problema que
+tenía el circuit breaker antes de mover su estado a Redis (ADR-0015), y el rate
+limit se quedó sin migrar. Está registrado como **brecha 24**. Lo que sí se
+observa es la contención del bulkhead, que actúa por servicio y sí funciona.
 Para verlos bajo carga real con servicios cayéndose:
 `python pruebas_k6/caos.py --fase 100k --vus 200`.

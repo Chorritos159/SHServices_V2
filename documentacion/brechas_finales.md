@@ -53,6 +53,7 @@ dictamen las evalúe con la información completa.
 | 21 | La prueba de caos derriba servicios de uno en uno | Resiliencia | No se ejercitan caídas simultáneas ni orden aleatorio, que es donde aparecen los fallos combinados | Añadir modos `--simultaneos N` y `--aleatorio` a `pruebas_k6/caos.py`. Ver anexo | Owner técnico de Resiliencia |
 | 22 | Cobertura funcional por servicio | Funcionalidad | Cada servicio cubre su flujo principal pero no las operaciones de gestión (ajustes de inventario, reasignar técnico, notas de crédito, exportar auditoría) | Priorizar por valor de negocio y añadir por iteraciones. Ver anexo | Owners funcionales |
 | 23 | Alcance del frontend | Funcionalidad | Sin paginación en la vista, sin filtros, sin edición, sin pruebas de navegador, accesibilidad no auditada | Añadir paginación y filtros; incorporar Playwright al pipeline. Ver anexo | Owner técnico de Frontend |
+| 24 | El rate limit del Gateway no es global: su token bucket vive en memoria de CADA worker | Resiliencia | El Gateway corre con 8 workers, así que el límite efectivo es ~8x20=160 rps y no los 20 configurados. Medido: una ráfaga de 40 rps sostenidos no produjo ni un 429. Es el mismo problema que tenía el circuit breaker antes del ADR-0015; el rate limit se quedó sin migrar | Mover el estado del token bucket a Redis, igual que se hizo con el breaker | Owner técnico del Gateway |
 
 ---
 

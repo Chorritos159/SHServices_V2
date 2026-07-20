@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""RESILIENCIA EN VIVO — 8 demos cortas, para enseñar en la sustentación.
+"""RESILIENCIA EN VIVO — 9 demos cortas, para enseñar en la sustentación.
 
 Cada demo dura menos de un minuto, dice EN CONSOLA qué servicio está tocando y
 en qué panel de Grafana se ve, e imprime los logs REALES del Gateway que lo
@@ -22,6 +22,8 @@ prueban. Está pensada para proyectarla mientras se explica.
      sube y drena sola. Muestra donde mirar cada metrica en Grafana.
   8. CIRCUIT BREAKER — trafico real contra un servicio caido: multiples 503,
      apertura del circuito, fail-fast y cierre automatico por la sonda.
+  9. BACKPRESSURE — una rafaga supera el token bucket del Gateway y recibe 429:
+     la avalancha se corta en la puerta, sin llegar al backend.
 
 Uso:
     python pruebas/13_resiliencia_en_vivo.py            # las seis
@@ -571,9 +573,94 @@ def demo8(token):
     logs("circuit_breaker", 200, 6)
 
 
+def demo9(token):
+    titulo(9, "BACKPRESSURE — el rate limit corta la avalancha en la puerta",
+           "panel 'Rate limit global: rechazos (/s) — 429'")
+    print(" Servicio comprometido: ninguno. Se satura al GATEWAY con una rafaga.")
+    print("")
+    print("  El Gateway usa un token bucket de 20 rps con rafaga de 40. Cinco")
+    print("  usuarios reales no llegan ni a 5 rps sostenidas, asi que 20 es")
+    print("  unas 3 veces la demanda real y deja holgura; la rafaga de 40")
+    print("  absorbe picos legitimos, como varios usuarios pulsando a la vez.")
+    print("")
+    print("  Lo que se demuestra: por encima de eso el Gateway responde 429 y")
+    print("  NO deja que la avalancha llegue al backend. Es la unica proteccion")
+    print("  que actua ANTES de gastar recursos: rechaza en la puerta.")
+    print("")
+
+    # Se usa un endpoint LIGERO a proposito. Con un listado pesado cada
+    # peticion tardaba ~1s y la rafaga solo alcanzaba 7 rps: por debajo del
+    # umbral de 20, asi que el rate limit no llegaba a dispararse nunca y la
+    # demo no demostraba nada. Aqui lo que importa es el RITMO de llegada, no
+    # el trabajo que hace el backend.
+    # Las peticiones se REPARTEN entre servicios. Concentrarlas en uno solo
+    # saturaba su bulkhead (notificaciones tiene 5 huecos) y devolvia 503 del
+    # mamparo antes de que el ritmo llegara al limitador: se veia contencion,
+    # si, pero de otro mecanismo. Repartiendo, ningun mamparo se satura y lo
+    # unico que puede frenar la avalancha es el rate limit del Gateway.
+    RUTAS = [
+        "/api/v1/notificaciones/notificaciones/mis-alertas",
+        "/api/v1/auditoria/auditoria/eventos",
+        "/api/v1/facturas/garantias/",
+        "/api/v1/diagnosticos/asignaciones/",
+    ]
+    # El VOLUMEN importa: el cubo arranca con 40 fichas y repone 20 por
+    # segundo. Con 200 peticiones en 9s habia 40+180=220 fichas disponibles y
+    # no sobraba ninguna, asi que no se rechazaba nada. Hay que pedir mas
+    # rapido de lo que repone, sostenidamente.
+    print("  lanzando 500 peticiones repartidas entre 4 servicios...")
+
+    def una(i):
+        cod, _c = pedir(f"{GW}{RUTAS[i % len(RUTAS)]}", token=token, timeout=15)
+        return cod
+
+    t0 = time.monotonic()
+    with ThreadPoolExecutor(max_workers=150) as ex:
+        codigos = list(ex.map(una, range(500)))
+    duracion = time.monotonic() - t0
+
+    resumen = {}
+    for c in codigos:
+        resumen[c] = resumen.get(c, 0) + 1
+
+    aceptadas = sum(v for k, v in resumen.items() if k == 200)
+    rechazadas = resumen.get(429, 0)
+    print("")
+    print(f"  respuestas ................ {resumen}")
+    print(f"  duracion .................. {duracion:.1f}s "
+          f"({len(codigos)/max(duracion,0.01):.0f} peticiones/s intentadas)")
+    print(f"  aceptadas (200) ........... {aceptadas}")
+    print(f"  RECHAZADAS (429) .......... {rechazadas}")
+
+    degradadas = resumen.get(503, 0) + resumen.get(504, 0)
+    if rechazadas:
+        print("")
+        print("  >>> El rate limit rechazo la parte que excedia el cupo <<<")
+        print("      Un 429 NO es un error del sistema: es un contrato. Le dice")
+        print("      al cliente 'vuelve a intentarlo', a diferencia de un 500,")
+        print("      que significa 'me rompi y no se por que'.")
+    else:
+        print("")
+        print("  NO hubo 429, y la razon esta documentada como BRECHA 24:")
+        print("  el token bucket vive EN MEMORIA DE CADA WORKER, y el Gateway")
+        print("  corre con 8. El limite efectivo no es 20 rps sino ~160, asi")
+        print("  que una rafaga como esta no lo alcanza. Es el mismo problema")
+        print("  que tenia el circuit breaker antes de mover su estado a Redis")
+        print("  (ADR-0015); el rate limit se quedo sin migrar.")
+        print("")
+        print(f"  Lo que SI se observa: {degradadas} respuesta(s) 503/504 del")
+        print("  BULKHEAD, que es la otra capa de contencion y esa si actua por")
+        print("  servicio. La avalancha se frena, pero en el mamparo y no en la")
+        print("  puerta.")
+
+    print("")
+    print("  Los logs del Gateway:")
+    logs("rate", 90, 4)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--demo", type=int, choices=[1, 2, 3, 4, 5, 6, 7, 8],
+    ap.add_argument("--demo", type=int, choices=[1, 2, 3, 4, 5, 6, 7, 8, 9],
                     help="Correr solo una (por defecto: las cuatro)")
     args = ap.parse_args()
 
@@ -583,8 +670,8 @@ def main():
         sys.exit(1)
 
     demos = {1: demo1, 2: demo2, 3: demo3, 4: demo4,
-             5: demo5, 6: demo6, 7: demo7, 8: demo8}
-    elegidas = [args.demo] if args.demo else [1, 2, 3, 4, 5, 6, 7, 8]
+             5: demo5, 6: demo6, 7: demo7, 8: demo8, 9: demo9}
+    elegidas = [args.demo] if args.demo else [1, 2, 3, 4, 5, 6, 7, 8, 9]
     try:
         for n in elegidas:
             demos[n](token)

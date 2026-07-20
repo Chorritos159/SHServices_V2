@@ -462,6 +462,7 @@ y la reponen internamente, ya a salvo.
 | **6** | **Buffering y fallback** | Se para `ticket-service` y el técnico diagnostica igual | El ticket se cierra **solo en 4 s** al volver |
 | **7** | **Queue depth y consumer lag** | Dos fases: `pause` congela al consumidor (sube el **lag**) y `stop` lo mata (sube el **depth**) | Fase A: lag 226. Fase B: depth 254. Ambas drenan solas |
 | **8** | **Circuit breaker completo** | Tráfico real contra un servicio caído | Múltiples 503, fail-fast y cierre automático |
+| **9** | **Backpressure (rate limit)** | Ráfaga de 500 peticiones repartidas entre 4 servicios | Frena en el bulkhead, no en el rate limit: ver **brecha 24** |
 
 Sin `--demo` se ejecutan las ocho seguidas. Cada una restaura lo que tocó, así
 que se pueden lanzar en cualquier orden.
