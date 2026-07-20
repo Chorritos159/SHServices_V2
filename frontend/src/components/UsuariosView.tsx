@@ -154,11 +154,38 @@ export default function UsuariosView() {
 }
 
 function extraer(err: unknown): string {
-  if (isAxiosError(err)) {
-    const data = err.response?.data as { error?: string; detail?: string } | undefined;
-    return data?.error ?? data?.detail ?? `Error ${err.response?.status ?? ""}`.trim();
+  if (!isAxiosError(err)) return "Error inesperado.";
+
+  const status = err.response?.status;
+  // OJO con el nombre del campo: el Gateway responde `detalle` (en espanol),
+  // no `detail`. Al leer solo `detail` se perdia el texto util y el usuario
+  // veia un escueto "Error 503" sin saber que hacer.
+  const data = err.response?.data as
+    | { error?: string; detalle?: string; detail?: string }
+    | undefined;
+  const delServidor = data?.detalle ?? data?.detail ?? data?.error;
+
+  // Mensajes explicitos para los casos que el usuario SI puede accionar.
+  if (status === 503 || status === 504) {
+    return (
+      "⏳ El servicio de identidad no responde. El Gateway puede haber dejado " +
+      "el alta en su outbox y entregarla sola cuando el servicio vuelva: " +
+      "REFRESCA la lista antes de reintentar, para no crear un duplicado."
+    );
   }
-  return "Error inesperado.";
+  if (status === 429) {
+    return "Demasiadas peticiones seguidas. Espera unos segundos y reintenta.";
+  }
+  if (status === 409) {
+    return delServidor ?? "Ese usuario ya existe. Elige otro identificador.";
+  }
+  if (status === 403) {
+    return "Solo un ADMIN puede dar de alta empleados.";
+  }
+  if (status === 401) {
+    return "Tu sesion caduco. Vuelve a iniciar sesion.";
+  }
+  return delServidor ?? `Error ${status ?? ""}`.trim();
 }
 
 function Campo({

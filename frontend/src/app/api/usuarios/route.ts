@@ -45,8 +45,27 @@ export async function POST(request: NextRequest) {
 }
 
 function reenviarError(err: unknown) {
-  const e = err as { response?: { status?: number; data?: unknown } };
-  return NextResponse.json(e.response?.data ?? { error: "Fallo al contactar el auth-service." }, {
-    status: e.response?.status ?? 500,
+  const e = err as { response?: { status?: number; data?: unknown }; code?: string };
+
+  // Sin respuesta = no se pudo ni contactar (auth caido, DNS, timeout). Antes
+  // esto se convertia en un 500 generico, que es MENTIRA y ademas confunde: un
+  // 500 dice "el servidor se rompio procesando tu peticion", cuando lo que
+  // pasa es que la peticion no llego a procesarse. Se responde 503, que es lo
+  // que el front sabe traducir a "no se creo nada, reintenta".
+  if (!e.response) {
+    return NextResponse.json(
+      {
+        error: "El servicio de identidad no esta disponible.",
+        detalle:
+          "No se pudo contactar con el auth-service. Si acabas de intentar un alta y el " +
+          "servicio vuelve en unos segundos, el Gateway puede entregarla desde su outbox: " +
+          "refresca la lista antes de reintentar.",
+      },
+      { status: 503 },
+    );
+  }
+
+  return NextResponse.json(e.response.data ?? { error: "Fallo al contactar el auth-service." }, {
+    status: e.response.status ?? 503,
   });
 }

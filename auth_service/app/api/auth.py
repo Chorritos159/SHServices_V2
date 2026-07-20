@@ -2,6 +2,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Request, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel, Field
 import jwt
 import os
@@ -154,7 +155,27 @@ async def registrar_usuario(
             sede=nuevo.sede.upper(),
         )
         db.add(empleado)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # `usuario` es la clave primaria, asi que un duplicado es
+            # IMPOSIBLE en la base: si salta aqui es una CARRERA (dos altas
+            # simultaneas del mismo identificador, o un reintento del cliente
+            # tras una caida). Las dos pasaron la comprobacion de arriba porque
+            # consultar-y-luego-insertar no es atomico.
+            #
+            # Es un 409, NUNCA un 500: el usuario SI quedo creado por la otra
+            # peticion, asi que el efecto deseado se logro. Sin este `except`
+            # el cliente veia un "error inesperado" y volvia a intentarlo,
+            # cuando en realidad ya estaba hecho.
+            db.rollback()
+            op.result = RECHAZADO
+            op.mensaje = f"Carrera de alta resuelta para '{nuevo.usuario}': ya existia al insertar."
+            raise HTTPException(
+                status_code=409,
+                detail=(f"El usuario '{nuevo.usuario}' ya existe. Si acabas de crearlo "
+                        "y el servicio se reinicio, el alta SI se guardo: refresca la lista."),
+            )
 
         op.campos.update({"rol": rol, "sede": empleado.sede})
         op.mensaje = f"Usuario '{nuevo.usuario}' ({rol}/{empleado.sede}) dado de alta por '{admin.get('sub')}'."
