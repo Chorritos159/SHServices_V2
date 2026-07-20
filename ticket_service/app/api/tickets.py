@@ -44,21 +44,42 @@ def _validar_transicion(actual: str, destino: str):
         )
 
 
-async def _mover_stock(operacion: str, repuestos: list[dict], sede: str, correlation_id: str):
-    """Llama al almacén para confirmar/liberar cada repuesto reservado del ticket."""
+async def _mover_stock(operacion: str, repuestos: list[dict], sede: str,
+                       correlation_id: str, id_ticket: str = "") -> list[str]:
+    """Llama al almacén para confirmar/liberar cada repuesto del ticket.
+
+    Devuelve la lista de repuestos que NO se pudieron mover, para que quien
+    llama decida. Antes solo capturaba `RequestError` (fallo de conexión) e
+    IGNORABA las respuestas de error: si almacén contestaba 409 o 500, el
+    ticket se cerraba igual y el stock se quedaba reservado para siempre —
+    justo el sintoma de "el ticket desaparecio pero el stock sigue reservado".
+    """
     if not repuestos:
-        return
+        return []
+    fallidos: list[str] = []
     async with httpx.AsyncClient() as client:
         for r in repuestos:
+            codigo = r["codigo_producto"]
             try:
-                await client.post(
+                resp = await client.post(
                     f"{ALMACEN_URL}/{operacion}",
-                    json={"codigo_producto": r["codigo_producto"], "cantidad": r["cantidad"], "sede": sede},
-                    headers={"x-correlation-id": correlation_id},
+                    json={"codigo_producto": codigo, "cantidad": r["cantidad"], "sede": sede},
+                    headers={
+                        "x-correlation-id": correlation_id,
+                        # Derivada: un reintento no mueve el stock dos veces.
+                        "Idempotency-Key": f"{operacion}-{id_ticket}-{codigo}",
+                    },
                     timeout=5.0,
                 )
-            except httpx.RequestError:
-                logger.error(f"No se pudo {operacion} stock de {r['codigo_producto']} (almacén inaccesible).")
+                if resp.status_code >= 400:
+                    fallidos.append(codigo)
+                    logger.error(
+                        f"almacen respondio {resp.status_code} al {operacion} "
+                        f"{codigo}: {resp.text[:120]}")
+            except httpx.RequestError as exc:
+                fallidos.append(codigo)
+                logger.error(f"No se pudo {operacion} stock de {codigo} (almacen inaccesible): {exc}")
+    return fallidos
 
 @router.post("/", response_model=TicketResponse, status_code=201)
 async def crear_ticket(
@@ -378,7 +399,18 @@ async def entregar_ticket(
 
     # Confirma (consume) los repuestos reservados en el diagnóstico.
     repuestos = json.loads(ticket.repuestos_reservados or "[]")
-    await _mover_stock("confirmar", repuestos, ticket.sede, correlation_id)
+    fallidos = await _mover_stock("confirmar", repuestos, ticket.sede,
+                                  correlation_id, ticket.id)
+    if fallidos:
+        # NO se cierra el ticket si el stock no salio: cerrarlo dejaria las
+        # unidades reservadas sin dueno y sin forma de recuperarlas. Se
+        # responde 503 para que el cliente reintente; el evento del cobro
+        # tambien lo reintentara por su cuenta.
+        raise HTTPException(
+            status_code=503,
+            detail=(f"No se pudo confirmar el stock de {', '.join(fallidos)} en almacen. "
+                    "El ticket sigue abierto: reintenta la entrega en unos segundos."),
+        )
 
     ticket.estado = "ENTREGADO"
     db.commit()
