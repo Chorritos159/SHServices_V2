@@ -30,10 +30,42 @@ docker compose up -d --build
 curl http://localhost:8000/health     # backend
 curl http://localhost:3001/login      # frontend
 
-# 4. Detener
+# 4. Datos de demo (opcional, pero recomendado para enseñar el sistema)
+python pruebas/14_datos_demo.py
+
+# 5. Detener
 docker compose down          # detiene todo, CONSERVA los datos
 docker compose down -v       # detiene y BORRA los datos (destructivo)
 ```
+
+### Datos de demo
+
+Los **usuarios** y el **almacén** se siembran solos al arrancar. Lo que no
+existe recién levantado son los tickets, así que los paneles salen vacíos y no
+hay nada que enseñar. `pruebas/14_datos_demo.py` rellena ese hueco: crea 3
+tickets de soporte en PIURA y lleva el primero por el ciclo completo
+(diagnóstico con reserva de stock → cobro con garantía de 90 días).
+
+Va **por la API y no con INSERTs** a propósito: así los datos respetan las
+reglas de negocio, reservan stock de verdad y publican sus eventos a RabbitMQ.
+Un INSERT directo dejaría un ticket que ningún evento anunció y que las
+notificaciones nunca verían.
+
+Es **idempotente** (usa `Idempotency-Key` derivadas): correrlo dos veces
+devuelve lo mismo y no duplica nada. Con `--tickets N` se crean hasta 5.
+
+| Usuario | Contraseña | Rol | Sede |
+|---|---|---|---|
+| `admin` | `admin123` | ADMIN | PIURA |
+| `caja01` | `caja123` | CAJA | PIURA |
+| `tecnico01` | `tecnico123` | TECNICO | PIURA |
+| `caja02` | `caja123` | CAJA | TALARA |
+| `tecnico02` | `tecnico123` | TECNICO | TALARA |
+
+Entra en **http://localhost:3001**. Cada rol ve lo suyo: ADMIN el almacén,
+auditoría y garantías; TECNICO la cola de diagnóstico; CAJA la venta de
+mostrador. Para borrar lo generado:
+`python pruebas/limpiar_datos_carga.py --borrar`.
 
 Todos los servicios usan `restart: always` y health checks — si el proceso
 **crashea**, se reinicia solo (~2 s). El Gateway es el **único** punto de
@@ -296,6 +328,7 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | 13 | `python pruebas/13_carga_100k_real.py` | **100.000 peticiones REALES**, contadas una a una — no es una etiqueta ni una extrapolación, es el contador. Imprime avance con % y minutos restantes para poder dejarla sola. Sirve además para ver si el throughput se degrada en una sesión larga | **~45 min** |
 | k6 | `python pruebas_k6/correr.py --fase 100k\|500k\|1M` | **Carga con k6** (Go, dentro de la red Docker): el generador de Python topaba en ~105 rps y era ÉL el cuello de botella. Con k6: 166 rps y p95 de 284 ms contra 1.495 ms. Cada corrida escribe la fila completa de la tabla de registro de carga | según fase |
 | 13 | `python pruebas/13_resiliencia_en_vivo.py [--demo 1\|2\|3\|4]` | **4 demos cortas para proyectar en la sustentación.** Cada una dice en consola qué servicio compromete, en qué panel de Grafana se ve, e imprime los **logs reales del Gateway** que lo prueban: sonda activa, timeout+retry, bulkhead y respawn de worker. Medido: el circuito se cierra **solo en 16 s** | ~4 min |
+| 14 | `python pruebas/14_datos_demo.py [--tickets N]` | **Datos de demo.** Crea 3 tickets de soporte en PIURA y lleva el primero por el ciclo completo (diagnóstico con reserva de stock → cobro con garantía). Va por la API, no con INSERTs, así que respeta las reglas de negocio y publica sus eventos. Idempotente | ~15 s |
 | k6-caos | `python pruebas_k6/caos.py --fase 100k\|500k\|1M` | **Caos bajo carga REAL**: k6 empujando ~200 rps mientras se tumban servicios con **Toxiproxy** (se deshabilita su proxy). Mide contención (cero 500), ausencia de cascada, y cuánto tarda cada circuito en cerrarse **solo** por la sonda activa. La conectividad la restaura la prueba; el circuito se recupera sin intervención | según fase |
 | — | `python pruebas/generar_informe.py` | **Genera el informe completo** en `documentacion/informe_de_pruebas.md`: lee la última corrida de cada prueba y arma tabla de carga, caos, auto-recuperación y veredicto. Lo que no se haya corrido sale como *(sin corrida)*, no como cero | ~1 s |
 

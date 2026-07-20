@@ -14,3 +14,4 @@
 | **humo** | 142 rps | 299 ms | 501 ms | 0.00% | 336% / 522 MiB | 417 | cero errores 500. cola RabbitMQ hasta 417 mensajes: los consumidores se quedaron atrás. |  <!-- 20260719_141053 -->
 | **humo** | 101 rps | 404 ms | 626 ms | 0.00% | 333% / 527 MiB | 453 | cero errores 500. cola RabbitMQ hasta 453 mensajes: los consumidores se quedaron atrás. |  <!-- 20260719_192226 -->
 | **humo** | 126 rps | 305 ms | 448 ms | 0.00% | 308% / 526 MiB | 258 | cero errores 500. cola RabbitMQ hasta 258 mensajes: los consumidores se quedaron atrás. |  <!-- 20260719_200832 -->
+| **100k** | 133 rps | 4353 ms | 6776 ms | 0.00% | 477% / 622 MiB | 27509 | cero errores 500. 50 escrituras salvadas por el outbox. cola RabbitMQ hasta 27509 mensajes: los consumidores se quedaron atrás. |  <!-- 20260719_220244 -->
