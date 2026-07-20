@@ -56,7 +56,7 @@ Repetir para `almacen-service`, `diagnostico-service`, `facturacion-service`, `a
 curl -s -X POST http://localhost:8003/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"usuario":"caja01","password":"caja123"}'
-# → { "access_token": "...", "token_type": "bearer", "expires_in": 7200 }
+#  { "access_token": "...", "token_type": "bearer", "expires_in": 7200 }
 ```
 
 ### 3.4 Prueba de humo end-to-end
@@ -66,10 +66,10 @@ Con el `access_token` de arriba en `$TOKEN`:
 curl -s -X POST http://localhost:8000/api/v1/tickets/tickets/ \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"datosCliente":"Demo","tipoOperacion":"SOPORTE","datosEquipo":"Laptop","prioridad":"ALTA"}'
-# → 201 { "idTicket": "TICK-PIU-XXXX", "estadoInicial": "EN_COLA", ... }
+#  201 { "idTicket": "TICK-PIU-XXXX", "estadoInicial": "EN_COLA", ... }
 ```
-Flujo completo por la UI (`http://localhost:3001`): `caja01` crea ticket → `tecnico01`
-diagnostica (descuenta stock) → `caja01` factura → `admin` revisa Inventario y Auditoría.
+Flujo completo por la UI (`http://localhost:3001`): `caja01` crea ticket  `tecnico01`
+diagnostica (descuenta stock)  `caja01` factura  `admin` revisa Inventario y Auditoría.
 
 ### 3.5 Auditoría persistente (FF-DEP-07)
 ```bash
@@ -147,7 +147,7 @@ El owner funcional de cada área decide si un cambio procede (ver `catalogo-serv
 | **Primeras revisiones** | `docker compose ps` (¿Exited/unhealthy?), `docker compose logs --tail=50 <servicio>`, `GET /health` del servicio |
 | **Acción** | Si crasheó: `restart: always` lo revive solo (~2 s). Si está `Exited` tras un stop manual: `docker compose up -d <servicio>`. Si está `unhealthy` (proceso colgado): `docker compose up -d --force-recreate <servicio>` |
 | **Verificación** | El circuito se cierra **solo** en ~15-20 s (sonda activa, ADR-0014). Las escrituras encoladas se entregan solas (outbox, ADR-0011) |
-| **Escalamiento** | Soporte de TI (owner técnico). Si es pérdida de datos → Administrador |
+| **Escalamiento** | Soporte de TI (owner técnico). Si es pérdida de datos  Administrador |
 | **Comunicación** | Área afectada (Recepción / Técnico / Facturación) según el servicio |
 
 ### 8.2 El usuario ve "tu solicitud quedó en cola"
@@ -167,7 +167,7 @@ El owner funcional de cada área decide si un cambio procede (ver `catalogo-serv
 | Sección | Detalle |
 | :-- | :-- |
 | **Incidente** | `queue depth` sube sostenidamente (consumidores insuficientes o caídos) |
-| **Detección** | Grafana → RabbitMQ: *Queue depth* y *Consumer lag*; `Consumidores activos por cola` = 0 |
+| **Detección** | Grafana  RabbitMQ: *Queue depth* y *Consumer lag*; `Consumidores activos por cola` = 0 |
 | **Primeras revisiones** | `docker exec rabbitmq rabbitmqctl list_queues name messages consumers`; logs de `auditoria-service` / `notificacion-service` |
 | **Acción** | Reiniciar el consumidor: `docker compose up -d --force-recreate auditoria-service` (los eventos están en cola durable: no se pierden) |
 | **Verificación** | `consumers` vuelve a 1 y `messages` baja a 0 |
@@ -180,7 +180,7 @@ El owner funcional de cada área decide si un cambio procede (ver `catalogo-serv
 | :-- | :-- |
 | **Incidente** | Tras una corrida de carga quedan tickets/productos/facturas con prefijo `CARGA-` |
 | **Detección** | Listados del frontend con muchos registros `CARGA-…` |
-| **Acción** | `python pruebas/limpiar_datos_carga.py` (cuenta) → `--borrar` (elimina) |
+| **Acción** | `python pruebas/limpiar_datos_carga.py` (cuenta)  `--borrar` (elimina) |
 | **Escalamiento** | Soporte de TI |
 | **Comunicación** | Administrador antes de borrar, para confirmar que no hay datos reales mezclados |
 
@@ -196,3 +196,67 @@ docker stop  <servicio>    # …luego: docker start   <servicio>
 ```
 > `docker pause` / `stop` / `kill` **no** disparan `restart: always` (Docker los trata como
 > parada solicitada por el usuario). Solo un **crash real** se auto-recupera.
+
+---
+
+## 9. Métricas de referencia y umbrales de alerta
+
+Estos son los valores que considero normales, medidos en las corridas de carga
+documentadas en `documentacion/registro_de_carga.md`. Sirven para decidir si lo
+que veo en Grafana es operación normal o un incidente.
+
+| Métrica | Normal | Vigilar | Incidente |
+| :-- | :-- | :-- | :-- |
+| Throughput sostenido | ~200 rps | < 120 rps | < 50 rps |
+| Latencia p95 | < 800 ms en régimen normal | 1-2 s bajo carga | > 3 s sostenido |
+| Error rate (5xx) | 0 % | > 0,1 % | > 1 % |
+| Respuestas 503/504/429 | < 3 % bajo carga | 3-10 % | > 10 % |
+| Circuitos abiertos | 0 | 1 puntual | 2 o más a la vez |
+| Profundidad de cola | crece y drena | crece 5 min seguidos | no drena tras cesar la carga |
+| Consumidores activos | 1 por cola | 0 en alguna cola | 0 en varias |
+| CPU del host | < 600 % | 600-1200 % | > 1400 % |
+
+**Cómo leo la cola.** Que crezca bajo carga es sano: es el desacoplamiento
+absorbiendo el exceso. Lo que delata un problema es que **no baje** cuando la
+carga cesa, porque significa consumidor muerto y no lentitud.
+
+---
+
+## 10. Rollback
+
+### 10.1 Revertir el código a la versión anterior
+
+```bash
+git log --oneline -5           # identifico el commit estable
+git revert <hash>              # revierto sin reescribir historia
+docker compose up -d --build   # reconstruyo con el código revertido
+```
+
+Uso `git revert` y no `git reset --hard` a propósito: `revert` deja constancia
+de qué se deshizo y por qué, y no rompe el historial de nadie que ya lo tenga.
+
+### 10.2 Revertir un solo servicio
+
+```bash
+docker compose up -d --build --no-deps <servicio>
+```
+
+`--no-deps` evita arrastrar el resto de contenedores, que es lo que quiero
+cuando el fallo está aislado en un servicio.
+
+### 10.3 Qué NO hace rollback
+
+Los cambios de **esquema de base de datos** no se revierten solos. Este proyecto
+solo añade columnas e índices de forma no destructiva (`ADD COLUMN IF NOT
+EXISTS`, `CREATE INDEX IF NOT EXISTS`), así que una versión anterior del código
+convive con el esquema nuevo sin romperse. Si alguna vez se elimina o renombra
+una columna, el rollback exigirá una migración inversa escrita a mano.
+
+### 10.4 Verificación posterior al rollback
+
+```bash
+python pruebas/08_flujo_completo.py    # el flujo de negocio completo
+```
+
+Doy el rollback por bueno solo si esa prueba termina en OK: recorre los ocho
+servicios de punta a punta y detecta si algo quedó a medias.

@@ -40,10 +40,10 @@ directo, rechazado por el índice (ver `documentacion/fichas_falla_controlada.md
 El identificador de correlación acompaña a la petición de extremo a extremo:
 
 ```
-Cliente → Gateway (genera/propaga X-Correlation-ID)
-        → microservicio (lo lee de la cabecera)
-        → evento RabbitMQ (message.correlation_id = trace_id)
-        → auditoria-service (lo persiste como trace_id)
+Cliente  Gateway (genera/propaga X-Correlation-ID)
+         microservicio (lo lee de la cabecera)
+         evento RabbitMQ (message.correlation_id = trace_id)
+         auditoria-service (lo persiste como trace_id)
 ```
 
 Cada fila de la traza **siempre** incluye el `trace_id`, lo que permite reconstruir el recorrido
@@ -67,7 +67,7 @@ a reinicios del contenedor.
 ## 5. Consulta de la traza
 
 - **API:** `GET /api/v1/auditoria/auditoria/eventos` (vía Gateway, rol ADMIN) — devuelve los más recientes primero.
-- **Frontend:** Panel **Admin → Auditoría** (tabla con evento, fecha, sede, ticket y trace_id).
+- **Frontend:** Panel **Admin  Auditoría** (tabla con evento, fecha, sede, ticket y trace_id).
 - **SQL directo (demostración):**
   ```sql
   SELECT evento, trace_id, sede, id_ticket, recibido_en

@@ -13,10 +13,10 @@
 | Falla inducida | `docker stop almacen-service` con el sistema operando |
 | Servicio afectado | `almacen-service` (vía API Gateway) |
 | Hipótesis esperada | El circuito abre tras fallos consecutivos y el Gateway deja de intentar contactar al servicio (fail-fast), sin colgarse ni propagar el fallo a otros servicios |
-| Métrica observada | `gateway_circuit_state{service="almacen"}`: 0 (CLOSED) → 2 (OPEN) tras 3 fallos consecutivos. 4 llamadas de sondeo devolvieron 503 |
+| Métrica observada | `gateway_circuit_state{service="almacen"}`: 0 (CLOSED)  2 (OPEN) tras 3 fallos consecutivos. 4 llamadas de sondeo devolvieron 503 |
 | Estado esperado del negocio | 503 honesto con `circuito` y `trace_id` en el cuerpo — nunca un 500 opaco ni un timeout colgado |
 | Tiempo de recuperación esperado | Cooldown de 15 s + arranque del contenedor; sonda HALF_OPEN cierra el circuito sola |
-| Evidencia de auditoría | Fail-fast medido en **58 ms** con el circuito abierto (sin tocar la red). Sonda tras `docker start` → HTTP 200, `circuit_state` vuelto a 0 (CLOSED), **sin intervención manual** |
+| Evidencia de auditoría | Fail-fast medido en **58 ms** con el circuito abierto (sin tocar la red). Sonda tras `docker start`  HTTP 200, `circuit_state` vuelto a 0 (CLOSED), **sin intervención manual** |
 
 ## Ficha B — Latencia artificial
 
@@ -25,10 +25,10 @@
 | Falla inducida | Toxiproxy: toxina `latency` de 8000 ms en `ticket_proxy` (timeout configurado del Gateway para `tickets`: 3 s) |
 | Servicio afectado | `ticket-service` (único servicio detrás de Toxiproxy) |
 | Hipótesis esperada | El Gateway corta la espera al presupuesto configurado (504), reintenta una vez en operaciones de lectura, y tras fallos repetidos abre el circuito |
-| Métrica observada | Intento 1: HTTP 504 en 6422 ms (timeout + 1 reintento con backoff). Intento 2: HTTP 504 en 3084 ms. Intento 3: HTTP 503 en 63 ms (circuito ya OPEN). `gateway_circuit_state{service="tickets"}`: 0 → 2 |
+| Métrica observada | Intento 1: HTTP 504 en 6422 ms (timeout + 1 reintento con backoff). Intento 2: HTTP 504 en 3084 ms. Intento 3: HTTP 503 en 63 ms (circuito ya OPEN). `gateway_circuit_state{service="tickets"}`: 0  2 |
 | Estado esperado del negocio | 504 con `trace_id` en los primeros intentos; 503 con `circuito` una vez abierto — nunca una espera indefinida |
 | Tiempo de recuperación esperado | Cooldown de 15 s tras quitar la toxina; sonda HALF_OPEN cierra el circuito |
-| Evidencia de auditoría | Sonda tras `DELETE .../toxics/latencia_caos` → HTTP 200, `circuit_state` vuelto a 0 (CLOSED) |
+| Evidencia de auditoría | Sonda tras `DELETE .../toxics/latencia_caos`  HTTP 200, `circuit_state` vuelto a 0 (CLOSED) |
 
 ## Ficha C — Cola saturada (bulkhead + shedding)
 
@@ -73,7 +73,7 @@
 | Consumidor lento | No hay un mecanismo para regular la velocidad de un consumidor RabbitMQ en este sistema (los consumidores procesan a la velocidad que llegan los mensajes) |
 | Base o almacenamiento lento | Requeriría un proxy/mock delante de PostgreSQL (no está en el alcance de esta fase) |
 | Error de contrato | Cubierto parcialmente por la validación Pydantic de cada servicio (422 ante payload inválido), pero no se diseñó como ficha de caos explícita |
-| Fallo parcial (ejecutar una parte y fallar la siguiente) | El flujo diagnóstico→almacén (`_mover_stock`) ya maneja este caso en el código (try/except por repuesto), pero no se verificó como ficha de caos dedicada en esta fase |
+| Fallo parcial (ejecutar una parte y fallar la siguiente) | El flujo diagnósticoalmacén (`_mover_stock`) ya maneja este caso en el código (try/except por repuesto), pero no se verificó como ficha de caos dedicada en esta fase |
 
 ---
 

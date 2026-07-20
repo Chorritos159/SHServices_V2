@@ -9,10 +9,23 @@ observabilidad y gobierno documentado (S26/S29/S31/S34).
 > página responde exactamente lo que hace falta para levantar el sistema,
 > operarlo y auditarlo.
 
-### Documentacion clave
+## Documentación
 
-- [Los 12 mecanismos de resiliencia](documentacion/resiliencia.md) — que es cada uno, en que archivo y linea vive, y **por que** se eligio cada valor.
-- [Fichas contractuales de la API](documentacion/fichas_contractuales.md) — contrato de los 11 endpoints principales.
+Toda la evidencia técnica del proyecto, ordenada por lo que responde:
+
+| Documento | Responde a |
+| :-- | :-- |
+| [catalogo-servicios.md](catalogo-servicios.md) | Qué hace cada servicio, quién lo posee, de qué depende |
+| [documentacion/fichas_contractuales.md](documentacion/fichas_contractuales.md) | Contrato de los 11 endpoints principales |
+| [documentacion/resiliencia.md](documentacion/resiliencia.md) | Los 12 mecanismos: dónde vive cada uno y por qué esos valores |
+| [matriz-resiliencia.md](matriz-resiliencia.md) | Qué mecanismo protege cada dependencia |
+| [matriz-auditoria.md](matriz-auditoria.md) | Qué se audita y dónde queda la traza |
+| [runbook.md](runbook.md) | Cómo operarlo y qué hacer ante un incidente |
+| [documentacion/sla.md](documentacion/sla.md) | Compromisos de disponibilidad y latencia |
+| [documentacion/brechas_finales.md](documentacion/brechas_finales.md) | **Qué NO cubre este proyecto y por qué** |
+| [CHANGELOG.md](CHANGELOG.md) | Qué cambió en cada versión y por qué |
+| [documentacion/adr/](documentacion/adr/) | Decisiones de arquitectura con su contexto |
+| [documentacion/registro_de_carga.md](documentacion/registro_de_carga.md) | Resultados medidos de las pruebas de carga |
 
 ## Cómo levantar el entorno
 
@@ -44,7 +57,7 @@ Los **usuarios** y el **almacén** se siembran solos al arrancar. Lo que no
 existe recién levantado son los tickets, así que los paneles salen vacíos y no
 hay nada que enseñar. `pruebas/14_datos_demo.py` rellena ese hueco: crea 3
 tickets de soporte en PIURA y lleva el primero por el ciclo completo
-(diagnóstico con reserva de stock → cobro con garantía de 90 días).
+(diagnóstico con reserva de stock  cobro con garantía de 90 días).
 
 Va **por la API y no con INSERTs** a propósito: así los datos respetan las
 reglas de negocio, reservan stock de verdad y publican sus eventos a RabbitMQ.
@@ -76,6 +89,28 @@ solo son alcanzables dentro de la red Docker `shservices-net`.
 ```bash
 python pruebas/08_flujo_completo.py
 ```
+
+## Checklist de gobierno (S31)
+
+Respondo aquí el checklist estricto de la sesión 31 para los siete servicios de
+negocio. La regla es que un servicio crítico con más de tres "No" no está listo.
+
+| Pregunta | Respuesta | Dónde se comprueba |
+| :-- | :-- | :-- |
+| ¿Tiene owner funcional y owner técnico? | Sí | [catalogo-servicios.md](catalogo-servicios.md) §2 |
+| ¿Tiene contrato de API/evento documentado? | Sí | [fichas_contractuales.md](documentacion/fichas_contractuales.md) y `/docs-todos` |
+| ¿Tiene versión vigente y política de cambios? | Sí | [CHANGELOG.md](CHANGELOG.md) y la política de versionado del catálogo |
+| ¿Identifica consumidores y dependencias? | Sí | Campo "Consumidores probables" de cada ficha contractual |
+| ¿Tiene ADR para decisiones relevantes? | Sí | [documentacion/adr/](documentacion/adr/) — 15 decisiones registradas |
+| ¿Tiene runbook para el incidente principal? | Sí | [runbook.md](runbook.md) §8, playbooks por incidente |
+| ¿Tiene trazabilidad hacia problema, capacidad y evidencia? | Sí | `trace_id` propagado y persistido en auditoría; ver `pruebas/08_flujo_completo.py` paso 10 |
+| ¿Tiene changelog o notas de release? | Sí | [CHANGELOG.md](CHANGELOG.md) |
+
+Ocho de ocho. Lo que sí reconozco como pendiente está recogido, sin adornos, en
+[brechas_finales.md](documentacion/brechas_finales.md): entre otras, el tráfico
+interno sin TLS, la cobertura de pruebas unitarias, el alcance funcional de
+varios servicios y del frontend, y que la prueba de caos derriba servicios de
+uno en uno en vez de combinarlos.
 
 ## Ownership (quién decide, mantiene y opera)
 
@@ -158,7 +193,7 @@ o inseguros.
    `diagnostico-service`, así que "Mis Tickets" y el "quién atiende qué" del
    admin funcionan aunque `ticket-service` esté caído (ver *Asignación de
    tickets* más abajo).
-3. Se emite `ticket.listo` → **notificacion-service** avisa a Caja.
+3. Se emite `ticket.listo`  **notificacion-service** avisa a Caja.
 4. **Caja** cobra (`POST /facturas`, `facturacion-service`) y entrega
    (`ENTREGADO`).
 5. Todo el trayecto queda trazado con un `X-Correlation-ID` único, auditado
@@ -183,7 +218,7 @@ que garantiza "un ticket = un técnico"), **no** del `ticket-service`. Así, la
 bandeja "Mis Tickets" y la vista del admin siguen funcionando **aunque
 `ticket-service` esté caído** — el trabajo del técnico no se detiene por una
 caída del servicio de tickets. Al tomar, se avisa a `ticket-service`
-(`EN_COLA → EN_DIAGNOSTICO`) en **segundo plano best-effort**: la respuesta es
+(`EN_COLA  EN_DIAGNOSTICO`) en **segundo plano best-effort**: la respuesta es
 instantánea y la asignación es autoritativa aunque ese aviso se pierda.
 
 | Acción | Endpoint | Rol |
@@ -192,7 +227,7 @@ instantánea y la asignación es autoritativa aunque ese aviso se pierda.
 | Mis Tickets | `GET /api/v1/diagnosticos/asignaciones/mias` | TECNICO |
 | Quién atiende qué | `GET /api/v1/diagnosticos/asignaciones/` | ADMIN |
 
-Pruébalo: `docker pause ticket-service`, abre la pantalla de un técnico → la
+Pruébalo: `docker pause ticket-service`, abre la pantalla de un técnico  la
 cola avisa "no disponible" pero **"Mis Tickets" sigue cargando**; `docker
 unpause ticket-service` para restaurar.
 
@@ -206,8 +241,8 @@ Un worker de fondo la reintenta sola contra el servicio con la **misma
 `Idempotency-Key`**; en cuanto el servicio vuelve, se entrega. **Nada se
 pierde ni se duplica.**
 
-Pruébalo: `docker pause ticket-service`, crea un ticket → `202 encolado`;
-`docker unpause ticket-service` → el worker lo registra solo, una sola vez.
+Pruébalo: `docker pause ticket-service`, crea un ticket  `202 encolado`;
+`docker unpause ticket-service`  el worker lo registra solo, una sola vez.
 Ver `api_gateway/app/core/outbox.py`.
 
 ## Garantías (las emite y consulta Facturación)
@@ -297,7 +332,7 @@ python -m pytest tests/ --cov=api_gateway/app/core --cov-report=xml   # + cobert
 
 | Archivo | Qué verifica |
 | :-- | :-- |
-| `tests/test_circuit_breaker.py` | Máquina de estados CLOSED → OPEN → HALF_OPEN → CLOSED: apertura por fallos consecutivos y por tasa de error, fail-fast, una sola sonda en HALF_OPEN, reapertura si la sonda falla, contador de aperturas |
+| `tests/test_circuit_breaker.py` | Máquina de estados CLOSED  OPEN  HALF_OPEN  CLOSED: apertura por fallos consecutivos y por tasa de error, fail-fast, una sola sonda en HALF_OPEN, reapertura si la sonda falla, contador de aperturas |
 | `tests/test_bulkhead_ratelimit.py` | Bulkhead: cupo, liberación y **aislamiento entre servicios** (saturar tickets no consume el cupo de almacén). Rate limit: ráfaga, reposición de tokens, tope de capacidad y `Retry-After` |
 | `tests/test_backoff_outbox.py` | Backoff **3s / 5s / 8s** exigido por la S34, crecimiento posterior con tope de 30s, presencia de jitter y mensajes de "encolado" al usuario |
 
@@ -320,15 +355,15 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | 5 | `python pruebas/05_carga_1M.py` | Nivel **1M**: **25.000 peticiones** contadas (6 nodos x bloques de 20) | ~10.5 min |
 | 6 | `python pruebas/06_caos.py` | 6 fichas de falla controlada: servicio caído, latencia, cola saturada (bulkhead+shed), rate limit, evento duplicado y **degradación funcional** (cae ticket-service y la VENTA se completa igual) | ~1.5 min |
 | 7 | `python pruebas/07_breaker_todos.py` | El circuit breaker abre para **los 7 servicios (auth incluido)**: tumba cada uno, exige 503 (no 500) y circuito OPEN, y verifica la recuperación automática | ~3 min |
-| 8 | `python pruebas/08_flujo_completo.py` | El flujo de negocio **completo tocando los 8 servicios**: caja registra → técnico toma/diagnostica (reserva stock real) → caja cobra/entrega → admin agrega inventario → consultas de auditoría y notificaciones. Verifica que los 8 recibieron tráfico | ~15 s |
-| 9 | `python pruebas/09_asignaciones.py` | **Asignación exclusiva de tickets** y su resiliencia: un técnico toma un ticket (queda solo para él), otro recibe 409, "Mis Tickets" y la vista de admin, y con **ticket-service pausado** "Mis Tickets" sigue funcionando. Incluye el diagnóstico duplicado → 409 legible | ~20 s |
-| 10 | `python pruebas/10_demo_breaker.py <servicio>` | **DEMO VISIBLE del circuit breaker** para un servicio (`almacen`, `tickets`, `diagnosticos`, `facturas`, `auditoria`, `notificaciones`): pausa el contenedor, le manda tráfico hasta abrir el circuito (CLOSED→OPEN con fail-fast), lo deja OPEN 15 s para verlo en Grafana, y al reanudar el servicio el circuito **se cierra solo** (sonda activa). Ideal para la sustentación | ~1.5 min |
+| 8 | `python pruebas/08_flujo_completo.py` | El flujo de negocio **completo tocando los 8 servicios**: caja registra  técnico toma/diagnostica (reserva stock real)  caja cobra/entrega  admin agrega inventario  consultas de auditoría y notificaciones. Verifica que los 8 recibieron tráfico | ~15 s |
+| 9 | `python pruebas/09_asignaciones.py` | **Asignación exclusiva de tickets** y su resiliencia: un técnico toma un ticket (queda solo para él), otro recibe 409, "Mis Tickets" y la vista de admin, y con **ticket-service pausado** "Mis Tickets" sigue funcionando. Incluye el diagnóstico duplicado  409 legible | ~20 s |
+| 10 | `python pruebas/10_demo_breaker.py <servicio>` | **DEMO VISIBLE del circuit breaker** para un servicio (`almacen`, `tickets`, `diagnosticos`, `facturas`, `auditoria`, `notificaciones`): pausa el contenedor, le manda tráfico hasta abrir el circuito (CLOSEDOPEN con fail-fast), lo deja OPEN 15 s para verlo en Grafana, y al reanudar el servicio el circuito **se cierra solo** (sonda activa). Ideal para la sustentación | ~1.5 min |
 | 11 | `python pruebas/11_caos_bajo_carga.py [--nivel 100k\|500k\|1M]` | **Caos BAJO CARGA sostenida**: lanza la carga real y va tumbando servicios **sin parar el tráfico**. Mide contención (cero 500), continuidad (% atendido) y recuperación, con línea de tiempo de los circuitos. Medido: 97.4% atendido y 0 errores 500 con 3 servicios cayendo | 3 / 6.5 / 12 min |
-| 12 | `python pruebas/12_autorecuperacion.py [--nivel reposo\|100k\|500k\|1M] [--servicio X]` | **¿Cuánto tarda en curarse solo?** Mata el proceso (`os._exit(1)`) de 5 servicios y **no vuelve a tocar nada**: cronometra Docker → `/health` → circuito CLOSED. Con `--nivel` se cura **mientras atiende tráfico**, que es el número honesto. Medido: **6 s en reposo, 19 s bajo carga** | 2 / 4 / 6.5 / 8.5 min |
+| 12 | `python pruebas/12_autorecuperacion.py [--nivel reposo\|100k\|500k\|1M] [--servicio X]` | **¿Cuánto tarda en curarse solo?** Mata el proceso (`os._exit(1)`) de 5 servicios y **no vuelve a tocar nada**: cronometra Docker  `/health`  circuito CLOSED. Con `--nivel` se cura **mientras atiende tráfico**, que es el número honesto. Medido: **6 s en reposo, 19 s bajo carga** | 2 / 4 / 6.5 / 8.5 min |
 | 13 | `python pruebas/13_carga_100k_real.py` | **100.000 peticiones REALES**, contadas una a una — no es una etiqueta ni una extrapolación, es el contador. Imprime avance con % y minutos restantes para poder dejarla sola. Sirve además para ver si el throughput se degrada en una sesión larga | **~45 min** |
 | k6 | `python pruebas_k6/correr.py --fase 100k\|500k\|1M` | **Carga con k6** (Go, dentro de la red Docker): el generador de Python topaba en ~105 rps y era ÉL el cuello de botella. Con k6: 166 rps y p95 de 284 ms contra 1.495 ms. Cada corrida escribe la fila completa de la tabla de registro de carga | según fase |
 | 13 | `python pruebas/13_resiliencia_en_vivo.py [--demo 1\|2\|3\|4]` | **4 demos cortas para proyectar en la sustentación.** Cada una dice en consola qué servicio compromete, en qué panel de Grafana se ve, e imprime los **logs reales del Gateway** que lo prueban: sonda activa, timeout+retry, bulkhead y respawn de worker. Medido: el circuito se cierra **solo en 16 s** | ~4 min |
-| 14 | `python pruebas/14_datos_demo.py [--tickets N]` | **Datos de demo.** Crea 3 tickets de soporte en PIURA y lleva el primero por el ciclo completo (diagnóstico con reserva de stock → cobro con garantía). Va por la API, no con INSERTs, así que respeta las reglas de negocio y publica sus eventos. Idempotente | ~15 s |
+| 14 | `python pruebas/14_datos_demo.py [--tickets N]` | **Datos de demo.** Crea 3 tickets de soporte en PIURA y lleva el primero por el ciclo completo (diagnóstico con reserva de stock  cobro con garantía). Va por la API, no con INSERTs, así que respeta las reglas de negocio y publica sus eventos. Idempotente | ~15 s |
 | k6-caos | `python pruebas_k6/caos.py --fase 100k\|500k\|1M` | **Caos bajo carga REAL**: k6 empujando ~200 rps mientras se tumban servicios con **Toxiproxy** (se deshabilita su proxy). Mide contención (cero 500), ausencia de cascada, y cuánto tarda cada circuito en cerrarse **solo** por la sonda activa. La conectividad la restaura la prueba; el circuito se recupera sin intervención | según fase |
 | — | `python pruebas/generar_informe.py` | **Genera el informe completo** en `documentacion/informe_de_pruebas.md`: lee la última corrida de cada prueba y arma tabla de carga, caos, auto-recuperación y veredicto. Lo que no se haya corrido sale como *(sin corrida)*, no como cero | ~1 s |
 
@@ -338,7 +373,7 @@ El generador de carga es **k6** (Go, sin GIL, corriendo dentro de la red
 Docker). Sustituye a la carpeta `pruebas_reales/`, que se eliminó: usaba un
 generador en Python que topaba en ~105 rps y **era él mismo el cuello de
 botella**, así que medía al cliente y no al sistema. Se comprobó lanzando
-generadores en paralelo (1 → 105 rps, 2 → 171, 4 → 257).
+generadores en paralelo (1  105 rps, 2  171, 4  257).
 
 | Comando | Qué prueba |
 | :--- | :--- |
@@ -367,7 +402,7 @@ bulkhead=5) son el aislamiento por servicio funcionando, no fallas.
 **Metodología de las pruebas 3-5 (nodos, bloques, ventana fija):**
 `carga_nodos.py` simula varios **nodos** independientes — no un solo hilo,
 no todo de golpe — que mandan **bloques** de N peticiones concurrentes,
-con **backoff escalonado 3s → 5s → 8s + jitter** entre bloques que topan
+con **backoff escalonado 3s  5s  8s + jitter** entre bloques que topan
 con 429/503 (un bloque limpio baja el nivel a 0). Acotado a una **ventana
 de tiempo fija** (10-15 min): a la tasa real medida del sistema (~85-90
 rps, limitada por el Gateway de 1 worker) completar 500k/1M literalmente
@@ -430,7 +465,7 @@ peticiones mientras está caído:
 # 1. token
 TOKEN=$(curl -s -X POST http://localhost:8003/api/v1/auth/login \
   -H "Content-Type: application/json" -d '{"usuario":"admin","password":"admin123"}' \
-  | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+ | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 # 2. tumba el servicio
 docker stop almacen-service
@@ -482,10 +517,10 @@ tres:
 
 | Comando | ¿Qué hace? | ¿`restart: always` lo revive? |
 | :-- | :-- | :-- |
-| `docker pause <c>` | Congela el proceso (sigue "corriendo") | ❌ No (no murió, está congelado) → `docker unpause` |
-| `docker stop <c>` | Parada solicitada por el usuario | ❌ No (Docker respeta tu decisión) → `docker start` |
-| `docker kill <c>` | Señal desde fuera; Docker la marca como parada del usuario | ❌ No → `docker start` |
-| **Crash real del proceso** | El proceso sale solo (p. ej. `os._exit`) | ✅ **Sí, en ~2s** |
+| `docker pause <c>` | Congela el proceso (sigue "corriendo") | No (no murió, está congelado)  `docker unpause` |
+| `docker stop <c>` | Parada solicitada por el usuario | No (Docker respeta tu decisión)  `docker start` |
+| `docker kill <c>` | Señal desde fuera; Docker la marca como parada del usuario | No  `docker start` |
+| **Crash real del proceso** | El proceso sale solo (p. ej. `os._exit`) | **Sí, en ~2s** |
 
 Por eso, cuando **pausas** un contenedor, "no se levanta solo": está
 congelado, no caído.
@@ -493,14 +528,14 @@ congelado, no caído.
 ### Tumbar un servicio unitario (uno por servicio)
 
 Cada microservicio tiene un endpoint de caos `POST /_chaos/crash` que hace
-que **su proceso muera de verdad** → `restart: always` lo revive solo en ~2s.
+que **su proceso muera de verdad**  `restart: always` lo revive solo en ~2s.
 Así demuestras el auto-restart servicio por servicio.
 
 > **PowerShell (Windows):** `curl` es un alias de `Invoke-WebRequest` y NO
 > acepta `-X`/`-s`. Usa **`curl.exe`** (el curl real, ya viene en Windows 10+)
 > o `Invoke-RestMethod`. Con `curl.exe` los comandos de abajo funcionan tal cual.
 
-| Servicio | Puerto | Comando para tumbarlo (crash real → revive solo) |
+| Servicio | Puerto | Comando para tumbarlo (crash real  revive solo) |
 | :-- | :-- | :-- |
 | auth-service | 8003 | `curl.exe -X POST http://localhost:8003/_chaos/crash` |
 | ticket-service | 8001 | `curl.exe -X POST http://localhost:8001/_chaos/crash` |
@@ -587,7 +622,7 @@ curl -s http://localhost:9001/api/system/status     # -> {"status":"UP"}
 # 2. Generar un token (usuario admin; SONAR_PASS = tu contraseña de SonarQube)
 TOKEN=$(curl -s -u admin:"$SONAR_PASS" -X POST \
   "http://localhost:9001/api/user_tokens/generate?name=analisis-$(date +%s)" \
-  | python -c "import sys,json;print(json.load(sys.stdin)['token'])")
+ | python -c "import sys,json;print(json.load(sys.stdin)['token'])")
 
 # 3. Correr el escáner (el código se copia dentro del contenedor: ver nota)
 docker rm -f sonar-scan 2>/dev/null
@@ -598,7 +633,7 @@ docker cp . sonar-scan:/usr/src/
 docker start -a sonar-scan          # ~45 s
 ```
 
-Resultados: **http://localhost:9001** (usuario `admin`) → proyecto
+Resultados: **http://localhost:9001** (usuario `admin`)  proyecto
 *SHServices V2*. Estado actual (2026-07-18): **0 bugs · Fiabilidad A ·
 Mantenibilidad A**, 16 vulnerabilidades MINOR aceptadas (HTTP/AMQP interno
 entre contenedores). El Quality Gate marca ERROR solo por condiciones de
@@ -623,12 +658,12 @@ que el usuario note nada.
 
 ## Cómo ver logs y métricas
 
-- **Logs en vivo (sin refrescar nada): Dozzle → http://localhost:9999**
+- **Logs en vivo (sin refrescar nada): Dozzle  http://localhost:9999**
   Streaming por WebSocket de los logs de todos los contenedores, en tiempo
   real, con filtro y búsqueda. Es lo que quieres para *mirar* el sistema
   mientras corre una prueba. (Equivalente en terminal:
   `docker compose logs -f api-gateway ticket-service`.)
-- **Logs históricos y correlacionados: Grafana → Explore → Loki.** Loki es
+- **Logs históricos y correlacionados: Grafana  Explore  Loki.** Loki es
   para *buscar* en el pasado (p. ej. filtrar por un `correlationId`
   concreto y ver el recorrido completo de una operación) y correlacionar
   con las métricas. También tiene tiempo real: botón **Live** arriba a la
@@ -639,8 +674,8 @@ que el usuario note nada.
 - **Métricas** (Prometheus, `GET http://localhost:8000/metrics` en texto
   plano): circuit breaker state, retries, fallbacks, bulkhead, rate limit,
   timeouts.
-- **Dashboard de resiliencia**: `http://localhost:3000` → carpeta
-  "SHServices" → *SHServices — Resiliencia (S34)* (provisionado
+- **Dashboard de resiliencia**: `http://localhost:3000`  carpeta
+  "SHServices"  *SHServices — Resiliencia (S34)* (provisionado
   automáticamente, no se arma a mano). Circuit breaker state en vivo,
   throughput/latencia/error rate, bulkhead, rate limit, queue depth y
   consumer lag de RabbitMQ.
@@ -651,13 +686,13 @@ que el usuario note nada.
 ## Mejoras que se pueden implementar (lo que faltó del catálogo funcional)
 
 El catálogo funcional describe capacidades por servicio más amplias que lo
-implementado. Por tiempo se priorizó el flujo núcleo (ticket → diagnóstico →
-almacén → facturación → notificación/auditoría), la asignación de tickets y la
+implementado. Por tiempo se priorizó el flujo núcleo (ticket  diagnóstico 
+almacén  facturación  notificación/auditoría), la asignación de tickets y la
 resiliencia. Lo que quedaría como siguiente iteración, por servicio:
 
 | Servicio | Pendiente del catálogo | Nota |
 | :-- | :-- | :-- |
-| **Tickets** | Estados intermedios completos (recibido, en reparación, validado, listo para entrega, cerrado) y control de tiempos/SLA por ticket | Hoy: `EN_COLA → EN_DIAGNOSTICO → DIAGNOSTICADO → ENTREGADO/RECHAZADO`. Falta el detalle de SLA. |
+| **Tickets** | Estados intermedios completos (recibido, en reparación, validado, listo para entrega, cerrado) y control de tiempos/SLA por ticket | Hoy: `EN_COLA  EN_DIAGNOSTICO  DIAGNOSTICADO  ENTREGADO/RECHAZADO`. Falta el detalle de SLA. |
 | **Diagnóstico** | Registro separado de acciones de reparación y de pruebas de validación/QA | Hoy se registra la falla + repuestos + precio en un solo diagnóstico. |
 | **Almacén** | Flujo de **venta directa** (salida de productos por venta) e ingreso incremental de stock por lote | Hoy: reservar/confirmar/liberar/descontar para servicio técnico + alta de productos. |
 | **Facturación** | **Anulación/corrección** controlada de comprobantes y consulta de comprobantes por cliente/orden | Hoy: emisión idempotente por `id_ticket` + garantías. |

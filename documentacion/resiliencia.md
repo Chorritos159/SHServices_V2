@@ -93,11 +93,11 @@ espera para que los reintentos se repartan en el tiempo en vez de sincronizarse.
 
 - **Alta de producto duplicada.** Si almacén se caía entre el `commit` y la
   respuesta, el cliente reintentaba y el producto quedaba dado de alta **dos
-  veces**. Verificado tras el arreglo: dos peticiones con la misma clave →
+  veces**. Verificado tras el arreglo: dos peticiones con la misma clave 
   `201` y `201`, mismo código `REP-018`, **una sola fila**.
 - **Stock descontado varias veces.** El técnico pulsaba varias veces "agregar
   repuesto" y cada pulsación movía stock. Verificado: tres clics con la misma
-  clave → stock 20 → **18**, no 14.
+  clave  stock 20  **18**, no 14.
 
 **Detalle de diseño que importa.** La clave que manda el diagnóstico al reservar
 es **derivada, no aleatoria**: `diag-{idTicket}-{codigo}`

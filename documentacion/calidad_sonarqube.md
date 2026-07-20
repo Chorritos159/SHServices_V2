@@ -9,11 +9,11 @@ también lo que **no** cumple.
 
 | Métrica | Valor | Umbral | Estado |
 | :-- | :-- | :-- | :-- |
-| Fiabilidad | **A** | A | ✅ |
-| Seguridad | **A** | A | ✅ |
-| Mantenibilidad | **A** | A | ✅ |
-| Duplicación | **~1%** | ≤ 3% | ✅ |
-| Cobertura global | **4.8%** | ≥ 4% (no regresión) | ⚠️ ver abajo |
+| Fiabilidad | **A** | A | |
+| Seguridad | **A** | A | |
+| Mantenibilidad | **A** | A | |
+| Duplicación | **~1%** | ≤ 3% | |
+| Cobertura global | **4.8%** | ≥ 4% (no regresión) | ver abajo |
 
 ## Por qué un Quality Gate propio y no "Sonar way"
 
@@ -35,7 +35,7 @@ Se prefirió esto a contar issues en bruto porque una calificación pondera por
 severidad: un `bug` que rompe producción y un nombre de variable mejorable no
 pueden pesar lo mismo en la misma suma.
 
-Para llegar aquí se corrigieron de verdad **35 issues de fiabilidad** (D → A):
+Para llegar aquí se corrigieron de verdad **35 issues de fiabilidad** (D  A):
 handlers `async` sin `await`, `datetime.utcnow()` deprecado, `Promise.reject`
 con objeto plano, y un `<article>` con `role="button"`.
 
@@ -118,8 +118,8 @@ esperables"); queda como trabajo siguiente y está anotada como tal.
 
 | Cambio | Issues |
 | :-- | :-- |
-| Fiabilidad D → A (handlers async, `utcnow`, `Promise.reject`, `role="button"`) | 35 |
-| `Depends(get_db)` → `Annotated[Session, Depends(get_db)]` en los 8 servicios | 33 |
+| Fiabilidad D  A (handlers async, `utcnow`, `Promise.reject`, `role="button"`) | 35 |
+| `Depends(get_db)`  `Annotated[Session, Depends(get_db)]` en los 8 servicios | 33 |
 | Props de componentes marcadas `Readonly<>` | 26 |
 | Lectura segura de `FormData` (helper `campoTexto`/`campoNumero`) | 18 |
 

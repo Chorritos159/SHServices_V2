@@ -8,16 +8,16 @@
 
 | Evidencia | Mínimo esperado | Estado | Dónde se ve |
 | :-- | :-- | :-- | :-- |
-| Logs estructurados | JSON o formato consistente | ✅ | JSON, un evento por línea, en los 9 servicios (`app/core/logger.py`). Dozzle (`:9999`) en vivo o Grafana→Loki |
-| CorrelationId | presente en todo el flujo | ✅ | `correlationId` en cada línea; el Gateway lo genera/propaga y viaja hasta RabbitMQ (`message.correlation_id`) y la BD de auditoría. Prueba: `python pruebas/08_flujo_completo.py` (pasos 10 y 12) |
-| Métricas | requests, errores, latencia | ✅ | `/metrics` de Gateway, ticket, auditoría y notificaciones → Prometheus (`:9090`) |
-| Trazas | relación entre servicios | ✅ | El `correlationId` es la traza: una operación se reconstruye completa uniendo los logs de los 4 servicios que tocó + la tabla `auditoria_eventos`. Ver §4 |
-| Dashboard | salud, latencia y errores | ✅ | Grafana (`:3000`) → *SHServices — Resiliencia (S34)*, 20 paneles en 7 filas |
-| Eventos auditables | registro del flujo crítico | ✅ | Tabla `auditoria_eventos` en PostgreSQL: `TicketCreado.v1`, `TicketListo.v1`, `DiagnosticoRegistrado.v1`, `FacturaGenerada.v1` (ver `matriz-auditoria.md`) |
-| Queue depth | si usan colas | ✅ | `rabbitmq_queue_messages_ready` por cola (fila "RabbitMQ" del dashboard) |
-| Consumer lag | si usan consumidores/eventos | ✅ | `rabbitmq_queue_messages_unacked` por cola + consumidores activos |
-| Circuit state | si usan circuit breaker | ✅ | `gateway_circuit_state` (0/1/2) — panel *state-timeline* con CLOSED/HALF_OPEN/OPEN por servicio |
-| Retry / fallback count | si reintentan o degradan | ✅ | `gateway_retries_total`, `gateway_fallbacks_total`, `gateway_timeouts_total` por servicio |
+| Logs estructurados | JSON o formato consistente | | JSON, un evento por línea, en los 9 servicios (`app/core/logger.py`). Dozzle (`:9999`) en vivo o GrafanaLoki |
+| CorrelationId | presente en todo el flujo | | `correlationId` en cada línea; el Gateway lo genera/propaga y viaja hasta RabbitMQ (`message.correlation_id`) y la BD de auditoría. Prueba: `python pruebas/08_flujo_completo.py` (pasos 10 y 12) |
+| Métricas | requests, errores, latencia | | `/metrics` de Gateway, ticket, auditoría y notificaciones  Prometheus (`:9090`) |
+| Trazas | relación entre servicios | | El `correlationId` es la traza: una operación se reconstruye completa uniendo los logs de los 4 servicios que tocó + la tabla `auditoria_eventos`. Ver §4 |
+| Dashboard | salud, latencia y errores | | Grafana (`:3000`)  *SHServices — Resiliencia (S34)*, 20 paneles en 7 filas |
+| Eventos auditables | registro del flujo crítico | | Tabla `auditoria_eventos` en PostgreSQL: `TicketCreado.v1`, `TicketListo.v1`, `DiagnosticoRegistrado.v1`, `FacturaGenerada.v1` (ver `matriz-auditoria.md`) |
+| Queue depth | si usan colas | | `rabbitmq_queue_messages_ready` por cola (fila "RabbitMQ" del dashboard) |
+| Consumer lag | si usan consumidores/eventos | | `rabbitmq_queue_messages_unacked` por cola + consumidores activos |
+| Circuit state | si usan circuit breaker | | `gateway_circuit_state` (0/1/2) — panel *state-timeline* con CLOSED/HALF_OPEN/OPEN por servicio |
+| Retry / fallback count | si reintentan o degradan | | `gateway_retries_total`, `gateway_fallbacks_total`, `gateway_timeouts_total` por servicio |
 
 ## 2. Log mínimo aceptable (pág. 17)
 
@@ -30,7 +30,7 @@ real de este sistema (copiado tal cual de `docker logs ticket-service`):
   "level": "INFO",
   "service": "ticket-service",
   "correlationId": "prueba1-traza-1784267439",
-  "message": "💾 Ticket TICK-LIM-4FCA guardado (sede LIMA, por admin).",
+  "message": " Ticket TICK-LIM-4FCA guardado (sede LIMA, por admin).",
   "operation": "crear_ticket",
   "event": "TicketCreado.v1",
   "result": "ok",
@@ -89,10 +89,10 @@ se reconstruye con el **correlationId**, que es lo que pide la S34
 ("relación entre servicios"):
 
 ```
-Cliente → Gateway (genera X-Correlation-ID)
-        → ticket-service (lo lee de la cabecera y lo loguea)
-        → RabbitMQ (viaja como message.correlation_id)
-        → auditoria-service + notificacion-service (lo persisten como trace_id)
+Cliente  Gateway (genera X-Correlation-ID)
+         ticket-service (lo lee de la cabecera y lo loguea)
+         RabbitMQ (viaja como message.correlation_id)
+         auditoria-service + notificacion-service (lo persisten como trace_id)
 ```
 
 `python pruebas/08_flujo_completo.py` lo demuestra de punta a punta: crea un

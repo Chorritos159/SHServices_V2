@@ -13,9 +13,9 @@ Eventos que el servicio produce o consume.
 
 | Evento | Tipo | Versión | Semántica / Propósito |
 | :--- | :--- | :--- | :--- |
-| `producto.registrado` | Consumidor | `v1` | Nuevo producto en almacén → alerta a ADMIN |
-| `ticket.creado` | Consumidor | `v1` | Ticket SOPORTE en EN_COLA → alerta a TECNICO de la sede |
-| `ticket.listo` | Consumidor | `v1` | Ticket diagnosticado → alerta a CAJA para cobro y entrega |
+| `producto.registrado` | Consumidor | `v1` | Nuevo producto en almacén  alerta a ADMIN |
+| `ticket.creado` | Consumidor | `v1` | Ticket SOPORTE en EN_COLA  alerta a TECNICO de la sede |
+| `ticket.listo` | Consumidor | `v1` | Ticket diagnosticado  alerta a CAJA para cobro y entrega |
 
 ## Runbook Básico
 Qué hacer cuando este servicio falla. Es operativo, breve y accionable.
@@ -24,7 +24,7 @@ Qué hacer cuando este servicio falla. Es operativo, breve y accionable.
 | :--- | :--- | :--- |
 | **Incidente cubierto** | ¿Qué problema atiende? | Los técnicos/caja dejan de recibir alertas de nuevos tickets o equipos listos. |
 | **Detección** | ¿Cómo sé que ocurre? | Logs `service=notificacion-service` sin líneas `result: ok` recientes; cola `notificaciones_queue` con mensajes sin consumir en RabbitMQ. |
-| **Primeras revisiones** | ¿Qué miro primero? | Estado del consumidor (`🎧 conectado y escuchando`), conexión a RabbitMQ y a PostgreSQL. |
+| **Primeras revisiones** | ¿Qué miro primero? | Estado del consumidor (` conectado y escuchando`), conexión a RabbitMQ y a PostgreSQL. |
 | **Acción** | ¿Qué puedo ejecutar? | Reiniciar el contenedor (`restart: always` ya lo reintenta); los mensajes durables quedan en la cola hasta que el consumidor vuelve. |
 | **Escalamiento** | ¿A quién llamo? | Owner Técnico de Plataforma. |
 | **Comunicación** | ¿A quién informo? | Recepción y Técnicos de la sede afectada (dependen de esta bandeja para su flujo diario). |

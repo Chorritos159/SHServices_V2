@@ -51,7 +51,7 @@ través del API Gateway**, con la convención de path doblado
   precio_estimado? }` + cabecera `Idempotency-Key`
 - **Salida(s):** `{ idTicket, estado, ... }` (`201`), o `202` si el Gateway lo
   encoló en el outbox.
-- **Regla(s) relevantes:** Estados `EN_COLA → EN_DIAGNOSTICO → DIAGNOSTICADO →
+- **Regla(s) relevantes:** Estados `EN_COLA  EN_DIAGNOSTICO  DIAGNOSTICADO 
   ENTREGADO` (o `RECHAZADO`). Publica `ticket.creado`. Con `Idempotency-Key`, un
   reintento devuelve el ticket original en vez de crear otro.
 - **Error(es) esperables:** `422` datos incompletos · `503` servicio no
@@ -150,7 +150,7 @@ través del API Gateway**, con la convención de path doblado
   `Idempotency-Key`; la sede va en `X-User-Sede`
 - **Salida(s):** `{ status: "STOCK_DESCONTADO", sede, lineas[] }`
 - **Regla(s) relevantes:** Bloquea las N filas **ordenadas por código** (mismo
-  orden en todas las transacciones ⇒ no hay deadlocks), valida todas y hace un
+  orden en todas las transacciones  no hay deadlocks), valida todas y hace un
   único commit: si la tercera línea no tiene stock, las dos primeras nunca
   salieron y no hay nada que compensar. Solo productos `PRODUCTO_VENTA`.
 - **Error(es) esperables:** `401` token sin sede · `404` producto inexistente ·

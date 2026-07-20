@@ -22,7 +22,7 @@
 > | auditoria | `GET /eventos` | *(consume los eventos que generan las escrituras)* |
 > | auth | login de cada nodo | — |
 >
-> La **cadena de negocio** (crear ticket → tomarlo → diagnosticar → cobrar) es
+> La **cadena de negocio** (crear ticket  tomarlo  diagnosticar  cobrar) es
 > la única forma de ejercitar diagnósticos y facturación con escrituras
 > **válidas** (necesitan un ticket en el estado correcto); va con peso bajo.
 > Las escrituras son las que hacen trabajar a **RabbitMQ** (eventos) y a los
@@ -153,7 +153,7 @@ QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.
 | `pool_size=5, max_overflow=10` | `10 + 10` = 20 por servicio | Cubre la concurrencia real medida |
 | `pool_timeout=30s` | `5s` | Si en 5 s no hay conexión, el servicio está saturado: mejor decirlo rápido |
 | `max_connections=100` | `200` | 8 × 20 = 160, más margen para administración |
-| Pool agotado → **HTTP 500** | → **HTTP 503** + `Retry-After` | Saturación no es avería |
+| Pool agotado  **HTTP 500** | **HTTP 503** + `Retry-After` | Saturación no es avería |
 
 El último punto es el que más importa. Un pool agotado significa **el servicio
 está saturado**, que es un estado transitorio y reintentable — exactamente lo
@@ -194,7 +194,7 @@ esos casos no hay factura previa que devolver, `existente` es `None` y el
 Corregido: si `existente` es `None` se responde **409 legible** y el motivo
 real (`exc.orig`) queda en el log para quien opera.
 
-**Verificado:** 8 cobros simultáneos del mismo ticket → `[201 × 8]`, cero 500.
+**Verificado:** 8 cobros simultáneos del mismo ticket  `[201 × 8]`, cero 500.
 
 Los dos hallazgos comparten patrón: **código que asumía el camino feliz y solo
 falla bajo concurrencia**. Ninguna prueba funcional los habría encontrado; hizo

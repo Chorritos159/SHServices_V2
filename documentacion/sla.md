@@ -93,7 +93,7 @@ terminar cada corrida (ver `registro_de_carga.md`).
 | **Timeout por servicio** | 3 s (auth, tickets, almacén, auditoría, notificaciones) · 4 s (facturas) · 5 s (diagnóstico) | Diagnóstico y facturación orquestan llamadas a almacén, por eso más holgura. Un timeout corta la espera antes de que el usuario abandone |
 | **Bulkhead (llamadas en vuelo)** | tickets 12 · auth/almacén/diagnóstico/facturas 8 · auditoría/notificaciones 5 | Tickets es el más transitado. Aísla: una dependencia lenta no consume la capacidad de las demás |
 | **Circuit breaker** | Abre a los 3 fallos seguidos · cooldown 15 s | 3 fallos es señal de dependencia enferma, no de un error puntual. 15 s da margen a reiniciar sin dejar el circuito abierto de más |
-| **Backoff de reintento** | **3 s → 5 s → 8 s** (+ jitter); el outbox sigue hasta 30 s | Escalonado para no golpear una dependencia enferma; el jitter evita que todos reintenten a la vez |
+| **Backoff de reintento** | **3 s  5 s  8 s** (+ jitter); el outbox sigue hasta 30 s | Escalonado para no golpear una dependencia enferma; el jitter evita que todos reintenten a la vez |
 | **Shedding** | Al 70 % de ocupación del bulkhead | Reserva el cupo restante para escrituras críticas, descartando lecturas de baja prioridad |
 
 ## 6. Garantía de no pérdida de datos (más fuerte que el SLA de disponibilidad)

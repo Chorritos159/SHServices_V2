@@ -5,8 +5,8 @@
 
 ## 1. Visión general
 
-Sistema de gestión de servicio técnico multi-sede (PIURA / TALARA): recepción → diagnóstico →
-almacén → facturación, con notificación y auditoría transversales. 7 microservicios de negocio
+Sistema de gestión de servicio técnico multi-sede (PIURA / TALARA): recepción  diagnóstico 
+almacén  facturación, con notificación y auditoría transversales. 7 microservicios de negocio
 (FastAPI + PostgreSQL + RabbitMQ) detrás de un **API Gateway** que es el único punto de entrada
 público, el único validador de identidad (JWT) y donde vive la resiliencia del sistema
 (circuit breaker, timeouts, retry+backoff+jitter, bulkhead, rate limiting, shedding, outbox).
@@ -286,12 +286,12 @@ Si la BD no responde: `status: "DEGRADED"`, `dependencies.database: "DOWN"` (sig
 
 ## 6. Flujo de negocio
 
-1. **Recepción** registra el ticket (`SOPORTE` → `EN_COLA`; `VENTA` → `VENTA_REGISTRADA`)
-   → el **Técnico** recibe una alerta.
+1. **Recepción** registra el ticket (`SOPORTE`  `EN_COLA`; `VENTA`  `VENTA_REGISTRADA`)
+    el **Técnico** recibe una alerta.
 2. **Técnico** ve la cola de **su sede** y **toma** un ticket: queda asignado solo a él
    (otro técnico de la sede recibe 409) y aparece en **"Mis Tickets"**. Registra el
    diagnóstico (precio + repuestos), que **reserva stock** en Almacén; el ticket pasa a
-   `DIAGNOSTICADO` → **Recepción** recibe la alerta de que ya puede cobrar.
+   `DIAGNOSTICADO`  **Recepción** recibe la alerta de que ya puede cobrar.
 3. **Recepción / Facturación** cobra: se emite el comprobante **y la garantía de 90 días**;
    al entregar se **confirma (consume)** el stock reservado y el ticket queda `ENTREGADO`.
 4. **Administrador** gestiona inventario y usuarios, ve **quién atiende cada ticket** y

@@ -15,7 +15,7 @@
 | **Circuit Breaker formal** (CLOSED/OPEN/HALF_OPEN) | API Gateway (`app/core/resilience.py`) | Aísla un microservicio caído o lento con fail-fast |
 | **Sonda activa del breaker** (recuperación automática) | API Gateway (`bucle_sonda_breakers`, cada 5s) | Cierra el circuito SOLO cuando el servicio revive, sin necesidad de tráfico del cliente (no es "lazy") |
 | **Timeouts por operación** | API Gateway (3–5 s según servicio) | Corta la espera ante dependencias lentas |
-| **Retry + backoff escalonado + jitter** | API Gateway (solo lecturas) | Absorbe fallos transitorios sin duplicar escrituras. Backoff **3s → 5s → 8s** + jitter (misma política en el outbox, que sigue hasta 30s) |
+| **Retry + backoff escalonado + jitter** | API Gateway (solo lecturas) | Absorbe fallos transitorios sin duplicar escrituras. Backoff **3s  5s  8s** + jitter (misma política en el outbox, que sigue hasta 30s) |
 | **Fallback honesto** | API Gateway (503/504 + `circuito` + `Retry-After`) | Respuesta degradada semántica, nunca 500 opaco |
 | **Bulkhead por servicio** | API Gateway (`app/core/bulkhead.py`) | Una dependencia lenta no agota la capacidad de las demás |
 | **Shedding por prioridad** | API Gateway (umbral 70% de ocupación) | Protege escrituras críticas descartando lecturas de baja prioridad primero |
@@ -26,12 +26,12 @@
 | **Idempotencia de consumidores** | auditoria-service, notificacion-service (índice único) | Un redelivery de RabbitMQ no duplica la traza ni la alerta |
 | **Outbox transaccional (store-and-forward)** | API Gateway (`app/core/outbox.py`, tabla `gateway_outbox`) | Si un servicio está caído, la ESCRITURA del cliente no se pierde: se encola (202) y un worker la reintenta sola con la misma Idempotency-Key (ni se pierde ni se duplica) |
 | **"Mis Tickets" independiente** | diagnostico-service (tabla `asignaciones`) | La bandeja del técnico y el "quién atiende qué" del admin los sirve diagnóstico, no ticket-service: el técnico sigue trabajando aunque tickets caiga |
-| **Sync best-effort en 2º plano** | diagnostico → ticket (`BackgroundTask`) | Tomar un ticket responde al instante; la sincronización de estado con ticket-service no bloquea ni falla la operación |
+| **Sync best-effort en 2º plano** | diagnostico  ticket (`BackgroundTask`) | Tomar un ticket responde al instante; la sincronización de estado con ticket-service no bloquea ni falla la operación |
 | **Logs estructurados S34** | Los 9 servicios (`app/core/logger.py`) | `service, correlationId, operation, event, result, durationMs` — trazables y filtrables |
-| **Métricas de resiliencia** | Gateway → `/metrics` → Prometheus | Circuit state, retries, fallbacks, bulkhead, rate limit, timeouts observables |
+| **Métricas de resiliencia** | Gateway  `/metrics`  Prometheus | Circuit state, retries, fallbacks, bulkhead, rate limit, timeouts observables |
 | **Dashboard de resiliencia** | Grafana (`grafana/dashboards/resiliencia_s34.json`, provisionado) | Circuit state, retry/fallback, bulkhead, rate limit, queue depth, consumer lag — todo en un solo lugar |
 | **Queue depth / consumer lag** | RabbitMQ (`rabbitmq_prometheus`, `/metrics/per-object`) | Visibilidad de cuánto trabajo pendiente/atascado hay por cola |
-| **Toxiproxy** | Tráfico Gateway → Tickets | Simula latencia/caídas (prueba del breaker) |
+| **Toxiproxy** | Tráfico Gateway  Tickets | Simula latencia/caídas (prueba del breaker) |
 | **`restart: always`** | Todos los contenedores | Auto-recuperación ante crash REAL del proceso (no ante `docker pause/stop/kill`, que Docker trata como parada del usuario) |
 | **Endpoint de caos `/_chaos/crash`** | ticket-service, diagnostico-service | Provoca un crash real (`os._exit`) para demostrar el auto-restart de `restart: always` |
 | **Health checks** | Dockerfile + `/health` | Detección de servicios no saludables |
@@ -44,11 +44,11 @@
 
 Un breaker **por servicio destino** con estados reales (no solo traducción de excepciones):
 
-- **CLOSED → OPEN**: ≥ 3 fallos consecutivos, o error rate ≥ 50 % en ventana de 30 s (mín. 4 muestras).
+- **CLOSED  OPEN**: ≥ 3 fallos consecutivos, o error rate ≥ 50 % en ventana de 30 s (mín. 4 muestras).
 - **OPEN**: fail-fast durante 15 s — el Gateway responde 503 con `Retry-After: 5` **sin llamar** a la dependencia enferma (le da aire para recuperarse).
-- **OPEN → HALF_OPEN**: al vencer el cooldown deja pasar **una sonda**; si sale bien → CLOSED, si falla → OPEN de nuevo.
+- **OPEN  HALF_OPEN**: al vencer el cooldown deja pasar **una sonda**; si sale bien  CLOSED, si falla  OPEN de nuevo.
 
-Cadena de protección por request: `circuit breaker → timeout por operación → retry (backoff+jitter, solo GET/HEAD) → fallback`.
+Cadena de protección por request: `circuit breaker  timeout por operación  retry (backoff+jitter, solo GET/HEAD)  fallback`.
 
 | Fallo del microservicio | Detección | Respuesta del Gateway |
 |---|---|---|
@@ -60,7 +60,7 @@ Cadena de protección por request: `circuit breaker → timeout por operación �
 **Regla de retry responsable (S34):** un POST con timeout tiene efecto incierto — reintentarlo
 puede duplicar el ticket/la factura. Por eso solo se reintentan lecturas (GET/HEAD) ante
 timeout/5xx; un `ConnectError` sí se reintenta con cualquier método (el request nunca llegó).
-Backoff **escalonado 3s → 5s → 8s** + jitter `U(0, 1s)` para desincronizar clientes
+Backoff **escalonado 3s  5s  8s** + jitter `U(0, 1s)` para desincronizar clientes
 (política del sistema, S34). La misma secuencia la usan el worker del outbox —que
 a partir de 8s sigue creciendo hasta un tope de 30s— y el generador de carga.
 En la práctica el breaker corta antes: tras 3 fallos seguidos abre y el reintento
@@ -130,7 +130,7 @@ repuesto a 20 tokens/s. Sin tokens disponibles, responde **429** con
 `Retry-After`. No se aplica a `/health` ni `/metrics` (monitoreo siempre
 disponible).
 
-**Verificado en vivo**: 100 peticiones con 40 en paralelo → 88×200, 12×429,
+**Verificado en vivo**: 100 peticiones con 40 en paralelo  88×200, 12×429,
 consistente con el tamaño del bucket.
 
 ### 3.4 Sampling de logs bajo carga
@@ -156,9 +156,9 @@ completa.
 ```bash
 curl -X POST http://localhost:8474/proxies/ticket_proxy/toxics \
   -d '{"type":"latency","attributes":{"latency":8000}}'
-# → leer tickets devuelve 504; tras 3 seguidos, 503 con "circuito": "OPEN" (fail-fast)
+#  leer tickets devuelve 504; tras 3 seguidos, 503 con "circuito": "OPEN" (fail-fast)
 
-# quitar la toxina y esperar el cooldown (15 s) → la sonda HALF_OPEN recupera el circuito
+# quitar la toxina y esperar el cooldown (15 s)  la sonda HALF_OPEN recupera el circuito
 curl -X DELETE http://localhost:8474/proxies/ticket_proxy/toxics/latency_downstream
 ```
 
@@ -209,9 +209,9 @@ en los consumidores, descartando el mensaje como no-op) — nunca se
 propaga como un error crudo ni se reintenta indefinidamente.
 
 **Verificado en vivo:**
-- `POST /tickets` con la misma `Idempotency-Key` dos veces → mismo `idTicket`, 1 sola fila en `tickets`.
-- `POST /facturas` con el mismo `idTicket` dos veces → misma `idFactura`, 1 sola fila en `facturas`.
-- Insert directo duplicado en `auditoria_eventos` (simulando un redelivery) → rechazado por
+- `POST /tickets` con la misma `Idempotency-Key` dos veces  mismo `idTicket`, 1 sola fila en `tickets`.
+- `POST /facturas` con el mismo `idTicket` dos veces  misma `idFactura`, 1 sola fila en `facturas`.
+- Insert directo duplicado en `auditoria_eventos` (simulando un redelivery)  rechazado por
   `ux_auditoria_trace_evento`, exactamente el `IntegrityError` que el consumidor ya sabe absorber.
 
 ## 9. Dashboard de resiliencia en Grafana (Fase 4)
