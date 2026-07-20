@@ -112,6 +112,28 @@ Todas tienen su archivo y línea en `resiliencia.md`. Aquí la respuesta corta:
 
 ---
 
+
+
+### Matriz de resiliencia — Sí / cómo se demuestra / archivo:línea (verificado hoy)
+
+| Mecanismo | ¿Cumple? | Cómo se demuestra | Archivo:línea |
+| :-- | :-- | :-- | :-- |
+| Timeout | Sí | Presupuesto por servicio (3-5 s); sin él, cuelga una conexión del pool | `api_gateway/app/main.py:120` |
+| Retry | Sí | Solo transitorios; nunca un 409 ni un cobro procesado | `api_gateway/app/main.py:232` |
+| Backoff | Sí | 3/5/8 s + jitter, para no bombardear al que se recupera | `api_gateway/app/main.py:232`, jitter `:236` |
+| Idempotencia | Sí | Reserva de clave + índice único; 3 clics = 1 operación | `almacen_service/app/api/almacen.py:126` |
+| Circuit breaker | Sí | Fail-fast tras 3 fallos; 1.430 aperturas en 1M, cierra solo | `resilience.py:31`, sonda `main.py:545` |
+| Bulkhead | Sí | Cupo por servicio; sin cascada (auth en 0 durante el caos) | `api_gateway/app/main.py:290` |
+| Backpressure | Sí | 429 en la puerta. Límite efectivo ~160 por worker (brecha 24) | `api_gateway/app/main.py:321` |
+| Buffering | Sí | Colas durables + outbox; 175.140 mensajes en 1M, ninguno perdido | `outbox.py:16` + colas `durable=True` |
+| Dropping/sampling | Sí | Shedding de baja prioridad + muestreo de logs (errores nunca) | `main.py:154` + `:344` |
+| Fallback | Sí | Outbox → 202; la venta se completa aunque tickets caiga | `api_gateway/app/main.py:619` |
+
+Estructura de cada respuesta: **Sí** + **cómo se demuestra** (número o panel) +
+**dónde** (archivo:línea). Es lo que pide la matriz: observar o justificar.
+
+---
+
 ## 4. Preguntas puntuales de código — "ubica implementación o configuración"
 
 | # | Pregunta | Dónde está |
