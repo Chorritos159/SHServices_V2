@@ -129,6 +129,28 @@ Todas tienen su archivo y línea en `resiliencia.md`. Aquí la respuesta corta:
 
 ---
 
+
+
+### Tabla rápida — archivo:línea (verificado hoy)
+
+| # | Pregunta | Archivo:línea |
+| :-- | :-- | :-- |
+| 1 | Timeout | `api_gateway/app/main.py:120` (`TIMEOUTS`) |
+| 2 | Retry | `api_gateway/app/main.py:232` (`BACKOFF_SEQ`), jitter en `:236` |
+| 3 | Idempotencia | `almacen_service/app/api/almacen.py:126` (`_reservar_clave`) |
+| 4 | CorrelationId | `api_gateway/app/main.py:645` (`correlation_id_middleware`) |
+| 5 | Validar request | `*/models/schemas.py` (Pydantic) + `exceptions.py:109` (422) |
+| 6 | No exponer secretos | `.gitignore:7` + `api_gateway/app/core/outbox.py:80` |
+| 7 | Separar negocio/externo | `api_gateway/app/main.py:371` (`_proxy_resiliente`) |
+| 8 | Traducir error externo | `main.py:410` (503) + `exceptions.py:31` (handler global) |
+| 9 | Evento auditable | `diagnostico_service/app/core/rabbitmq.py:28` (`publicar_evento`) |
+| 10 | Fallback | `api_gateway/app/main.py:619` (`_encolar_o_error`) |
+
+Seis de diez están en `api_gateway/app/main.py`: ten ese archivo abierto y usa
+Ctrl+G (ir a línea).
+
+---
+
 ## 5. La pregunta final — modelo de respuesta completo
 
 > "Bajo 1 millón de peticiones y con una dependencia crítica fallando, ¿qué se
