@@ -265,3 +265,33 @@ con tráfico encima", no el mejor caso de laboratorio.
 
 Con ese dato, agotar el presupuesto de error mensual del nivel alto (99%)
 requeriría unas 23 caídas al mes.
+
+---
+
+## Cobertura de las 5 pruebas de fallas que exige la S34
+
+Mapeo cada prueba obligatoria con dónde la ejecuto y qué resultado obtengo.
+
+| Prueba exigida | Resultado esperado | Dónde la ejecuto | Estado |
+| :-- | :-- | :-- | :-- |
+| **Dependencia externa caída** | timeout, retry limitado, circuit breaker, estado pendiente | `pruebas/13_resiliencia_en_vivo.py --demo 2` (timeout y retry) y `--demo 8` (circuito) | Cubierta |
+| **Webhook duplicado** | idempotencia, no duplicar estado, evidencia de duplicado | `--demo 5`: mando el mismo alta 3 veces con la misma `Idempotency-Key` y consulto la base — queda 1 sola fila | Cubierta |
+| **Cola saturada** | queue depth, consumer lag, backpressure o buffering | `--demo 7`: ráfaga de 400 altas, la cola sube y drena sola. Bajo carga real: pico de 20.620 mensajes en la corrida de 100k | Cubierta |
+| **Falla parcial** | estado intermedio, compensación, auditoría | `--demo 6`: con `ticket-service` parado, el diagnóstico se guarda igual y el ticket queda en estado intermedio hasta que el backlog se procesa | Cubierta |
+| **Circuit breaker** | múltiples 503, circuito abierto, fallback o degradación | `--demo 8`: 8 peticiones contra un servicio caído, apertura del circuito, fail-fast y cierre automático | Cubierta |
+
+### Por qué añadí las demos 7 y 8
+
+Hasta ahora la cola saturada y el circuit breaker solo se observaban **dentro de
+las pruebas de carga**, que duran entre 8 y 90 minutos. Eso sirve como evidencia
+escrita, pero no para demostrarlo en vivo delante de alguien. Las demos 7 y 8
+reproducen ambos escenarios en **menos de dos minutos cada una** y dicen en
+consola en qué panel de Grafana se observa cada métrica.
+
+### Evidencia mínima que deja cada demo
+
+Todas cumplen lo que pide la sesión: se ve el **request y la response** (código
+HTTP de cada petición), el **estado final** (consulta directa a PostgreSQL o al
+endpoint de métricas), los **logs** reales del Gateway filtrados por operación,
+el **correlationId** propagado, el **evento auditable** en la traza y el
+**panel** concreto donde mirarlo.

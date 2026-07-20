@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""RESILIENCIA EN VIVO — 6 demos cortas, para enseñar en la sustentación.
+"""RESILIENCIA EN VIVO — 8 demos cortas, para enseñar en la sustentación.
 
 Cada demo dura menos de un minuto, dice EN CONSOLA qué servicio está tocando y
 en qué panel de Grafana se ve, e imprime los logs REALES del Gateway que lo
@@ -18,6 +18,10 @@ prueban. Está pensada para proyectarla mientras se explica.
      base de datos. Trae un bloque comentado para ver el contraste SIN clave.
   6. BUFFERING — se para ticket-service, el tecnico diagnostica igual, y al
      volver el servicio procesa el backlog y mueve el ticket SOLO.
+  7. QUEUE DEPTH y CONSUMER LAG — una rafaga satura a los consumidores; la cola
+     sube y drena sola. Muestra donde mirar cada metrica en Grafana.
+  8. CIRCUIT BREAKER — trafico real contra un servicio caido: multiples 503,
+     apertura del circuito, fail-fast y cierre automatico por la sonda.
 
 Uso:
     python pruebas/13_resiliencia_en_vivo.py            # las seis
@@ -130,6 +134,23 @@ def _cola(nombre: str) -> str:
         return str(json.loads(urllib.request.urlopen(pet, timeout=6).read()).get("messages", "?"))
     except Exception:
         return "?"
+
+
+def _colas():
+    """Mensajes pendientes en TODAS las colas, por la API HTTP de RabbitMQ."""
+    import base64
+    pet = urllib.request.Request("http://localhost:15672/api/queues")
+    pet.add_header("Authorization", "Basic " + base64.b64encode(b"guest:guest").decode())
+    try:
+        colas = json.loads(urllib.request.urlopen(pet, timeout=6).read())
+    except Exception:
+        return 0, "(no se pudo leer RabbitMQ)"
+    total, detalle = 0, []
+    for c in colas:
+        n = c.get("messages", 0) or 0
+        total += n
+        detalle.append(f"{c.get('name')}={n}")
+    return total, ", ".join(detalle)
 
 
 def _estado_ticket(id_ticket: str) -> str:
@@ -395,9 +416,109 @@ def demo6(token):
     _logs_de("ticket-service", "consumir_diagnostico", 180, 3)
 
 
+def demo7(token):
+    titulo(7, "QUEUE DEPTH y CONSUMER LAG — la cola sube y drena sola",
+           "seccion RabbitMQ: 'Queue depth', 'Consumer lag' y 'Consumidores activos'")
+    print(" Servicio comprometido: ninguno. Se satura a los CONSUMIDORES.")
+    print("")
+    print("  Cada alta de producto publica un evento que auditoria y")
+    print("  notificaciones deben procesar. Si se publica mas rapido de lo que")
+    print("  consumen, la cola CRECE: eso es el desacoplamiento absorbiendo el")
+    print("  exceso en vez de rechazar trabajo.")
+    print("")
+
+    antes, detalle = _colas()
+    print(f"  cola al empezar ........... {antes} mensaje(s)  ({detalle})")
+    print("  lanzando 400 altas en rafaga (40 a la vez)...")
+
+    def alta(i):
+        cod, _c = pedir(f"{GW}/api/v1/almacen/almacen/productos", "POST", {
+            "nombre": f"CARGA-demo7 {int(time.time())}-{i}", "categoria": "REPUESTO",
+            "sede": "PIURA", "stock_inicial": 3, "precio_unitario": 12.0,
+        }, token=token, timeout=30)
+        return cod
+
+    with ThreadPoolExecutor(max_workers=40) as ex:
+        list(ex.map(alta, range(400)))
+
+    pico, detalle = _colas()
+    print(f"  cola justo despues ........ {pico} mensaje(s)  ({detalle})")
+    if pico > antes:
+        print("  >>> LA COLA SUBIO: es el BUFFERING absorbiendo la rafaga <<<")
+    else:
+        print("  (los consumidores fueron mas rapidos que la rafaga; mira el")
+        print("   panel 'Consumer lag', que es mas sensible que 'Queue depth')")
+
+    print("")
+    print("  Ahora NADIE interviene: se observa como DRENA sola.")
+    for _ in range(12):
+        time.sleep(5)
+        actual, _d = _colas()
+        print(f"    quedan {actual} mensaje(s)")
+        if actual == 0:
+            break
+
+    print("")
+    print("  Lo que hay que mirar en Grafana:")
+    print("    - 'Queue depth': la curva sube y vuelve a cero. Eso es sano.")
+    print("    - 'Consumer lag': mensajes entregados pero SIN confirmar. Un lag")
+    print("      alto con la cola vacia significa consumidor atascado, no ocioso.")
+    print("    - 'Consumidores activos': si marca 0 en alguna cola, el consumidor")
+    print("      murio; ahi la cola crece y NO baja.")
+
+
+def demo8(token):
+    titulo(8, "CIRCUIT BREAKER — multiples 503, circuito abierto y fallback",
+           "panel 'Estado del circuito por servicio' y 'Aperturas de circuito'")
+    print(" Servicio comprometido: ALMACEN (se corta su proxy en Toxiproxy)")
+    print("")
+    print("  Se manda trafico REAL contra un servicio caido. El breaker necesita")
+    print("  ver fallos para abrir: si nadie llama al servicio caido, su circuito")
+    print("  se queda CLOSED, y eso es correcto, no un fallo.")
+    print("")
+
+    print(f"  estado inicial ............ {circuito('almacen')}")
+    proxy(PROXY["almacen"], False)
+    print("  'almacen' sin conectividad. Mandando 8 peticiones...")
+
+    codigos = []
+    for i in range(8):
+        cod, _c = pedir(f"{GW}/api/v1/almacen/almacen/productos",
+                        token=token, timeout=12)
+        codigos.append(cod)
+        print(f"    peticion {i+1} -> HTTP {cod}  (circuito: {circuito('almacen')})")
+
+    resumen = {}
+    for c in codigos:
+        resumen[c] = resumen.get(c, 0) + 1
+    print("")
+    print(f"  respuestas ................ {resumen}")
+    print(f"  estado del circuito ....... {circuito('almacen')}")
+    print(f"  'tickets' mientras tanto .. {circuito('tickets')}  <-- sin cascada")
+    print("")
+    print("  Los primeros fallos tardan (se agota el timeout); a partir de la")
+    print("  apertura las respuestas son INMEDIATAS: eso es el fail-fast, que")
+    print("  deja de gastar timeout contra algo que ya se sabe caido.")
+
+    print("")
+    print("  restaurando la conectividad; el circuito se cierra SOLO.")
+    proxy(PROXY["almacen"], True)
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 90:
+        if circuito("almacen") == "CLOSED":
+            print(f"  >>> circuito CERRADO SOLO en {time.monotonic()-t0:.0f}s "
+                  "(sonda activa, ADR-0014) <<<")
+            break
+        time.sleep(2)
+
+    print("")
+    print("  Los logs del Gateway (una linea por TRANSICION, no por peticion):")
+    logs("circuit_breaker", 200, 6)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--demo", type=int, choices=[1, 2, 3, 4, 5, 6],
+    ap.add_argument("--demo", type=int, choices=[1, 2, 3, 4, 5, 6, 7, 8],
                     help="Correr solo una (por defecto: las cuatro)")
     args = ap.parse_args()
 
@@ -406,8 +527,9 @@ def main():
         print("No se pudo iniciar sesion. Esta todo levantado? (docker compose ps)")
         sys.exit(1)
 
-    demos = {1: demo1, 2: demo2, 3: demo3, 4: demo4, 5: demo5, 6: demo6}
-    elegidas = [args.demo] if args.demo else [1, 2, 3, 4, 5, 6]
+    demos = {1: demo1, 2: demo2, 3: demo3, 4: demo4,
+             5: demo5, 6: demo6, 7: demo7, 8: demo8}
+    elegidas = [args.demo] if args.demo else [1, 2, 3, 4, 5, 6, 7, 8]
     try:
         for n in elegidas:
             demos[n](token)

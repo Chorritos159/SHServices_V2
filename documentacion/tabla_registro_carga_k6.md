@@ -15,3 +15,4 @@
 | **humo** | 101 rps | 404 ms | 626 ms | 0.00% | 333% / 527 MiB | 453 | cero errores 500. cola RabbitMQ hasta 453 mensajes: los consumidores se quedaron atrás. | <!-- 20260719_192226 -->
 | **humo** | 126 rps | 305 ms | 448 ms | 0.00% | 308% / 526 MiB | 258 | cero errores 500. cola RabbitMQ hasta 258 mensajes: los consumidores se quedaron atrás. | <!-- 20260719_200832 -->
 | **100k** | 133 rps | 4353 ms | 6776 ms | 0.00% | 477% / 622 MiB | 27509 | cero errores 500. 50 escrituras salvadas por el outbox. cola RabbitMQ hasta 27509 mensajes: los consumidores se quedaron atrás. | <!-- 20260719_220244 -->
+| **500k** | 146 rps | 3206 ms | 4469 ms | 0.00% | 625% / 679 MiB | 73483 | cero errores 500. 15823 respuestas 503/504/429 (3.0%): degradación con contrato, no caídas. 26023 escrituras salvadas por el outbox. cola RabbitMQ hasta 73483 mensajes: los consumidores se quedaron atrás. |  <!-- 20260720_020130 -->
