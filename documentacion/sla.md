@@ -61,17 +61,26 @@ régimen normal): p95 hasta **3 s** con error rate < 1 %.
 
 **Medición real con k6** (100 000 peticiones, 200 usuarios virtuales, 8,4 min):
 
-| Métrica | Valor medido | Objetivo | |
+| Métrica | Valor medido | Objetivo | Veredicto |
 | :-- | :-- | :-- | :-- |
-| Throughput sostenido | 203 rps | — | — |
-| p95 | 2 199 ms | < 3 s | Cumple |
-| p99 | 3 053 ms | — | — |
+| Throughput sostenido | 203 rps | ≥ 20 rps (régimen de negocio) | Cumple — 10× la demanda de diseño |
+| p95 | 2 199 ms | < 3 s en carga alta | Cumple |
+| p99 | 3 053 ms | < 5 s en carga alta | Cumple |
 | Error rate (5xx) | **0,00 %** | < 1 % | Cumple |
-| Degradadas con contrato (503/504/429) | 1 131 (1,4 %) | — | Respuestas con contrato, no caídas |
-| Escrituras salvadas por el outbox | 1 008 | — | Ninguna perdida |
+| Degradadas con contrato (503/504/429) | 1 131 (1,4 %) | < 5 % | Cumple — son respuestas con contrato, no caídas |
+| Escrituras salvadas por el outbox | 1 008 | 0 pérdidas | Cumple — ninguna perdida |
+| Pérdida de datos | 0 | 0 | Cumple |
 
 El p95 de 2,2 s se obtiene a **10 veces el régimen normal** (20 rps): la
 degradación es proporcional y predecible, no un colapso.
+
+**Comportamiento observado a nivel 1M.** Por encima de ~200 rps el pool de
+conexiones de `almacen-service` se agota, su circuito abre y el Gateway hace
+fail-fast. En ese punto el SLA de **disponibilidad** se incumple para ese
+servicio, pero el de **integridad no**: las escrituras se desvían al outbox
+(21 781 en esa corrida) y ninguna se pierde. Es el límite real de esta
+instalación con un solo host, y está documentado como tal en vez de presentarse
+como capacidad alcanzable.
 
 ## 4. Rate limiting: qué es y por qué existe
 
