@@ -269,3 +269,29 @@ Cuando no sepas un número exacto, **di dónde se ve** en vez de inventarlo:
 Y cuando algo NO esté cubierto, **reconócelo con su brecha**: "eso no lo tengo,
 es la brecha N, y la solución sería Z". Reconocer un límite con criterio suma más
 que fingir que no existe.
+
+
+### Preguntas similares que pueden lanzar
+
+**"¿Y si en vez de almacén falla RabbitMQ entero?"**
+> Los publicadores se reconectan solos (`connect_robust`); los eventos que no se
+> pueden publicar quedan en el outbox. Cuando un consumidor perdió la conexión
+> bajo 1M, sus mensajes sin confirmar volvieron a la cola y se reprocesaron.
+> Cero pérdida.
+
+**"¿Cómo sabes que se recuperó y no lo reiniciaste tú?"**
+> Porque no toqué nada. El circuito de almacén terminó en CLOSED por la sonda
+> activa (prueba cada 5 s). En Grafana se ve el rojo volviéndose verde solo. El
+> consumer lag subió a 140.000 y drenó por sí mismo al aliviarse la carga.
+
+**"Si fuera producción, ¿qué falla te preocupa más?"**
+> El Gateway como punto único de fallo (brecha 2): sin réplicas en un solo host,
+> si el proceso cae, cae todo. La solución es ≥2 réplicas tras un balanceador, y
+> ya está preparado porque el estado de resiliencia vive en Redis, compartido.
+
+### Cómo entregar la respuesta final
+
+1. Empieza con el número: "Esto lo medimos: 952.701 peticiones."
+2. Ve por los seis elementos en orden (métrica, traza, log, estado, impacto,
+   acción). No los mezcles.
+3. Cierra con la brecha. Terminar con la acción correctiva demuestra madurez.
