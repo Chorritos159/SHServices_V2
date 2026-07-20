@@ -1,0 +1,13 @@
+# Dependencias de la suite de pruebas (pruebas/ y pruebas_k6/).
+#
+# NO se instalan en ninguna imagen Docker: los microservicios tienen su propio
+# requirements.txt cada uno. Esto es solo para la maquina desde la que se
+# LANZAN las pruebas, que corren fuera de los contenedores.
+#
+#     python -m pip install -r pruebas/requirements.txt
+#
+# httpx es el unico paquete externo que usan: cliente HTTP de pruebas/lib/
+# (comun.py, carga_nodos.py, rafaga_async.py) y de las pruebas 06-12. El resto
+# de scripts va con la biblioteca estandar (urllib, subprocess) a proposito,
+# para que levantar el entorno no dependa de pip.
+httpx>=0.27

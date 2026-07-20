@@ -44,10 +44,15 @@ docker compose up -d --build
 curl http://localhost:8000/health     # backend
 curl http://localhost:3001/login      # frontend
 
-# 4. Datos de demo (opcional, pero recomendado para enseñar el sistema)
+# 4. Dependencias de los scripts de prueba (una sola vez por máquina)
+#    Solo hace falta para correr `pruebas/` y `pruebas_k6/`: esos scripts se
+#    ejecutan FUERA de los contenedores, así que no los cubre docker compose.
+python -m pip install -r pruebas/requirements.txt
+
+# 5. Datos de demo (opcional, pero recomendado para enseñar el sistema)
 python pruebas/14_datos_demo.py
 
-# 5. Detener
+# 6. Detener
 docker compose down          # detiene todo, CONSERVA los datos
 docker compose down -v       # detiene y BORRA los datos (destructivo)
 ```
