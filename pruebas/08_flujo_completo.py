@@ -205,11 +205,25 @@ def main():
           f"no se pudo traer el comprobante: HTTP {rc.status_code}")
 
     # ------------------------------------------------------------------
-    paso("6. CAJA entrega (ticket-service -> ENTREGADO, almacen confirma stock)")
-    r = httpx.post(f"{GW}/api/v1/tickets/tickets/{tk}/entregar", headers=hdr(t_caja), timeout=15.0,
-                   json={"monto_total": 125.0})
-    check(r.status_code < 400, "ticket ENTREGADO, stock confirmado",
-          f"no se pudo entregar: HTTP {r.status_code} {r.text}")
+    paso("6. El ticket se cierra tras el cobro (por evento, sin llamada directa)")
+    # YA NO se llama a /entregar. El cierre lo hace el CONSUMIDOR de
+    # ticket-service al recibir 'ticket.facturado': confirma el stock reservado
+    # en almacen y pasa el ticket a ENTREGADO. Es lo que permite cobrar con
+    # ticket-service caido y que el cierre ocurra solo al volver.
+    #
+    # Llamar ademas al endpoint daba 409 "Transicion ilegal: ENTREGADO ->
+    # ENTREGADO", porque el consumidor se habia adelantado.
+    estado_final = None
+    for _ in range(20):
+        rr = httpx.get(f"{GW}/api/v1/tickets/tickets/por-estado/ENTREGADO",
+                       headers=hdr(t_caja), timeout=10.0)
+        if rr.status_code < 400 and any(x.get("id") == tk for x in rr.json()):
+            estado_final = "ENTREGADO"
+            break
+        time.sleep(1)
+    check(estado_final == "ENTREGADO",
+          "ticket ENTREGADO y stock confirmado (lo cerro el consumidor, nadie lo llamo)",
+          f"el ticket no llego a ENTREGADO en 20s tras el cobro")
 
     out()
     out("#" * 68)

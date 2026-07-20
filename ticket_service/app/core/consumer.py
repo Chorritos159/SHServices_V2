@@ -20,14 +20,16 @@ DURABILIDAD (lo que hace que el backlog sobreviva)
     servicio está caído siguen ahí cuando vuelve.
   - `connect_robust`: aio_pika reconecta solo cuando el broker vuelve, sin que
     nadie reinicie el contenedor.
-  - `message.process()`: el ACK se manda solo si el handler terminó bien. Si
-    revienta a mitad, el mensaje vuelve a la cola y se reintenta.
+  - `message.process(requeue=True)`: el ACK se manda solo si el handler terminó
+    bien y, si revienta, el mensaje VUELVE a la cola. Sin `requeue=True` el
+    comportamiento por defecto es descartarlo, y el evento se perdía.
 """
 import asyncio
 import json
 import os
 
 import aio_pika
+import httpx
 
 from app.core.database import SessionLocal
 from app.core.logger import get_logger
@@ -53,6 +55,10 @@ RABBITMQ_URL = os.getenv(
 # Estado al que pasa un ticket ya diagnosticado: listo para que Caja cobre y
 # entregue. Es el que la bandeja de CAJA espera para mostrar el aviso.
 ESTADO_LISTO = "DIAGNOSTICADO"
+
+# Estado final tras el cobro: el equipo sale y su stock reservado se consume.
+ESTADO_ENTREGADO = "ENTREGADO"
+ALMACEN_URL = f"{os.getenv('ESQUEMA_INTERNO', 'http')}://almacen-service:80/api/v1/almacen"
 
 
 def _marcar_diagnosticado(datos: dict) -> None:
@@ -112,6 +118,89 @@ def _marcar_diagnosticado(datos: dict) -> None:
         db.close()
 
 
+async def _confirmar_stock(repuestos: list, sede: str, correlation_id: str) -> None:
+    """Consume en almacen el stock que el diagnostico habia reservado.
+
+    Si almacen no responde se LANZA la excepcion a proposito: sin ACK el
+    mensaje vuelve a la cola y se reintenta. Tragarse el error aqui dejaria el
+    stock reservado para siempre, que es justo el fallo que esto corrige.
+    """
+    if not repuestos:
+        return
+    async with httpx.AsyncClient() as client:
+        for r in repuestos:
+            resp = await client.post(
+                f"{ALMACEN_URL}/confirmar",
+                json={"codigo_producto": r["codigo_producto"],
+                      "cantidad": r["cantidad"], "sede": sede},
+                headers={
+                    "x-correlation-id": correlation_id,
+                    # Clave DERIVADA: si este evento se reprocesa, almacen no
+                    # vuelve a consumir el mismo stock.
+                    "Idempotency-Key": f"entrega-{r.get('_ticket','')}-{r['codigo_producto']}",
+                },
+                timeout=10.0,
+            )
+            if resp.status_code >= 500:
+                raise RuntimeError(
+                    f"almacen devolvio {resp.status_code} al confirmar {r['codigo_producto']}")
+
+
+async def _marcar_entregado(datos: dict) -> None:
+    """Cierra el ticket tras el cobro: consume el stock y lo pasa a ENTREGADO.
+
+    POR QUE POR EVENTO. El BFF llamaba a POST /{id}/entregar justo despues de
+    cobrar, con un `catch` vacio: si ticket-service estaba caido en ese momento,
+    el cobro salia bien pero el ticket se quedaba abierto y el stock reservado
+    para siempre, sin que nada lo reintentara. Por la cola, el evento espera y
+    se procesa cuando el servicio vuelve.
+    """
+    id_ticket = datos.get("idTicket")
+    if not id_ticket:
+        return
+
+    db = SessionLocal()
+    try:
+        ticket = db.query(TicketDB).filter(TicketDB.id == id_ticket).first()
+        if ticket is None:
+            logger.warning(f"Cobro de '{id_ticket}', que no existe aqui.")
+            return
+        if ticket.estado in (ESTADO_ENTREGADO, "RECHAZADO"):
+            logger.info(f"El ticket {id_ticket} ya estaba en {ticket.estado}; no se toca.")
+            return
+
+        repuestos = json.loads(ticket.repuestos_reservados or "[]")
+        for r in repuestos:
+            r["_ticket"] = id_ticket
+        sede = ticket.sede
+    finally:
+        db.close()
+
+    # El stock PRIMERO: si falla, el mensaje se reintenta y el ticket sigue
+    # abierto, que es preferible a cerrarlo dejando stock colgado.
+    await _confirmar_stock(repuestos, sede, datos.get("trace_id") or "N/A")
+
+    db = SessionLocal()
+    try:
+        ticket = db.query(TicketDB).filter(TicketDB.id == id_ticket).first()
+        if ticket is not None and ticket.estado != ESTADO_ENTREGADO:
+            ticket.estado = ESTADO_ENTREGADO
+            db.commit()
+            logger.info(
+                f"Ticket {id_ticket} -> ENTREGADO por el cobro "
+                f"({len(repuestos)} repuesto(s) confirmados en almacen).",
+                extra={"campos": {"operation": "consumir_factura",
+                                  "event": "FacturaGenerada.v1", "result": "exito",
+                                  "idTicket": id_ticket}},
+            )
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"No se pudo cerrar el ticket '{id_ticket}': {exc}")
+        raise
+    finally:
+        db.close()
+
+
 async def iniciar_consumidor():
     """Escucha los eventos que cambian el estado del ticket. Reintenta si se cae."""
     while True:
@@ -128,17 +217,31 @@ async def iniciar_consumidor():
                 )
                 queue = await channel.declare_queue("tickets_estado_queue", durable=True)
                 await queue.bind(exchange, routing_key="ticket.diagnosticado")
+                await queue.bind(exchange, routing_key="ticket.facturado")
 
-                logger.info("Consumidor de tickets conectado; escuchando 'ticket.diagnosticado'.")
+                logger.info("Consumidor de tickets conectado; escuchando "
+                            "'ticket.diagnosticado' y 'ticket.facturado'.")
 
                 async with queue.iterator() as queue_iter:
                     async for message in queue_iter:
-                        async with message.process():
+                        # requeue=True es IMPRESCINDIBLE: por defecto
+                        # `process()` RECHAZA el mensaje sin devolverlo a la
+                        # cola si el handler lanza, y se pierde. Se vio al
+                        # levantar todo a la vez: almacen aun arrancaba, el
+                        # confirmar-stock fallo y el evento del cobro
+                        # desaparecio, dejando el ticket abierto para siempre.
+                        # Con requeue vuelve a la cola y se reintenta.
+                        async with message.process(requeue=True):
                             payload = json.loads(message.body.decode())
                             logger.extra["correlation_id"] = (
                                 payload.get("trace_id") or message.correlation_id or "N/A"
                             )
-                            _marcar_diagnosticado(payload.get("datos", {}))
+                            datos = payload.get("datos", {})
+                            datos.setdefault("trace_id", payload.get("trace_id"))
+                            if message.routing_key == "ticket.facturado":
+                                await _marcar_entregado(datos)
+                            else:
+                                _marcar_diagnosticado(datos)
 
         except Exception as exc:
             logger.error(f"Consumidor de tickets caido, reintentando en 5s: {exc}")
