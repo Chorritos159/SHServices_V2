@@ -33,6 +33,13 @@ export default function InventarioForm() {
         categoria: campoTexto(fd, "categoria"),
         sede: campoTexto(fd, "sede"),
         stock_inicial: campoNumero(fd, "stock_inicial"),
+        // Sin esto el backend aplicaba su default (0.0) y TODO producto quedaba
+        // a precio 0, incluidos los PRODUCTO_VENTA: el POS de caja los cobraba
+        // gratis. El formulario simplemente no mandaba el campo.
+        precio_unitario: campoNumero(fd, "precio_unitario"),
+      }, {
+        // Clic repetido = misma alta, no dos productos.
+        headers: { "Idempotency-Key": crypto.randomUUID() },
       });
       // Almacén caído: el alta quedó encolada y se registrará sola al volver.
       if (esEncolado(data)) {
@@ -67,7 +74,10 @@ export default function InventarioForm() {
           <Select name="categoria" label="Categoría" options={["REPUESTO", "PRODUCTO_VENTA"]} />
           <Select name="sede" label="Sede" options={["PIURA", "TALARA"]} />
         </div>
-        <Campo name="stock_inicial" label="Stock inicial" type="number" placeholder="10" min={0} />
+        <div className="grid grid-cols-2 gap-3">
+          <Campo name="stock_inicial" label="Stock inicial" type="number" placeholder="10" min={0} />
+          <Campo name="precio_unitario" label="Precio unitario (S/.)" type="number" placeholder="55.00" min={0} step="0.01" />
+        </div>
         <Boton cargando={cargando}>Guardar producto</Boton>
         <Feedback estado={estado} />
       </form>
@@ -89,12 +99,14 @@ function Campo({
   type = "text",
   placeholder,
   min,
+  step,
 }: Readonly<{
   name: string;
   label: string;
   type?: string;
   placeholder?: string;
   min?: number;
+  step?: string;
 }>) {
   return (
     <label className="flex flex-col gap-1 text-sm">
@@ -104,6 +116,7 @@ function Campo({
         type={type}
         placeholder={placeholder}
         min={min}
+        step={step}
         required
         className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
       />

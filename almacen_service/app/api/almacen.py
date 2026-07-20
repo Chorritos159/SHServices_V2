@@ -120,41 +120,84 @@ def _siguiente_codigo(db: Session, categoria: str) -> str:
     return f"{prefijo}-{numero:03d}"
 
 
-def _respuesta_idempotente(db: Session, clave: str | None):
-    """Si la clave ya se proceso, devuelve la respuesta original tal cual.
+EN_CURSO = -1   # status_code centinela: clave reservada, trabajo aun sin terminar
 
-    Sin esto, un reintento (el cliente pulsa dos veces, o el outbox del Gateway
-    reenvia tras una caida) repetia el efecto: producto dado de alta dos veces,
-    stock descontado dos veces.
+
+def _reservar_clave(db: Session, clave: str | None, operacion: str):
+    """Reserva la clave ANTES de hacer el trabajo. Devuelve la respuesta previa
+    si ya estaba procesada, o None si a este le toca hacer el trabajo.
+
+    POR QUE RESERVAR ANTES Y NO COMPROBAR-Y-LUEGO-GUARDAR
+    Comprobar primero y guardar despues NO es atomico: con clics rapidos las
+    peticiones entran a la vez, las dos consultan, ninguna encuentra la clave y
+    las DOS crean el producto. Se vio en los logs: al tercer clic aparecia
+    "duplicate key value violates unique constraint idempotencia_almacen_pkey"
+    y quedaban REP-403 y REP-404 con el mismo nombre.
+
+    Aqui el INSERT va primero: el indice unico de PostgreSQL es el que arbitra,
+    y solo UNA peticion consigue insertar. Las demas chocan con IntegrityError,
+    que es la senal de que otro ya se encargo.
     """
     if not clave:
         return None
+    try:
+        db.add(IdempotenciaDB(clave=clave, operacion=operacion,
+                              status_code=EN_CURSO, respuesta_json="{}"))
+        db.commit()
+        return None                      # la clave es nuestra: hay que trabajar
+    except IntegrityError:
+        db.rollback()
+
     previo = db.query(IdempotenciaDB).filter(IdempotenciaDB.clave == clave).first()
-    if previo is None:
+    if previo is None:                   # choco por otra cosa; que siga
         return None
+
+    if previo.status_code == EN_CURSO:
+        # El gemelo aun no ha terminado. Se responde 409 y no un duplicado: es
+        # un conflicto temporal, y el cliente ya tiene la respuesta buena en la
+        # otra peticion en vuelo.
+        raise HTTPException(
+            status_code=409,
+            detail="Esa misma operacion se esta procesando ahora mismo; espera el resultado.",
+        )
+
     return JSONResponse(status_code=previo.status_code,
                         content=json.loads(previo.respuesta_json))
 
 
-def _guardar_idempotencia(db: Session, clave: str | None, operacion: str,
-                          status_code: int, cuerpo: dict) -> None:
-    """Deja constancia de la clave y su respuesta. Nunca tumba la operacion.
+def _cerrar_idempotencia(db: Session, clave: str | None, status_code: int,
+                         cuerpo: dict) -> None:
+    """Completa la clave ya reservada con la respuesta real."""
+    if not clave:
+        return
+    try:
+        fila = db.query(IdempotenciaDB).filter(IdempotenciaDB.clave == clave).first()
+        if fila is not None:
+            fila.status_code = status_code
+            fila.respuesta_json = json.dumps(cuerpo, default=str)
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(f"No se pudo cerrar la Idempotency-Key '{clave}': {exc}")
 
-    Va DESPUES del commit del efecto: si fallara al guardar la clave, es
-    preferible perder la proteccion de idempotencia que perder la venta o el
-    alta que ya se confirmo.
+
+def _soltar_clave(db: Session, clave: str | None) -> None:
+    """Libera una clave reservada cuando el trabajo NO llego a hacerse.
+
+    Sin esto, un intento que falla (sin stock, producto inexistente) dejaria la
+    clave bloqueada en EN_CURSO y el reintento legitimo del usuario chocaria
+    con un 409 eterno.
     """
     if not clave:
         return
     try:
-        db.add(IdempotenciaDB(clave=clave, operacion=operacion,
-                              status_code=status_code,
-                              respuesta_json=json.dumps(cuerpo, default=str)))
+        db.query(IdempotenciaDB).filter(
+            IdempotenciaDB.clave == clave,
+            IdempotenciaDB.status_code == EN_CURSO,
+        ).delete()
         db.commit()
-    except Exception as exc:
+    except Exception:
         db.rollback()
-        logger.warning(f"No se pudo registrar la Idempotency-Key '{clave}': {exc}")
-
 
 
 @router.post("/productos", response_model=ProductoResponse, status_code=201, tags=["Inventario"])
@@ -171,7 +214,7 @@ async def crear_producto(
     # el cliente reintenta y el producto se daba de alta dos veces. Con la misma
     # Idempotency-Key se devuelve la respuesta original sin repetir el alta.
     clave_idem = request.headers.get("idempotency-key")
-    repetida = _respuesta_idempotente(db, clave_idem)
+    repetida = _reservar_clave(db, clave_idem, "crear_producto")
     if repetida is not None:
         logger.info(
             f"Idempotency-Key '{clave_idem}' ya procesada; se devuelve el producto original.",
@@ -205,6 +248,7 @@ async def crear_producto(
             db.rollback()
             op.result = RECHAZADO
             op.mensaje = f"El codigo {codigo} ya existia al insertar."
+            _soltar_clave(db, clave_idem)
             raise HTTPException(
                 status_code=409,
                 detail=f"El codigo de producto '{codigo}' ya esta en uso. Reintenta la operacion.",
@@ -235,7 +279,7 @@ async def crear_producto(
             "stock_reservado": nuevo_producto.stock_reservado,
             "precio_unitario": nuevo_producto.precio_unitario,
         }
-        _guardar_idempotencia(db, clave_idem, "crear_producto", 201, cuerpo)
+        _cerrar_idempotencia(db, clave_idem, 201, cuerpo)
         return nuevo_producto
 
 
@@ -248,7 +292,7 @@ async def reservar_stock(reserva: ReservaRequest, request: Request, db: Annotate
     # cada pulsacion movia stock otra vez. Con la misma Idempotency-Key se
     # devuelve el resultado de la primera y NO se vuelve a mover nada.
     clave_idem = request.headers.get("idempotency-key")
-    repetida = _respuesta_idempotente(db, clave_idem)
+    repetida = _reservar_clave(db, clave_idem, "reservar_stock")
     if repetida is not None:
         logger.info(f"Idempotency-Key '{clave_idem}' ya procesada; reserva no repetida.",
                     extra={"campos": {"operation": "reservar_stock", "result": DUPLICADO}})
@@ -267,6 +311,7 @@ async def reservar_stock(reserva: ReservaRequest, request: Request, db: Annotate
         if not item:
             op.result = NO_ENCONTRADO
             op.mensaje = f"Reserva rechazada: {reserva.codigo_producto} no existe en {reserva.sede.upper()}."
+            _soltar_clave(db, clave_idem)
             raise HTTPException(
                 status_code=404,
                 detail=f"El repuesto '{reserva.codigo_producto}' no existe en la sede {reserva.sede.upper()}.",
@@ -277,6 +322,7 @@ async def reservar_stock(reserva: ReservaRequest, request: Request, db: Annotate
             op.campos["stockDisponible"] = item.stock_disponible
             op.mensaje = (f"Reserva rechazada por stock insuficiente de {item.codigo}: "
                           f"pedidas {reserva.cantidad}, disponibles {item.stock_disponible}.")
+            _soltar_clave(db, clave_idem)
             raise HTTPException(
                 status_code=409,
                 detail=(f"Stock insuficiente de '{item.nombre}' en {item.sede}: "
@@ -292,7 +338,7 @@ async def reservar_stock(reserva: ReservaRequest, request: Request, db: Annotate
         op.mensaje = (f"Reservadas {reserva.cantidad}x {item.codigo} ({item.nombre}); "
                       f"quedan {item.stock_disponible} disponible(s).")
         cuerpo = _estado_stock("RESERVA_CONFIRMADA", item)
-        _guardar_idempotencia(db, clave_idem, "reservar_stock", 200, cuerpo)
+        _cerrar_idempotencia(db, clave_idem, 200, cuerpo)
         return cuerpo
 
 
@@ -393,7 +439,7 @@ async def descontar_stock(mov: ReservaRequest, request: Request, db: Annotated[S
     _trazar(request)
 
     clave_idem = request.headers.get("idempotency-key")
-    repetida = _respuesta_idempotente(db, clave_idem)
+    repetida = _reservar_clave(db, clave_idem, "descontar_stock")
     if repetida is not None:
         logger.info(f"Idempotency-Key '{clave_idem}' ya procesada; descuento no repetido.",
                     extra={"campos": {"operation": "descontar_stock", "result": DUPLICADO}})
@@ -409,6 +455,7 @@ async def descontar_stock(mov: ReservaRequest, request: Request, db: Annotated[S
             op.campos["stockDisponible"] = item.stock_disponible
             op.mensaje = (f"Venta rechazada por stock insuficiente de {item.codigo}: "
                           f"pedidas {mov.cantidad}, disponibles {item.stock_disponible}.")
+            _soltar_clave(db, clave_idem)
             raise HTTPException(
                 status_code=409,
                 detail=(f"Stock insuficiente de '{item.nombre}' para la venta: "
@@ -421,7 +468,7 @@ async def descontar_stock(mov: ReservaRequest, request: Request, db: Annotated[S
         op.mensaje = (f"Venta directa: descontadas {mov.cantidad}x {item.codigo}; "
                       f"disponibles: {item.stock_disponible}.")
         cuerpo = _estado_stock("STOCK_DESCONTADO", item)
-        _guardar_idempotencia(db, clave_idem, "descontar_stock", 200, cuerpo)
+        _cerrar_idempotencia(db, clave_idem, 200, cuerpo)
         return cuerpo
 
 
@@ -449,7 +496,7 @@ async def descontar_venta(venta: VentaRequest, request: Request, db: Annotated[S
     # Idempotencia: si caja reintenta el cobro (doble clic, o el BFF reenvia
     # tras un timeout), el carrito NO se descuenta dos veces del inventario.
     clave_idem = request.headers.get("idempotency-key")
-    repetida = _respuesta_idempotente(db, clave_idem)
+    repetida = _reservar_clave(db, clave_idem, "descontar_venta")
     if repetida is not None:
         logger.info(f"Idempotency-Key '{clave_idem}' ya procesada; venta no repetida.",
                     extra={"campos": {"operation": "descontar_venta", "result": DUPLICADO}})
@@ -499,5 +546,5 @@ async def descontar_venta(venta: VentaRequest, request: Request, db: Annotated[S
         op.mensaje = (f"Venta de mostrador en {sede}: {unidades} unidad(es) de "
                       f"{len(items)} producto(s) descontadas del inventario.")
         cuerpo = {"status": "STOCK_DESCONTADO", "sede": sede, "lineas": detalle}
-        _guardar_idempotencia(db, clave_idem, "descontar_venta", 200, cuerpo)
+        _cerrar_idempotencia(db, clave_idem, 200, cuerpo)
         return cuerpo

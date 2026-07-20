@@ -12,3 +12,4 @@
 | **500k** | 230 rps | 1929 ms | 2667 ms | 0.00% | 626% / 697 MiB | 96964 | cero errores 500. 92612 respuestas 503/504/429 (15.0%): degradación con contrato, no caídas. 79450 escrituras salvadas por el outbox. cola RabbitMQ hasta 96964 mensajes: los consumidores se quedaron atrás. |  <!-- 20260719_122045 -->
 | **humo** | 88 rps | 452 ms | 654 ms | 0.00% | 369% / 581 MiB | 4 | cero errores 500. 230 respuestas 503/504/429 (8.2%): degradación con contrato, no caídas. 205 escrituras salvadas por el outbox. |  <!-- 20260719_134354 -->
 | **humo** | 142 rps | 299 ms | 501 ms | 0.00% | 336% / 522 MiB | 417 | cero errores 500. cola RabbitMQ hasta 417 mensajes: los consumidores se quedaron atrás. |  <!-- 20260719_141053 -->
+| **humo** | 101 rps | 404 ms | 626 ms | 0.00% | 333% / 527 MiB | 453 | cero errores 500. cola RabbitMQ hasta 453 mensajes: los consumidores se quedaron atrás. |  <!-- 20260719_192226 -->
