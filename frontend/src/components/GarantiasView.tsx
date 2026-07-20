@@ -14,6 +14,7 @@ import type { Garantia } from "@/lib/types/backend";
  */
 export default function GarantiasView() {
   const [garantias, setGarantias] = useState<Garantia[]>([]);
+  const [facturas, setFacturas] = useState<FacturaListada[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -27,6 +28,17 @@ export default function GarantiasView() {
     try {
       const { data } = await api.get<Garantia[]>("/garantias");
       setGarantias(data);
+      // Las VENTAS de mostrador NO emiten garantia (solo el SOPORTE la lleva),
+      // asi que sin esta segunda lista una venta cerrada con ticket-service
+      // caido —cuya factura referencia un id VENTA-XXX propio— no aparecia en
+      // ninguna consulta del panel. Si facturacion no responde, la vista sigue
+      // mostrando las garantias en vez de quedarse en blanco.
+      try {
+        const rf = await api.get<FacturaListada[]>("/facturas");
+        setFacturas(Array.isArray(rf.data) ? rf.data : []);
+      } catch {
+        setFacturas([]);
+      }
     } catch (err) {
       setError(
         isAxiosError(err)
@@ -76,6 +88,14 @@ export default function GarantiasView() {
       setCargandoComp(null);
     }
   }
+
+  const facturasFiltradas = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return facturas;
+    return facturas.filter(
+      (f) => f.idFactura.toLowerCase().includes(t) || f.idTicket.toLowerCase().includes(t),
+    );
+  }, [facturas, q]);
 
   const filtradas = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -131,6 +151,59 @@ export default function GarantiasView() {
           ))}
         </div>
       )}
+
+      {/* Comprobantes emitidos. Incluye las VENTAS de mostrador, que no llevan
+          garantia, incluso las cerradas con ticket-service caido. */}
+      <section className="mt-2">
+        <h3 className="mb-3 text-lg font-semibold text-white">
+          Facturas emitidas{" "}
+          <span className="text-sm font-normal text-slate-500">({facturasFiltradas.length})</span>
+        </h3>
+        {facturasFiltradas.length === 0 ? (
+          <p className="rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-4 text-sm text-slate-500">
+            {q ? `Sin facturas para "${q}".` : "Aún no hay facturas registradas."}
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-slate-800">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-900/70 text-left text-slate-400">
+                <tr>
+                  <th className="px-4 py-2.5">Factura</th>
+                  <th className="px-4 py-2.5">Referencia</th>
+                  <th className="px-4 py-2.5">Tipo</th>
+                  <th className="px-4 py-2.5">Pago</th>
+                  <th className="px-4 py-2.5 text-right">Total</th>
+                  <th className="px-4 py-2.5">Emitida</th>
+                </tr>
+              </thead>
+              <tbody>
+                {facturasFiltradas.map((f) => (
+                  <tr key={f.idFactura} className="border-t border-slate-800/70">
+                    <td className="px-4 py-2 font-mono text-xs text-slate-300">{f.idFactura}</td>
+                    <td className="px-4 py-2 font-mono text-xs text-slate-400">{f.idTicket}</td>
+                    <td className="px-4 py-2">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-bold ${
+                          f.esVenta ? "bg-sky-500/15 text-sky-300" : "bg-emerald-500/15 text-emerald-300"
+                        }`}
+                      >
+                        {f.esVenta ? "VENTA" : "SOPORTE"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-slate-300">{f.metodoPago}</td>
+                    <td className="px-4 py-2 text-right font-bold text-white">
+                      S/. {f.montoTotal.toFixed(2)}
+                    </td>
+                    <td className="px-4 py-2 text-slate-400">
+                      {f.fechaEmision ? soloFecha(f.fechaEmision) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {comprobante && (
         <ComprobanteModal data={comprobante} onClose={() => setComprobante(null)} />
@@ -220,3 +293,12 @@ function Fila({ k, v, mono = false }: Readonly<{ k: string; v: string; mono?: bo
     </div>
   );
 }
+
+type FacturaListada = {
+  idFactura: string;
+  idTicket: string;
+  montoTotal: number;
+  metodoPago: string;
+  fechaEmision: string | null;
+  esVenta: boolean;
+};
