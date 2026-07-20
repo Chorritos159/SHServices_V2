@@ -46,4 +46,15 @@ app.include_router(asignaciones.router, prefix="/api/v1/asignaciones", tags=["As
 
 @app.on_event("startup")
 async def startup_event():
+    # Ver el comentario equivalente en facturacion_service/app/main.py: los
+    # listados ordenan por fecha y sin indice acaban en escaneo completo.
+    try:
+        from sqlalchemy import text as _sql
+        from app.core.database import engine as _engine
+        with _engine.begin() as _conn:
+            _conn.execute(_sql("CREATE INDEX IF NOT EXISTS ix_asignaciones_fecha_tomado "
+                               "ON asignaciones (fecha_tomado DESC)"))
+    except Exception as _exc:
+        logger.error(f"No se pudieron preparar los indices de diagnostico: {_exc}")
+
     logger.info("El Servicio de Diagnóstico Técnico ha arrancado exitosamente.")

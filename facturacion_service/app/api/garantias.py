@@ -10,7 +10,7 @@ exponga como `/api/v1/facturas/garantias`.
 from typing import Annotated
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -37,10 +37,21 @@ def _garantia_out(g: GarantiaDB) -> dict:
 
 
 @router.get("/", response_model=list[GarantiaOut], tags=["Garantías"])
-async def listar_garantias(request: Request, db: Annotated[Session, Depends(get_db)]):
-    """Todas las garantías con su vigencia (Recepción y Admin)."""
+async def listar_garantias(request: Request, db: Annotated[Session, Depends(get_db)],
+                           limite: int = Query(200, ge=1, le=500)):
+    """Las garantías más recientes con su vigencia (Recepción y Admin).
+
+    LLEVA LIMITE, y no es un capricho. Antes hacia `.all()` sin tope y ordenaba
+    por `fecha_entrega`, que no tenia indice: con la tabla llena de garantias de
+    las pruebas de carga, cada peticion era un escaneo completo mas una
+    ordenacion en memoria. Superaba el timeout de 4s del Gateway, que lo leia
+    como que facturacion estaba caido y abria el circuito: 652 aperturas en una
+    sola corrida de 100k, con el p95 disparado a 6,2s.
+    """
     logger.extra["correlation_id"] = request.headers.get("x-correlation-id", "N/A")
-    garantias = db.query(GarantiaDB).order_by(GarantiaDB.fecha_entrega.desc()).all()
+    garantias = (db.query(GarantiaDB)
+                 .order_by(GarantiaDB.fecha_entrega.desc())
+                 .limit(limite).all())
     return [_garantia_out(g) for g in garantias]
 
 

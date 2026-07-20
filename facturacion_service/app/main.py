@@ -39,4 +39,19 @@ app.include_router(garantias.router, prefix="/api/v1/garantias", tags=["Garantí
 
 @app.on_event("startup")
 async def startup_event():
+    # Indices de los listados. Van aqui y no en `create_all` porque este solo
+    # crea indices al CREAR la tabla: en una base que ya existe no los anadiria
+    # nunca. Sin ellos, ordenar por fecha era un escaneo completo que superaba
+    # el timeout del Gateway y abria el circuito de facturas una y otra vez.
+    try:
+        from sqlalchemy import text as _sql
+        from app.core.database import engine as _engine
+        with _engine.begin() as _conn:
+            _conn.execute(_sql("CREATE INDEX IF NOT EXISTS ix_garantias_fecha_entrega "
+                               "ON garantias (fecha_entrega DESC)"))
+            _conn.execute(_sql("CREATE INDEX IF NOT EXISTS ix_facturas_fecha_emision "
+                               "ON facturas (fecha_emision DESC)"))
+    except Exception as _exc:      # nunca impedir el arranque por un indice
+        logger.error(f"No se pudieron preparar los indices de facturacion: {_exc}")
+
     logger.info("El Servicio de Facturación ha arrancado exitosamente.")
