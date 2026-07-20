@@ -71,19 +71,25 @@ deja de permitirse, así que una dependencia caída no implica esperar los 16s.
 `gateway_proxy_requests_total{outcome}`, `gateway_retries_total`, `gateway_fallbacks_total`,
 `gateway_timeouts_total`.
 
-**Nota de diseño — por qué el Gateway corre con 1 worker:** el breaker y las
-métricas viven en memoria del proceso Python. Se probó primero con Gunicorn a
-4 workers (config original) y se detectó en vivo que el estado del circuito
-"parpadeaba" entre CLOSED/OPEN según a qué worker caía cada request/scrape,
-porque cada proceso mantiene su propio breaker y su propio registro
-Prometheus. Sin un backend de estado compartido (p. ej. Redis) entre
-procesos, un breaker por-worker no es un circuit breaker real: distintas
-fracciones del tráfico verían estados distintos de la misma dependencia. Se
-bajó a 1 worker para garantizar una fuente de verdad única y consistente;
-el Gateway es I/O-bound (reenvía llamadas async), así que el costo en
-throughput es limitado. Si la Fase 5 (carga 100k/500k/1M) revela que 1
-worker es insuficiente, la solución correcta es mover el estado del breaker
-a Redis (no volver a múltiples workers en memoria).
+**Nota de diseño — el estado del breaker vive en Redis (ADR-0015):** el
+recorrido de esta decisión explica por qué está donde está. Al principio el
+Gateway corría con 4 workers de Gunicorn y se detectó en vivo que el estado del
+circuito "parpadeaba" entre CLOSED y OPEN según a qué worker caía cada petición,
+porque cada proceso mantenía su propio breaker y su propio registro Prometheus
+en memoria. Un breaker por worker no es un circuit breaker real: distintas
+fracciones del tráfico ven estados distintos de la misma dependencia.
+
+La primera solución fue bajar a **1 worker** para tener una fuente de verdad
+única. Funcionaba, pero el throughput quedaba limitado a ~96 rps por la CPU de un
+solo núcleo. La solución correcta —y la que está hoy en el código— fue mover el
+estado a **Redis** y volver a escalar a **8 workers** (ADR-0015): estado
+compartido y consistente, sin sacrificar rendimiento. Medido tras el cambio:
+**~200 rps sostenidos**, con el cuello de botella ya no en el Gateway sino en los
+consumidores de RabbitMQ.
+
+Queda una pieza sin migrar y está registrada como **brecha 24**: el token bucket
+del rate limit sigue siendo por worker, así que su límite efectivo es ~8× el
+configurado.
 
 ## 3. Contención de recursos (Fase 2)
 

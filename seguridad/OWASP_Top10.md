@@ -142,10 +142,21 @@ con la contraseña CORRECTA     -> 429 (el bloqueo aguanta)
 
 ### Limitación conocida
 
-El contador vive **en memoria del Gateway**, así que un reinicio lo borra. Es
-consistente porque el Gateway corre con 1 worker (ADR-0008), pero no sobrevive
-a un despliegue. La solución es la misma que para el estado del circuit
-breaker: moverlo a Redis. Registrado en `documentacion/brechas_finales.md`.
+El contador vive **en memoria del Gateway**, y eso tiene dos consecuencias que
+conviene decir sin adornos:
+
+1. **Un reinicio lo borra**, así que no sobrevive a un despliegue.
+2. **Es por worker.** El Gateway corría con 1 worker cuando se escribió esto,
+   así que el contador era consistente; hoy corre con **8** (ADR-0015), y cada
+   uno lleva su propia cuenta. El bloqueo nominal de 5 intentos se convierte en
+   la práctica en hasta **40** antes de frenar a un atacante, porque el
+   balanceo reparte sus intentos entre procesos distintos.
+
+La solución es la misma que se aplicó al estado del circuit breaker: moverlo a
+Redis. Está registrado como **brecha 25** en
+`documentacion/brechas_finales.md`, junto con la brecha 24, que es el mismo
+problema en el rate limit. Mitiga en parte que bcrypt con coste 12 hace cada
+intento ~250 ms, así que 40 intentos siguen costando ~10 s de CPU al atacante.
 
 También es por **usuario**, no por IP: no frena a quien rota nombres de usuario
 contra el sistema. Un rate limit por IP en un reverse proxy delante del Gateway

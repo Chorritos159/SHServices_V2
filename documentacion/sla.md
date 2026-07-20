@@ -3,7 +3,7 @@
 > Acuerdo de nivel de servicio del sistema de soporte técnico multi-sede.
 > Los números **no son aspiracionales**: salen de lo medido en las pruebas de
 > carga (`registro_de_carga.md`) y de los límites realmente configurados en el
-> código. Última revisión: 2026-07-18.
+> código. Última revisión: 2026-07-20.
 
 ## 1. Alcance y contexto (por qué estos números y no "99.99%")
 
@@ -14,7 +14,7 @@ alcanzable:
 | Condicionante | Efecto sobre el SLA |
 | :-- | :-- |
 | **Un solo host** (Docker Compose, sin réplicas) | No hay tolerancia a fallo de infraestructura: si el host cae, cae todo |
-| **API Gateway con 1 worker** (ADR-0008) | Techo de throughput ~40–65 rps; es el primer cuello de botella |
+| **Consumidores únicos por cola** | 1 consumidor en cada cola de RabbitMQ; es el primer cuello de botella. El techo medido con k6 es de ~200 rps sostenidos, y lo que lo limita no es la CPU (pico del 518 % sobre 1600 % disponibles) sino que los consumidores no drenan al ritmo que el Gateway encola |
 | **Sin alta disponibilidad de datos** | PostgreSQL de instancia única, sin réplica ni failover |
 
 Por eso el objetivo es **99,0 % mensual** ("dos nueves") para lo crítico y no
@@ -57,8 +57,21 @@ Objetivos por percentil, con la carga real esperada del negocio (≤ 20 rps,
 | Consulta puntual sin carga | < 100 ms | < 200 ms | ~35 ms |
 
 **Degradación aceptada bajo carga alta** (por encima de ~40 rps, fuera del
-régimen normal): p95 hasta **3 s** con error rate < 1 %. Medido a nivel 500k/1M:
-p95 1,53–1,58 s con 0–0,1 % de error. Por encima de eso actúa el rate limiting.
+régimen normal): p95 hasta **3 s** con error rate < 1 %.
+
+**Medición real con k6** (100 000 peticiones, 200 usuarios virtuales, 8,4 min):
+
+| Métrica | Valor medido | Objetivo | |
+| :-- | :-- | :-- | :-- |
+| Throughput sostenido | 203 rps | — | — |
+| p95 | 2 199 ms | < 3 s | Cumple |
+| p99 | 3 053 ms | — | — |
+| Error rate (5xx) | **0,00 %** | < 1 % | Cumple |
+| Degradadas con contrato (503/504/429) | 1 131 (1,4 %) | — | Respuestas con contrato, no caídas |
+| Escrituras salvadas por el outbox | 1 008 | — | Ninguna perdida |
+
+El p95 de 2,2 s se obtiene a **10 veces el régimen normal** (20 rps): la
+degradación es proporcional y predecible, no un colapso.
 
 ## 4. Rate limiting: qué es y por qué existe
 
@@ -67,8 +80,8 @@ ráfaga de 40**. Al superarlo: `429 Too Many Requests` + cabecera `Retry-After`.
 
 **Por qué está y por qué con esos números:**
 
-1. **Protege al Gateway de sí mismo.** El Gateway corre con **1 worker** y su
-   capacidad real medida es ~40–65 rps. Sin límite, una ráfaga lo satura, la
+1. **Protege al Gateway de sí mismo.** El Gateway corre con **8 workers** y su
+   capacidad real medida es de ~200 rps. Sin límite, una ráfaga lo satura, la
    latencia se dispara para *todos* los servicios y el sistema colapsa sin señal
    previa — el peor resultado posible según la S34 ("colapso sin señal previa =
    observabilidad insuficiente").
