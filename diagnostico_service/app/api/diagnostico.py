@@ -88,7 +88,15 @@ async def registrar_diagnostico(
                     response = await client.post(
                         f"{ALMACEN_SERVICE_URL}/reservar",
                         json=payload_reserva,
-                        headers={"x-correlation-id": correlation_id},
+                        headers={
+                            "x-correlation-id": correlation_id,
+                            # Clave DERIVADA del diagnostico y la linea, no
+                            # aleatoria: si este diagnostico se reintenta (doble
+                            # clic del tecnico, o reenvio del outbox), la clave
+                            # es la MISMA y el almacen no vuelve a reservar.
+                            "Idempotency-Key":
+                                f"diag-{diagnostico.idTicket}-{item.codigo_repuesto}",
+                        },
                         timeout=5.0,
                     )
                 except httpx.RequestError as exc:

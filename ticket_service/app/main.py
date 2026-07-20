@@ -50,4 +50,11 @@ Instrumentator().instrument(app).expose(app)
 
 @app.on_event("startup")
 async def startup_event():
+    # Consumidor de eventos: es quien pasa el ticket a DIAGNOSTICADO cuando el
+    # tecnico registra su diagnostico. Se guarda la referencia a la tarea porque
+    # asyncio solo mantiene weakrefs: sin ella el recolector puede cancelarla.
+    import asyncio
+    from app.core.consumer import iniciar_consumidor
+    app.state.consumidor = asyncio.create_task(iniciar_consumidor())
+
     logger.info("El Servicio de Gestión de Tickets ha arrancado exitosamente.")
