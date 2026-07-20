@@ -460,7 +460,7 @@ y la reponen internamente, ya a salvo.
 | **4** | Auto-healing de proceso | Se mata un worker de uvicorn | 12/12 sondeos OK: el maestro lo respawnea |
 | **5** | Idempotencia | El mismo alta 3 veces con la misma clave | **1 sola fila** en la base de datos |
 | **6** | Buffering / backlog | Se para `ticket-service` y el técnico diagnostica igual | El ticket se cierra **solo en 4 s** al volver |
-| **7** | Queue depth y consumer lag | Se paran los consumidores y se sigue publicando | **538 mensajes** acumulados, drenan solos en 10 s |
+| **7** | Queue depth y consumer lag | Dos fases: `pause` congela al consumidor (sube el **lag**) y `stop` lo mata (sube el **depth**) | Fase A: lag 226. Fase B: depth 254. Ambas drenan solas |
 | **8** | Circuit breaker completo | Tráfico real contra un servicio caído | Múltiples 503, fail-fast y cierre automático |
 
 Sin `--demo` se ejecutan las ocho seguidas. Cada una restaura lo que tocó, así

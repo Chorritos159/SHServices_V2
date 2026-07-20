@@ -136,6 +136,18 @@ def _cola(nombre: str) -> str:
         return "?"
 
 
+def _lag():
+    """Mensajes ENTREGADOS pero sin confirmar (unacked) = consumer lag."""
+    import base64
+    pet = urllib.request.Request("http://localhost:15672/api/queues")
+    pet.add_header("Authorization", "Basic " + base64.b64encode(b"guest:guest").decode())
+    try:
+        colas = json.loads(urllib.request.urlopen(pet, timeout=6).read())
+    except Exception:
+        return 0
+    return sum((c.get("messages_unacknowledged", 0) or 0) for c in colas)
+
+
 def _colas():
     """Mensajes pendientes en TODAS las colas, por la API HTTP de RabbitMQ."""
     import base64
@@ -145,9 +157,13 @@ def _colas():
         colas = json.loads(urllib.request.urlopen(pet, timeout=6).read())
     except Exception:
         return 0, "(no se pudo leer RabbitMQ)"
+    # `messages_ready` y NO `messages`: este ultimo SUMA los listos y los
+    # sin confirmar, asi que al congelar los consumidores ambas metricas
+    # salian identicas y no se distinguia una de otra. El panel "Queue depth"
+    # de Grafana grafica los LISTOS, que es lo que se replica aqui.
     total, detalle = 0, []
     for c in colas:
-        n = c.get("messages", 0) or 0
+        n = c.get("messages_ready", 0) or 0
         total += n
         detalle.append(f"{c.get('name')}={n}")
     return total, ", ".join(detalle)
@@ -417,71 +433,93 @@ def demo6(token):
 
 
 def demo7(token):
-    titulo(7, "QUEUE DEPTH y CONSUMER LAG — la cola sube y drena sola",
+    titulo(7, "QUEUE DEPTH y CONSUMER LAG — las dos metricas, por separado",
            "seccion RabbitMQ: 'Queue depth', 'Consumer lag' y 'Consumidores activos'")
     print(" Servicios comprometidos: AUDITORIA y NOTIFICACIONES (los consumidores)")
     print("")
-    print("  Se PARAN LOS CONSUMIDORES y se sigue publicando. No basta con")
-    print("  mandar una rafaga: con los consumidores vivos vacian la cola tan")
-    print("  rapido que el pico ni se ve. Se probo con 400 altas y la cola")
-    print("  marcaba 0 antes y despues. La cola solo crece de verdad cuando")
-    print("  quien consume no da abasto, asi que aqui se fuerza esa condicion.")
+    print("  Son DOS metricas distintas y se provocan de forma distinta. Esto")
+    print("  costo descubrirlo, asi que la demo lo ensena en dos fases:")
+    print("")
+    print("    FASE A · `docker pause` congela el proceso pero deja VIVA la")
+    print("      conexion. Los mensajes que el consumidor ya se habia llevado")
+    print("      se quedan SIN CONFIRMAR -> sube CONSUMER LAG.")
+    print("    FASE B · `docker stop` mata la conexion. Nadie se lleva nada, y")
+    print("      los mensajes se acumulan ESPERANDO -> sube QUEUE DEPTH.")
     print("")
 
-    antes, detalle = _colas()
-    print(f"  cola al empezar ........... {antes} mensaje(s)")
-    print("  parando auditoria-service y notificacion-service...")
+    def publicar(n, etiqueta):
+        def alta(i):
+            cod, _c = pedir(f"{GW}/api/v1/almacen/almacen/productos", "POST", {
+                "nombre": f"CARGA-demo7 {etiqueta} {int(time.time())}-{i}",
+                "categoria": "REPUESTO", "sede": "PIURA",
+                "stock_inicial": 3, "precio_unitario": 12.0,
+            }, token=token, timeout=30)
+            return cod
+        with ThreadPoolExecutor(max_workers=20) as ex:
+            list(ex.map(alta, range(n)))
+
+    # ---- FASE A: consumer lag ----------------------------------------
+    print("--- FASE A: consumidores CONGELADOS (docker pause) ---")
+    subprocess.run(["docker", "pause", "auditoria-service", "notificacion-service"],
+                   capture_output=True)
+    time.sleep(2)
+    publicar(150, "faseA")
+    time.sleep(3)
+    listos, _d = _colas()
+    print(f"  queue depth (esperando) ... {listos}")
+    print(f"  CONSUMER LAG (sin confirmar) ... {_lag()}   <-- esta es la que sube")
+    print("  En Grafana: 'Consumer lag' crece y 'Consumidores activos' sigue")
+    print("  en 1, porque la conexion no se ha caido: el consumidor esta ahi,")
+    print("  pero no responde. Ese es el sintoma de consumidor ATASCADO.")
+
+    subprocess.run(["docker", "unpause", "auditoria-service", "notificacion-service"],
+                   capture_output=True)
+    print("  descongelados; esperando a que confirmen lo pendiente...")
+    for _ in range(12):
+        time.sleep(3)
+        if _lag() == 0:
+            break
+    print(f"  lag tras descongelar ...... {_lag()}")
+
+    # ---- FASE B: queue depth -----------------------------------------
+    print("")
+    print("--- FASE B: consumidores PARADOS (docker stop) ---")
     subprocess.run(["docker", "stop", "auditoria-service", "notificacion-service"],
                    capture_output=True)
     time.sleep(3)
-
-    print("  publicando 150 altas SIN nadie que las consuma...")
-
-    def alta(i):
-        cod, _c = pedir(f"{GW}/api/v1/almacen/almacen/productos", "POST", {
-            "nombre": f"CARGA-demo7 {int(time.time())}-{i}", "categoria": "REPUESTO",
-            "sede": "PIURA", "stock_inicial": 3, "precio_unitario": 12.0,
-        }, token=token, timeout=30)
-        return cod
-
-    with ThreadPoolExecutor(max_workers=20) as ex:
-        list(ex.map(alta, range(150)))
-
+    publicar(150, "faseB")
     time.sleep(3)
-    pico, detalle = _colas()
+    listos, detalle = _colas()
+    print(f"  QUEUE DEPTH (esperando) ... {listos}   <-- esta es la que sube")
+    print(f"  consumer lag .............. {_lag()}")
+    print(f"  {detalle}")
+    print("  En Grafana: 'Queue depth' crece y 'Consumidores activos' cae a 0.")
+    print("  Ese es el sintoma de consumidor MUERTO, no lento.")
     print("")
-    print(f"  >>> QUEUE DEPTH: {pico} mensaje(s) esperando <<<")
-    print(f"      {detalle}")
-    print("      Mira ahora Grafana: la curva de 'Queue depth' esta SUBIENDO,")
-    print("      y 'Consumidores activos' marca 0 en esas dos colas.")
-    print("")
-    print("      Ningun evento se ha perdido: estan encolados y duraderos, asi")
-    print("      que sobreviven incluso a un reinicio del broker. Eso es el")
-    print("      BUFFERING: absorber el exceso en vez de rechazar trabajo.")
+    print("  Ningun evento se pierde: las colas son durables y sobreviven")
+    print("  incluso a un reinicio del broker. Eso es el BUFFERING.")
 
     print("")
     print("  levantando los consumidores; NO se toca nada mas.")
     subprocess.run(["docker", "start", "auditoria-service", "notificacion-service"],
                    capture_output=True)
-
     t0 = time.monotonic()
     for _ in range(24):
         time.sleep(5)
-        actual, _d = _colas()
-        print(f"    quedan {actual} mensaje(s)")
-        if actual == 0:
+        listos, _d = _colas()
+        lag = _lag()
+        print(f"    queue depth {listos}  ·  consumer lag {lag}")
+        if listos == 0 and lag == 0:
             print("")
-            print(f"  >>> la cola DRENO SOLA en {time.monotonic()-t0:.0f}s <<<")
+            print(f"  >>> TODO DRENADO SOLO en {time.monotonic()-t0:.0f}s <<<")
             break
 
     print("")
-    print("  Como leer los tres paneles:")
-    print("    - 'Queue depth': mensajes esperando. Que suba bajo presion es")
-    print("      SANO. Lo que delata un problema es que NO baje al cesar la carga.")
-    print("    - 'Consumer lag': entregados pero sin confirmar. Lag alto con la")
-    print("      cola vacia significa consumidor atascado, no ocioso.")
-    print("    - 'Consumidores activos': 0 en una cola es consumidor muerto.")
-    print("      Es lo que se acaba de provocar a proposito.")
+    print("  Resumen para la sustentacion:")
+    print("    - Queue depth alto  -> nadie consume (consumidor muerto).")
+    print("    - Consumer lag alto -> consumen pero no confirman (atascado).")
+    print("    - Que suban bajo presion es SANO; lo grave es que no bajen")
+    print("      cuando la carga cesa.")
 
 
 def demo8(token):
