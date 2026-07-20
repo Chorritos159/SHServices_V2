@@ -35,6 +35,6 @@ El changelog explica qué cambió y a quién afecta. No es una bitácora extensa
 | Versión | Cambio | Tipo | Acción para consumidores |
 | :--- | :--- | :--- | :--- |
 | `v1.0` | feat(almacen-service): Consumidor de eventos RabbitMQ y gestión de stock por sedes | Release | N/A |
-| `v2.0` | Refactorización V2 y actualización de arquitectura | Breaking | Actualizar URLs y contratos |
-| `v2.1` | feat(observabilidad S34, Fase 3): logs migrados al formato mínimo S34 (`service, correlationId, operation, event, result, durationMs`), consistente con el resto de servicios | Compatible | Ninguna |
-| `v2.2` | refactor(logs): endpoints reescritos con el helper `logger.operacion()` (mide `durationMs` solo, distingue `no_encontrado`/`rechazado`, sin emojis); errores de stock legibles (409 con el detalle real). feat(seed): `app/core/seed.py` siembra 24 productos base (8 repuestos + 4 de venta x PIURA/TALARA) de forma idempotente, para que el almacén no arranque vacío | Compatible | Ninguna |
+| `v1.0` | Refactorización V2 y actualización de arquitectura | Breaking | Actualizar URLs y contratos |
+| `v1.1` | feat(observabilidad S34, Fase 3): logs migrados al formato mínimo S34 (`service, correlationId, operation, event, result, durationMs`), consistente con el resto de servicios | Compatible | Ninguna |
+| `v1.2` | refactor(logs): endpoints reescritos con el helper `logger.operacion()` (mide `durationMs` solo, distingue `no_encontrado`/`rechazado`, sin emojis); errores de stock legibles (409 con el detalle real). feat(seed): `app/core/seed.py` siembra 24 productos base (8 repuestos + 4 de venta x PIURA/TALARA) de forma idempotente, para que el almacén no arranque vacío | Compatible | Ninguna |

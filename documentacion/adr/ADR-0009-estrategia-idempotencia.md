@@ -52,4 +52,4 @@ propaga como error crudo ni se reintenta indefinidamente.
   es el mismo en los tres) en vez de una sola abstracción reutilizable.
 - **Verificado en vivo:** ver `documentacion/fichas_falla_controlada.md`
   (Ficha E) y `documentacion/registro_de_carga.md`/Fase 3 del
-  `PLAN_INTEGRACION.md`.
+  este documento y el `CHANGELOG.md`.

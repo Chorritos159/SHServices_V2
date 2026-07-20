@@ -32,12 +32,12 @@ opera) y **consumidores** identificados.
 | :-- | :-- | :-- | :-- | :-- |
 | api-gateway | Soporte de TI | Soporte de TI | Todas las áreas | Soporte de TI |
 | auth-service | Administrador | Soporte de TI | Todas las áreas | Soporte de TI |
-| ticket-service | Recepción | Soporte de TI | Recepción, Técnico, Administrador | Soporte de TI |
+| ticket-service | Recepción y Técnico | Soporte de TI | Recepción, Técnico, Administrador | Soporte de TI |
 | diagnostico-service | Técnico | Soporte de TI | Técnico, Administrador | Soporte de TI |
-| almacen-service | Administrador | Soporte de TI | Técnico, Recepción | Soporte de TI |
-| facturacion-service | Área de facturación | Soporte de TI | Recepción, Administrador | Soporte de TI |
+| almacen-service | Administrador y Técnico | Soporte de TI | Técnico, Recepción | Soporte de TI |
+| facturacion-service | Caja y Administrador | Soporte de TI | Caja, Administrador | Soporte de TI |
 | auditoria-service | Administrador | Soporte de TI | Administrador | Soporte de TI |
-| notificacion-service | Recepción | Soporte de TI | Todas las áreas | Soporte de TI |
+| notificacion-service | Recepción, Técnico y Administrador | Soporte de TI | Todas las áreas | Soporte de TI |
 
 > **Regla (S31):** ante un cambio de contrato o un incidente, el owner técnico (Soporte de TI)
 > ejecuta y el owner funcional del área decide si el cambio procede.
@@ -84,7 +84,7 @@ domain: seguridad
 businessCapability: autenticar-y-autorizar
 ownerTeam: soporte-ti
 technicalOwner: soporte-ti
-businessOwner: administrador
+businessOwner: [administrador, tecnico]  # el tecnico consulta y reserva repuestos
 status: active
 criticality: high          # sin token no hay operación
 apiVersion: v1
@@ -105,7 +105,7 @@ domain: atencion
 businessCapability: gestionar-ticket-u-orden
 ownerTeam: soporte-ti
 technicalOwner: soporte-ti
-businessOwner: recepcion
+businessOwner: [recepcion, tecnico]      # el tecnico tambien lista y toma tickets
 status: active
 criticality: high
 apiVersion: v1
@@ -190,7 +190,7 @@ domain: cobranza
 businessCapability: emitir-comprobante-y-garantia
 ownerTeam: soporte-ti
 technicalOwner: soporte-ti
-businessOwner: area-de-facturacion
+businessOwner: [caja, administrador]     # caja cobra; administracion supervisa
 status: active
 criticality: high
 apiVersion: v1
@@ -238,7 +238,7 @@ domain: comunicacion
 businessCapability: avisar-a-las-areas
 ownerTeam: soporte-ti
 technicalOwner: soporte-ti
-businessOwner: recepcion
+businessOwner: [recepcion, tecnico, administrador]  # cada rol tiene su bandeja
 status: active
 criticality: low           # degrada sin frenar el flujo principal
 apiVersion: v1

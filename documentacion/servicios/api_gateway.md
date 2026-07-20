@@ -1,0 +1,49 @@
+# Servicio: api_gateway
+
+## Contratos (API Síncrona)
+El contrato es la frontera pública del servicio.
+
+| Contrato / Endpoint | Propósito | Notas de gobierno |
+| :--- | :--- | :--- |
+| `* /api/v1/{service}/{path}` | Enrutador dinámico hacia microservicios internos | Inyecta X-Correlation-ID, Circuit Breaker, Validación JWT |
+
+## Menú de Eventos (Asíncronos)
+Eventos que el servicio produce o consume.
+
+| Evento | Tipo | Versión | Semántica / Propósito |
+| :--- | :--- | :--- | :--- |
+| `PicoTraficoDetectado.v1` | Productor | `v1` | Notifica anomalías de peticiones por segundo (DDoS o picos legítimos) |
+| `FalloCircuitoAbierto.v1` | Productor | `v1` | Alerta emitida cuando el circuit breaker bloquea un microservicio por fallos continuos |
+
+## Runbook Básico
+Qué hacer cuando este servicio falla. Es operativo, breve y accionable.
+
+| Sección | Pregunta | Acción/Detalle Específico |
+| :--- | :--- | :--- |
+| **Incidente cubierto** | ¿Qué problema atiende? | Gateway responde HTTP 503 o 403 masivos, bloqueando toda la plataforma. |
+| **Detección** | ¿Cómo sé que ocurre? | Gráficos de Error Rate en rojo absoluto. Alerta P1 de disponibilidad global. |
+| **Primeras revisiones** | ¿Qué miro primero? | Validar si el servicio de auth está caído (provocando 403) o si los microservicios internos cambiaron de IP/puerto (provocando 503). |
+| **Acción** | ¿Qué puedo ejecutar? | Aumentar el timeout temporalmente, reiniciar el pod del gateway, limpiar caché de resolución DNS interna. |
+| **Escalamiento** | ¿A quién llamo? | Arquitecto Cloud / Owner Técnico de Plataforma / DevOps. |
+| **Comunicación** | ¿A quién informo? | Todo el negocio, todos los equipos de desarrollo. |
+
+## Changelog Técnico
+El changelog explica qué cambió y a quién afecta. No es una bitácora extensa, es una señal de evolución controlada.
+
+| Versión | Cambio | Tipo | Acción para consumidores |
+| :--- | :--- | :--- | :--- |
+| `v1.0` | feat(api-gateway): Implementar escudo de seguridad JWT y proxy reverso | Release | Enviar header Authorization |
+| `v1.1` | feat(infra): Dockerización completa de la arquitectura | Compatible | Ninguna |
+| `v1.0` | Actualización de rutas para nuevos microservicios de la V2 | Compatible | Ninguna |
+| `v1.1` | feat(resiliencia S34): circuit breaker formal (CLOSED/OPEN/HALF_OPEN) por servicio, timeouts por operación, retry con backoff+jitter (solo lecturas), fallback honesto (503/504 con estado del circuito y Retry-After) y métricas Prometheus (`gateway_circuit_state`, `gateway_circuit_opens_total`, `gateway_proxy_requests_total`, `gateway_retries_total`, `gateway_fallbacks_total`, `gateway_timeouts_total`) | Compatible | Ninguna (opcional: manejar `Retry-After` en 503 y el campo `circuito` del cuerpo de error) |
+| `v1.2` | fix(infra): Gunicorn de 4 workers a 1 en el Gateway — verificación en vivo con Toxiproxy detectó que el circuit breaker y sus métricas "parpadeaban" entre CLOSED/OPEN porque cada worker mantenía su propio breaker y su propio registro Prometheus en memoria; con 1 worker el estado es una única fuente de verdad consistente | Compatible | Ninguna |
+| `v1.3` | feat(resiliencia S34, Fase 2): contención de recursos — bulkhead por servicio (cupo de llamadas en vuelo, 503 sin cola oculta), shedding preventivo de tráfico de baja prioridad al 70% de ocupación (protege escrituras críticas: POST/PUT/PATCH/DELETE), rate limiting global con token bucket (429 + Retry-After) y sampling de logs de rutina bajo carga alta (errores/warnings nunca se muestrean). Métricas nuevas: `gateway_bulkhead_in_flight`, `gateway_bulkhead_rejects_total{razon}`, `gateway_rate_limit_rejects_total`, `gateway_logs_sampled_total` | Compatible | Ninguna (opcional: manejar 429 con `Retry-After` igual que el 503 del circuito) |
+| `v1.4` | feat(resiliencia S34, Fase 3): logs migrados al formato mínimo S34 (`service, correlationId, operation, event, result, durationMs`) en cada proxy_request/bulkhead/rate_limit; fix del `LoggerAdapter` que descartaba silenciosamente los campos pasados por-llamada (ahora los fusiona con el contexto base) | Compatible | Ninguna |
+| `v1.5` | feat(resiliencia S34, Fase 5): rate limit del Gateway configurable por entorno (`RATE_LIMIT_RPS`/`RATE_LIMIT_BURST`, default 20/40 — mismo comportamiento que antes) para poder ampliarlo temporalmente en las pruebas de carga 500k/1M sin tocar código | Compatible | Ninguna |
+| `v1.6` | fix(observabilidad): se inicializan todas las series de métricas al arranque. Un Counter de `prometheus_client` no existe como serie hasta su primer `.inc()`, así que los paneles de Grafana mostraban "No data" (en vez de 0) mientras no hubiera ocurrido nunca un retry/fallback/timeout/rechazo — se leía como "la métrica está rota" cuando significaba "no ha pasado nada malo" | Compatible | Ninguna |
+| `v1.7` | feat(observabilidad S34): el dashboard cubre el "dashboard mínimo" completo de la S34 (pág. 18) — nueva fila de **Saturación** (CPU/memoria/conexiones/fds, que faltaba por completo) y panel de **errores por código HTTP**. Fix del panel de error rate: filtraba `status=~"5.."` pero el instrumentator agrupa el status en clases (`5xx`), así que nunca podía mostrar datos | Compatible | Ninguna |
+| `v1.8` | **fix(resiliencia, BUG): el circuit breaker de `tickets` nunca abría.** El proxy solo capturaba `ConnectError`/`TimeoutException`; como `tickets` es el único servicio que va vía Toxiproxy, al caer su upstream Toxiproxy seguía vivo y aceptaba la conexión TCP para luego cerrarla -> `httpx.ReadError`, que se escapaba al manejador global: el cliente recibía un **500 opaco** y el breaker no registraba el fallo (circuito en CLOSED con el servicio caído). Ahora se captura toda la familia `httpx.TransportError` y el retry distingue "el request nunca llegó" (`ConnectError`, reintentable siempre) de "pudo haber llegado" (`ReadError`, no se reintentan escrituras). Verificado con `pruebas/07_breaker_todos.py` sobre los 6 servicios | Compatible | Ninguna (ahora un servicio caído devuelve 503 con `Retry-After` en vez de 500) |
+| `v1.9` | feat(observabilidad): el Gateway loguea cada **transición de estado** del circuit breaker (CLOSED->OPEN, OPEN->HALF_OPEN, HALF_OPEN->CLOSED/OPEN), una línea por cambio y para TODOS los servicios — así el log dice cuándo el circuito abre, prueba recuperarse y se cierra, no solo el estado en Grafana. Además el **retry** ahora deja constancia en el log (`operation="retry"`, `retryAttempt`, `backoffSeg`) cuando se activa, en vez de solo incrementar la métrica. Filtrable en Loki/Dozzle por `operation="circuit_breaker"` / `"retry"` | Compatible | Ninguna |
+| `v1.4` | feat(resiliencia S34, Fase 8): **outbox transaccional** (ADR-0011) — una escritura que falla por indisponibilidad se encola en `gateway_outbox` y se responde `202 {encolado:true}`; un worker la reintenta con la misma `Idempotency-Key` hasta entregarla (nada se pierde ni se duplica). **Sonda activa del circuit breaker** (ADR-0014): los circuitos se cierran solos al recuperarse el servicio, sin necesidad de trafico. Bulkhead ampliable por env (`BULKHEAD_LIMITE_OVERRIDE`) para las pruebas de carga. fix: las tareas de fondo se guardan en un set (sin la referencia, el GC podia matar el worker del outbox en silencio) | **Aditivo** (nuevo `202` en escrituras) | Manejar `202 {encolado:true}` como "aceptado, se enviara solo" |
+| `v3.0` | feat(alto rendimiento, escalabilidad): Circuit Breaker distribuido con Redis (ADR-0015), escalamiento de Gunicorn a 8 workers (aprovechamiento de CPU multi-core i9), e integración de límites de paginación por defecto (`limite: int = 50`) en consultas de listados de microservicios para evitar cuellos de botella de serialización JSON y de disco | Compatible | Ninguna |
+

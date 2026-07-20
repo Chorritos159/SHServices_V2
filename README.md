@@ -16,6 +16,7 @@ Toda la evidencia técnica del proyecto, ordenada por lo que responde:
 | Documento | Responde a |
 | :-- | :-- |
 | [catalogo-servicios.md](catalogo-servicios.md) | Qué hace cada servicio, quién lo posee, de qué depende |
+| [documentacion/servicios/](documentacion/servicios/) | Ficha detallada de cada microservicio, con su changelog |
 | [documentacion/fichas_contractuales.md](documentacion/fichas_contractuales.md) | Contrato de los 11 endpoints principales |
 | [documentacion/resiliencia.md](documentacion/resiliencia.md) | Los 12 mecanismos: dónde vive cada uno y por qué esos valores |
 | [matriz-resiliencia.md](matriz-resiliencia.md) | Qué mecanismo protege cada dependencia |
@@ -728,4 +729,3 @@ demostrada; son ampliaciones funcionales.
   latencia medida, y el porqué del rate limiting y de cada límite.
 - `matriz-resiliencia.md`, `catalogo-servicios.md`, `matriz-auditoria.md`,
   `runbook.md` — gobierno a nivel de sistema completo.
-- `PLAN_INTEGRACION.md` — plan de integración final S34, fase por fase.
