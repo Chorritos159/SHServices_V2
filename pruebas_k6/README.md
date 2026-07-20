@@ -1,7 +1,7 @@
 # Pruebas de carga con k6
 
 Generador de carga en **Go** para las tres fases de la S34. Convive con
-`pruebas/` (funcionales, caos, resiliencia) y con `pruebas_reales/`: **no
+`pruebas/` (funcionales, caos, resiliencia): **no
 sustituye a ninguna**. Si k6 fallara, esas siguen sirviendo.
 
 ## Por qué k6

@@ -124,4 +124,4 @@ Esto **no invalida la decisión** —el estado compartido en Redis sigue siendo 
 que permite escalar sin romper el breaker, y la paginación sigue siendo
 correcta— pero sí obliga a corregir el dato: el throughput real del sistema
 está **por encima de 257 rps** y no se conoce su techo, porque haría falta un
-generador que no sea el cuello de botella (ver `pruebas_reales/README.md`).
+generador que no sea el cuello de botella (ver `pruebas_k6/README.md`).

@@ -332,29 +332,33 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | k6-caos | `python pruebas_k6/caos.py --fase 100k\|500k\|1M` | **Caos bajo carga REAL**: k6 empujando ~200 rps mientras se tumban servicios con **Toxiproxy** (se deshabilita su proxy). Mide contención (cero 500), ausencia de cascada, y cuánto tarda cada circuito en cerrarse **solo** por la sonda activa. La conectividad la restaura la prueba; el circuito se recupera sin intervención | según fase |
 | — | `python pruebas/generar_informe.py` | **Genera el informe completo** en `documentacion/informe_de_pruebas.md`: lee la última corrida de cada prueba y arma tabla de carga, caos, auto-recuperación y veredicto. Lo que no se haya corrido sale como *(sin corrida)*, no como cero | ~1 s |
 
-### Pruebas Reales de Alto Rendimiento (1190+ RPS con Redis)
+### Pruebas de carga con k6
 
-Estas pruebas están ubicadas en la carpeta `pruebas_reales/` y están diseñadas para ejecutarse con la configuración de alto rendimiento activa (Gateway a 8 workers y Redis como estado compartido):
+El generador de carga es **k6** (Go, sin GIL, corriendo dentro de la red
+Docker). Sustituye a la carpeta `pruebas_reales/`, que se eliminó: usaba un
+generador en Python que topaba en ~105 rps y **era él mismo el cuello de
+botella**, así que medía al cliente y no al sistema. Se comprobó lanzando
+generadores en paralelo (1 → 105 rps, 2 → 171, 4 → 257).
 
-| Comando | Qué prueba | Descripción / Configuración |
-| :--- | :--- | :--- |
-| `python pruebas_reales/carga_lecturas.py [--total N]` | **Carga Real de Solo Lecturas** | Mide el techo teórico del Gateway y la red sin persistencia en disco. Por defecto corre 100.000 peticiones (`--total 100000`). |
-| `python pruebas_reales/carga_100k.py` | **Carga Mixta Real 100k** | Corre y completa **literalmente 100.000 peticiones** de lectura/escritura (8 nodos x bloques de 30). |
-| `python pruebas_reales/carga_500k.py` | **Carga Mixta Real 500k** | Corre y completa **literalmente 500.000 peticiones** (12 nodos x bloques de 40). |
-| `python pruebas_reales/carga_1M.py` | **Carga Mixta Real 1M** | Corre y completa **literalmente 1.000.000 de peticiones** (16 nodos x bloques de 50). |
-| `python pruebas_reales/caos_real.py [--nivel X]` | **Caos Real y Auto-recuperación** | Inicia carga real sostenida (100k, 500k o 1M) y tumba servicios en caliente con `POST /_chaos/crash`. Valida auto-healing (Docker revive con `restart: always` y la Gateway reconecta sola vía Redis sin intervención manual). |
+| Comando | Qué prueba |
+| :--- | :--- |
+| `python pruebas_k6/correr.py --fase humo` | Humo (2.000 peticiones), para comprobar que todo responde antes de una corrida larga |
+| `python pruebas_k6/correr.py --fase 100k --vus 200` | Carga mixta de 100.000 peticiones |
+| `python pruebas_k6/correr.py --fase 500k --vus 200` | Carga mixta de 500.000 peticiones |
+| `python pruebas_k6/correr.py --fase 1M --vus 200` | Carga mixta de 1.000.000 de peticiones |
 
-**Instrucciones de ejecución:**
-1. Asegúrate de detener SonarQube para liberar CPU: `docker compose stop sonarqube` (si está de fondo).
-2. Limpia los datos de carga acumulados para no sesgar las consultas de listados: `python pruebas/limpiar_datos_carga.py --borrar`.
-3. Lanza la prueba elegida desde la raíz del proyecto. Por ejemplo:
-   ```bash
-   python pruebas_reales/carga_100k.py
-   python pruebas_reales/caos_real.py --nivel 100k
-   ```
+Cada corrida añade su fila a `documentacion/tabla_registro_carga_k6.md` y deja
+el reporte completo en `pruebas_k6/resultados/`. **Ctrl+C** corta la corrida y
+k6 emite igualmente el resumen de lo hecho hasta ese momento.
+
+**Antes de una corrida larga:**
+1. Parar SonarQube si está de fondo, para liberar CPU:
+   `docker compose --profile analisis stop sonarqube`
+2. Limpiar los datos acumulados, o las consultas de listados se sesgan:
+   `python pruebas/limpiar_datos_carga.py --borrar`
 
 **Todas las pruebas tocan todos los servicios.** La E2E (8) recorre el flujo
-completo por los 8 servicios; las de carga (3-5) reparten el tráfico entre
+completo por los 8 servicios; las de carga con k6 reparten el tráfico entre
 tickets, almacén, auditoría y notificaciones (rotan por sus endpoints GET),
 no solo `tickets` — así el sistema completo se ejercita bajo presión. Los
 503 que verás en servicios de bajo cupo (auditoría/notificaciones,

@@ -966,7 +966,14 @@ async def gateway_router(service: str, path: str, request: Request, payload: dic
     # estable por petición. Es la clave que usa el outbox para no duplicar al
     # reintentar una escritura encolada.
     if request.method in METODOS_ESCRITURA and not headers.get("idempotency-key"):
-        headers["idempotency-key"] = f"gw-{correlation_id}"
+        # La clave incluye METODO y RUTA, no solo el correlation_id. Con
+        # `gw-{correlation_id}` a secas, TODAS las escrituras de un mismo flujo
+        # compartian clave: un cliente que crea un producto y despues registra
+        # una venta bajo el mismo correlation_id recibia, en la segunda, la
+        # respuesta guardada de la PRIMERA (un 201 con el producto en vez del
+        # resultado de la venta). Se detecto en pruebas/08_flujo_completo.py,
+        # donde todo el flujo comparte un unico trace.
+        headers["idempotency-key"] = f"gw-{correlation_id}-{request.method}-{path}"
 
     # Bulkhead + shedding (Fase 2, S34): aísla la capacidad de este servicio y,
     # si ya está bajo presión, descarta primero el tráfico de baja prioridad

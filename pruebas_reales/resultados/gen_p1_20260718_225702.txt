@@ -1,7 +1,0 @@
-== Reporte: gen_p1 (2026-07-18T22:57:02) ==
-objetivo(etiqueta)=p1  nodos=8  bloque=40  bloques_enviados=57  ventana=25s
-duracion_real=28.2s  throughput=80.7 rps
-exitosas=2278/2280 (99.9%)
-codigos: HTTP 200: 2278  HTTP ERR: 2
-latencia ms: p50=1730.6 p90=2717.4 p95=2941.3 p99=3231.2 max=3371.8
-reporte JSON: pruebas_reales/resultados\gen_p1_20260718_225702.json

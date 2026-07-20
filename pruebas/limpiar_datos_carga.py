@@ -99,7 +99,6 @@ BORRADOS = [
 # Carpetas de reportes que las pruebas van llenando.
 REPORTES = [
     "pruebas/resultados",
-    "pruebas_reales/resultados",
     "pruebas_k6/resultados",
 ]
 

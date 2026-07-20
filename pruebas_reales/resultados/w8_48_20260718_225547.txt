@@ -1,7 +1,0 @@
-== Reporte: w8_48 (2026-07-18T22:55:47) ==
-objetivo(etiqueta)=w8-48  nodos=48  bloque=40  bloques_enviados=79  ventana=30s
-duracion_real=35.6s  throughput=88.8 rps
-exitosas=3011/3160 (95.3%)
-codigos: HTTP 200: 3011  HTTP ERR: 149
-latencia ms: p50=8349.0 p90=11648.3 p95=13187.0 p99=17263.6 max=19230.3
-reporte JSON: pruebas_reales/resultados\w8_48_20260718_225547.json

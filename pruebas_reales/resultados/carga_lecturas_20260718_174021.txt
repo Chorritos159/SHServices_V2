@@ -1,7 +1,0 @@
-== Reporte: carga_lecturas (2026-07-18T17:40:21) ==
-objetivo(etiqueta)=lecturas-20000  nodos=8  bloque=30  bloques_enviados=674  ventana=600s
-duracion_real=464.0s  throughput=43.6 rps
-exitosas=19306/20220 (95.5%)
-codigos: HTTP 200: 19306  HTTP ERR: 914
-latencia ms: p50=4152.0 p90=5103.5 p95=5260.2 p99=5589.3 max=6369.1
-reporte JSON: C:\Users\diego\OneDrive\Escritorio\ArquiFinal\SHServices_V2_Yassir\SHServices_V2\pruebas_reales\resultados\carga_lecturas_20260718_174021.json

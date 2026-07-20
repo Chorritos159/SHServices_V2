@@ -152,12 +152,29 @@ def main():
           f"el stock no bajo como se esperaba ({stock_antes} -> {stock_despues})")
 
     # ------------------------------------------------------------------
-    paso("4. TECNICO marca DIAGNOSTICADO (ticket-service, emite ticket.listo)")
-    r = httpx.post(f"{GW}/api/v1/tickets/tickets/{tk}/diagnosticar", headers=hdr(t_tec), timeout=15.0, json={
-        "repuestos": [{"codigo_producto": rep, "cantidad": 1}],
-    })
-    check(r.status_code < 400 and r.json().get("estado") == "DIAGNOSTICADO",
-          "ticket en DIAGNOSTICADO", f"no se pudo diagnosticar: HTTP {r.status_code} {r.text}")
+    paso("4. El ticket pasa a DIAGNOSTICADO (por evento, sin llamada directa)")
+    # YA NO se llama a /diagnosticar. Ese endpoint sigue existiendo, pero el
+    # cambio de estado lo hace ahora el CONSUMIDOR de ticket-service al recibir
+    # 'ticket.diagnosticado' (ver ticket_service/app/core/consumer.py). Es lo
+    # que permite diagnosticar con ticket-service caido y que el backlog se
+    # procese solo al volver.
+    #
+    # Llamar ademas al endpoint daba 409 "Transicion ilegal: DIAGNOSTICADO ->
+    # DIAGNOSTICADO", porque el consumidor se habia adelantado. Aqui se espera
+    # a que el evento llegue, que es justo lo que hay que comprobar.
+    # No hay GET /tickets/{id} (daba 405): se consulta el listado POR ESTADO,
+    # que es el endpoint que si existe, y se busca el ticket dentro.
+    estado = None
+    for _ in range(15):
+        rr = httpx.get(f"{GW}/api/v1/tickets/tickets/por-estado/DIAGNOSTICADO",
+                       headers=hdr(t_tec), timeout=10.0)
+        if rr.status_code < 400 and any(x.get("id") == tk for x in rr.json()):
+            estado = "DIAGNOSTICADO"
+            break
+        time.sleep(1)
+    check(estado == "DIAGNOSTICADO",
+          "ticket en DIAGNOSTICADO (lo movio el consumidor de eventos, nadie lo llamo)",
+          f"el ticket sigue en {estado} tras 15s: el consumidor no proceso el evento")
 
     # ------------------------------------------------------------------
     paso("5. CAJA cobra (facturacion-service, emite ticket.facturado)")
@@ -345,8 +362,12 @@ def _repuesto_con_stock(token, sede, minimo=1):
 def _stock(token, codigo, sede):
     """Stock disponible de un producto (via el listado del almacen)."""
     try:
-        r = httpx.get(f"{GW}/api/v1/almacen/almacen/productos",
-                      headers={"Authorization": f"Bearer {token}"}, timeout=10.0)
+        # limite=500 y no el default: con el inventario sembrado mas lo que
+        # dejan las pruebas de carga, el producto buscado se quedaba FUERA de
+        # la primera pagina y esta funcion devolvia None, haciendo fallar
+        # comprobaciones de stock que en realidad estaban bien.
+        r = httpx.get(f"{GW}/api/v1/almacen/almacen/productos?limite=500",
+                      headers={"Authorization": f"Bearer {token}"}, timeout=15.0)
         for p in r.json():
             if p["codigo"] == codigo and p["sede"] == sede:
                 return p["stock_disponible"]

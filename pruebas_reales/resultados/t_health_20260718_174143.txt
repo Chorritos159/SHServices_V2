@@ -1,7 +1,0 @@
-== Reporte: t_health (2026-07-18T17:41:43) ==
-objetivo(etiqueta)=trivial  nodos=8  bloque=30  bloques_enviados=138  ventana=40s
-duracion_real=42.9s  throughput=96.4 rps
-exitosas=4136/4140 (99.9%)
-codigos: HTTP 200: 4136  HTTP ERR: 4
-latencia ms: p50=1184.3 p90=1782.0 p95=1895.7 p99=2102.6 max=2435.8
-reporte JSON: pruebas_reales/resultados\t_health_20260718_174143.json
