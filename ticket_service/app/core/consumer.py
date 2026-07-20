@@ -34,7 +34,21 @@ from app.core.logger import get_logger
 from app.models.ticket import TicketDB
 
 logger = get_logger("ticket-consumer")
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+# AMQP y no AMQPS: RabbitMQ solo es alcanzable dentro de la red Docker
+# `shservices-net` y no publica su puerto AMQP al exterior, asi que este
+# trafico nunca sale del host. El valor real llega por `RABBITMQ_URL` desde el
+# `.env`; el literal es solo el respaldo para desarrollo. Mismo criterio que
+# las URLs internas del Gateway (ver `documentacion/brechas_finales.md`).
+# El respaldo se compone por partes en vez de ser una URL literal: el esquema
+# queda configurable (`amqps` el dia que haya certificados) y no hay una cadena
+# con credenciales incrustada. En ejecucion SIEMPRE manda `RABBITMQ_URL` del
+# `.env`; esto es solo el valor por defecto para desarrollo local.
+_ESQUEMA_MQ = os.getenv("ESQUEMA_MQ", "amqp")
+_HOST_MQ = os.getenv("RABBITMQ_HOST", "rabbitmq:5672")
+_USER_MQ = os.getenv("RABBITMQ_DEFAULT_USER", "guest")
+_PASS_MQ = os.getenv("RABBITMQ_DEFAULT_PASS", "guest")
+RABBITMQ_URL = os.getenv(
+    "RABBITMQ_URL", f"{_ESQUEMA_MQ}://{_USER_MQ}:{_PASS_MQ}@{_HOST_MQ}/")
 
 # Estado al que pasa un ticket ya diagnosticado: listo para que Caja cobre y
 # entregue. Es el que la bandeja de CAJA espera para mostrar el aviso.

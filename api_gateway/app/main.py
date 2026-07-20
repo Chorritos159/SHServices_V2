@@ -75,14 +75,36 @@ if _DIR_MULTIPROC:
 Instrumentator().instrument(app).expose(app)
 
 # 2. Mapa de Microservicios para Docker
+# HTTP (no HTTPS) A PROPÓSITO, y SonarQube lo marca con razón en general.
+# Estas URLs son tráfico ESTE-OESTE dentro de la red Docker `shservices-net`,
+# que no publica puertos al exterior: ningún byte de estas conexiones sale del
+# host. El borde público es el Gateway, y ahí sí termina TLS un proxy inverso
+# en un despliegue real.
+#
+# Cifrar entre contenedores exigiría una CA interna, emitir y rotar
+# certificados por servicio y montarlos en cada imagen — una mTLS completa, que
+# es justo lo que resuelve un service mesh. Queda registrado como brecha
+# consciente en `documentacion/brechas_finales.md`, no como descuido.
+# El esquema es CONFIGURABLE (`ESQUEMA_INTERNO`) y no un literal repetido siete
+# veces. Así, el día que haya certificados internos, pasar a TLS es un cambio de
+# configuración —`ESQUEMA_INTERNO=https`— y no tocar código en siete sitios.
+ESQUEMA_INTERNO = os.getenv("ESQUEMA_INTERNO", "http")
+
+# host:puerto de cada servicio. Los que van vía Toxiproxy están para poder
+# inyectarles fallos en las pruebas de caos (Chaos Engineering).
+_DESTINOS = {
+    "tickets": "toxiproxy:8666",
+    "almacen": "toxiproxy:8667",
+    "auth": "auth-service:80",
+    "diagnosticos": "toxiproxy:8669",
+    "facturas": "toxiproxy:8668",
+    "auditoria": "toxiproxy:8670",
+    "notificaciones": "toxiproxy:8671",
+}
+
 MICROSERVICIOS = {
-    "tickets": "http://toxiproxy:8666",          # <-- vía Toxiproxy (Chaos Engineering)
-    "almacen": "http://toxiproxy:8667",          # <-- vía Toxiproxy (Chaos Engineering)
-    "auth": "http://auth-service:80",
-    "diagnosticos": "http://toxiproxy:8669",     # <-- vía Toxiproxy (Chaos Engineering)
-    "facturas": "http://toxiproxy:8668",         # <-- vía Toxiproxy (Chaos Engineering)
-    "auditoria": "http://toxiproxy:8670",         # <-- vía Toxiproxy (Chaos Engineering)
-    "notificaciones": "http://toxiproxy:8671"     # <-- vía Toxiproxy (Chaos Engineering)
+    nombre: f"{ESQUEMA_INTERNO}://{destino}"
+    for nombre, destino in _DESTINOS.items()
 }
 
 # 2.b Política RBAC del Gateway.

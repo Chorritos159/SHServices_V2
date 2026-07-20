@@ -45,3 +45,30 @@ dictamen las evalúe con la información completa.
 | 18 | La tabla `notificaciones` **crece con el tráfico** y no tiene política de retención | El ADMIN recibe copia de todos los eventos (decisión correcta: supervisa las dos sedes), así que cada evento escribe al menos una fila. Una corrida de carga dejó **46.627** filas. En operación real el volumen es mucho menor, pero crece sin límite | Archivar o borrar las notificaciones leídas con cierta antigüedad (job programado) | Owner técnico de Notificaciones |
 
 | 19 | ~~Los **contadores de Prometheus del Gateway subestiman** con 8 workers~~ — 🟢 **CERRADA 18/07/2026** | Cada worker de Gunicorn lleva su propio registro en memoria y `/metrics` devuelve el del que conteste el scrape. Medido: 30 peticiones enviadas, contador reportando 21. Afecta a `gateway_proxy_requests_total`, `retries`, `circuit_opens`, `rate_limit_rejects` y `bulkhead_rejects`, o sea a los paneles de Grafana. Las tendencias siguen siendo válidas; los valores absolutos no. **El ESTADO del breaker sí es correcto** (viene de Redis, ADR-0015) | **Hecho:** modo *multiprocess* de `prometheus_client` activado (`PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus` sobre `tmpfs`), con `multiprocess_mode` en los dos gauges (`max` para el estado del circuito, `livesum` para las llamadas en vuelo). Verificado: 30 enviadas → 30 contadas, estable, con los 8 procesos escribiendo | Owner técnico del Gateway / Observabilidad |
+
+---
+
+## Brecha 20 — Tráfico este-oeste sin TLS (aceptada)
+
+**Qué es.** Las llamadas entre el Gateway y los microservicios van en `http://`,
+y la conexión a RabbitMQ en `amqp://`. SonarQube las marca como vulnerabilidad
+(6 issues, severidad MINOR), y en general tiene razón.
+
+**Por qué se acepta aquí.** Es tráfico **este-oeste** dentro de la red Docker
+`shservices-net`, que no publica esos puertos al exterior: ningún byte de esas
+conexiones sale del host. El borde público es el Gateway (`:8000`), y es ahí
+donde termina TLS un proxy inverso en un despliegue real.
+
+**Qué costaría cerrarla.** Una CA interna, emitir y rotar un certificado por
+servicio, y montarlos en cada imagen — mTLS completa. Es exactamente el
+problema que resuelve un service mesh (Istio, Linkerd), y queda fuera del
+alcance de este proyecto.
+
+**Cómo está marcada.** Con `# NOSONAR` y una nota explicando el motivo en
+`api_gateway/app/main.py` (mapa `MICROSERVICIOS`) y en
+`ticket_service/app/core/consumer.py` (`RABBITMQ_URL`). Se marcan, no se
+ocultan: la decisión queda escrita al lado del código.
+
+**Si esto fuera producción**, el orden sería: (1) TLS en el borde con
+certificados reales, (2) políticas de red que impidan alcanzar los servicios
+salvo desde el Gateway, y (3) mTLS entre servicios vía mesh.
