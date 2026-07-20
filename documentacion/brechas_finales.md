@@ -49,8 +49,17 @@ dictamen las evalúe con la información completa.
 | 18 | La tabla `notificaciones` **crece con el tráfico** y no tiene política de retención | Funcionalidad | El ADMIN recibe copia de todos los eventos (decisión correcta: supervisa las dos sedes), así que cada evento escribe al menos una fila. Una corrida de carga dejó **46.627** filas. En operación real el volumen es mucho menor, pero crece sin límite | Archivar o borrar las notificaciones leídas con cierta antigüedad (job programado) | Owner técnico de Notificaciones |
 
 | 19 | ~~Los **contadores de Prometheus del Gateway subestiman** con 8 workers~~ —  **CERRADA 18/07/2026** | Funcionalidad | Cada worker de Gunicorn lleva su propio registro en memoria y `/metrics` devuelve el del que conteste el scrape. Medido: 30 peticiones enviadas, contador reportando 21. Afecta a `gateway_proxy_requests_total`, `retries`, `circuit_opens`, `rate_limit_rejects` y `bulkhead_rejects`, o sea a los paneles de Grafana. Las tendencias siguen siendo válidas; los valores absolutos no. **El ESTADO del breaker sí es correcto** (viene de Redis, ADR-0015) | **Hecho:** modo *multiprocess* de `prometheus_client` activado (`PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus` sobre `tmpfs`), con `multiprocess_mode` en los dos gauges (`max` para el estado del circuito, `livesum` para las llamadas en vuelo). Verificado: 30 enviadas  30 contadas, estable, con los 8 procesos escribiendo | Owner técnico del Gateway / Observabilidad |
+| 20 | Tráfico este-oeste sin TLS (HTTP/AMQP entre contenedores) | Seguridad | Sin cifrado entre servicios. No explotable desde fuera: la red Docker no publica esos puertos | CA interna con certificado por servicio y rotación, o malla con mTLS. Ver anexo | DevOps / Infraestructura |
+| 21 | La prueba de caos derriba servicios de uno en uno | Resiliencia | No se ejercitan caídas simultáneas ni orden aleatorio, que es donde aparecen los fallos combinados | Añadir modos `--simultaneos N` y `--aleatorio` a `pruebas_k6/caos.py`. Ver anexo | Owner técnico de Resiliencia |
+| 22 | Cobertura funcional por servicio | Funcionalidad | Cada servicio cubre su flujo principal pero no las operaciones de gestión (ajustes de inventario, reasignar técnico, notas de crédito, exportar auditoría) | Priorizar por valor de negocio y añadir por iteraciones. Ver anexo | Owners funcionales |
+| 23 | Alcance del frontend | Funcionalidad | Sin paginación en la vista, sin filtros, sin edición, sin pruebas de navegador, accesibilidad no auditada | Añadir paginación y filtros; incorporar Playwright al pipeline. Ver anexo | Owner técnico de Frontend |
 
 ---
+
+# Anexo: brechas que requieren desarrollo
+
+Las cuatro siguientes ya figuran en la tabla de arriba. Aquí las desarrollo,
+porque su justificación no cabe en una celda.
 
 ## Brecha 20 — Tráfico este-oeste sin TLS (aceptada)
 

@@ -419,17 +419,23 @@ def demo6(token):
 def demo7(token):
     titulo(7, "QUEUE DEPTH y CONSUMER LAG — la cola sube y drena sola",
            "seccion RabbitMQ: 'Queue depth', 'Consumer lag' y 'Consumidores activos'")
-    print(" Servicio comprometido: ninguno. Se satura a los CONSUMIDORES.")
+    print(" Servicios comprometidos: AUDITORIA y NOTIFICACIONES (los consumidores)")
     print("")
-    print("  Cada alta de producto publica un evento que auditoria y")
-    print("  notificaciones deben procesar. Si se publica mas rapido de lo que")
-    print("  consumen, la cola CRECE: eso es el desacoplamiento absorbiendo el")
-    print("  exceso en vez de rechazar trabajo.")
+    print("  Se PARAN LOS CONSUMIDORES y se sigue publicando. No basta con")
+    print("  mandar una rafaga: con los consumidores vivos vacian la cola tan")
+    print("  rapido que el pico ni se ve. Se probo con 400 altas y la cola")
+    print("  marcaba 0 antes y despues. La cola solo crece de verdad cuando")
+    print("  quien consume no da abasto, asi que aqui se fuerza esa condicion.")
     print("")
 
     antes, detalle = _colas()
-    print(f"  cola al empezar ........... {antes} mensaje(s)  ({detalle})")
-    print("  lanzando 400 altas en rafaga (40 a la vez)...")
+    print(f"  cola al empezar ........... {antes} mensaje(s)")
+    print("  parando auditoria-service y notificacion-service...")
+    subprocess.run(["docker", "stop", "auditoria-service", "notificacion-service"],
+                   capture_output=True)
+    time.sleep(3)
+
+    print("  publicando 150 altas SIN nadie que las consuma...")
 
     def alta(i):
         cod, _c = pedir(f"{GW}/api/v1/almacen/almacen/productos", "POST", {
@@ -438,33 +444,44 @@ def demo7(token):
         }, token=token, timeout=30)
         return cod
 
-    with ThreadPoolExecutor(max_workers=40) as ex:
-        list(ex.map(alta, range(400)))
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        list(ex.map(alta, range(150)))
 
+    time.sleep(3)
     pico, detalle = _colas()
-    print(f"  cola justo despues ........ {pico} mensaje(s)  ({detalle})")
-    if pico > antes:
-        print("  >>> LA COLA SUBIO: es el BUFFERING absorbiendo la rafaga <<<")
-    else:
-        print("  (los consumidores fueron mas rapidos que la rafaga; mira el")
-        print("   panel 'Consumer lag', que es mas sensible que 'Queue depth')")
+    print("")
+    print(f"  >>> QUEUE DEPTH: {pico} mensaje(s) esperando <<<")
+    print(f"      {detalle}")
+    print("      Mira ahora Grafana: la curva de 'Queue depth' esta SUBIENDO,")
+    print("      y 'Consumidores activos' marca 0 en esas dos colas.")
+    print("")
+    print("      Ningun evento se ha perdido: estan encolados y duraderos, asi")
+    print("      que sobreviven incluso a un reinicio del broker. Eso es el")
+    print("      BUFFERING: absorber el exceso en vez de rechazar trabajo.")
 
     print("")
-    print("  Ahora NADIE interviene: se observa como DRENA sola.")
-    for _ in range(12):
+    print("  levantando los consumidores; NO se toca nada mas.")
+    subprocess.run(["docker", "start", "auditoria-service", "notificacion-service"],
+                   capture_output=True)
+
+    t0 = time.monotonic()
+    for _ in range(24):
         time.sleep(5)
         actual, _d = _colas()
         print(f"    quedan {actual} mensaje(s)")
         if actual == 0:
+            print("")
+            print(f"  >>> la cola DRENO SOLA en {time.monotonic()-t0:.0f}s <<<")
             break
 
     print("")
-    print("  Lo que hay que mirar en Grafana:")
-    print("    - 'Queue depth': la curva sube y vuelve a cero. Eso es sano.")
-    print("    - 'Consumer lag': mensajes entregados pero SIN confirmar. Un lag")
-    print("      alto con la cola vacia significa consumidor atascado, no ocioso.")
-    print("    - 'Consumidores activos': si marca 0 en alguna cola, el consumidor")
-    print("      murio; ahi la cola crece y NO baja.")
+    print("  Como leer los tres paneles:")
+    print("    - 'Queue depth': mensajes esperando. Que suba bajo presion es")
+    print("      SANO. Lo que delata un problema es que NO baje al cesar la carga.")
+    print("    - 'Consumer lag': entregados pero sin confirmar. Lag alto con la")
+    print("      cola vacia significa consumidor atascado, no ocioso.")
+    print("    - 'Consumidores activos': 0 en una cola es consumidor muerto.")
+    print("      Es lo que se acaba de provocar a proposito.")
 
 
 def demo8(token):

@@ -363,7 +363,7 @@ compartidos viven en `pruebas/lib/` (`comun.py`, `carga.py`,
 | 12 | `python pruebas/12_autorecuperacion.py [--nivel reposo\|100k\|500k\|1M] [--servicio X]` | **¿Cuánto tarda en curarse solo?** Mata el proceso (`os._exit(1)`) de 5 servicios y **no vuelve a tocar nada**: cronometra Docker  `/health`  circuito CLOSED. Con `--nivel` se cura **mientras atiende tráfico**, que es el número honesto. Medido: **6 s en reposo, 19 s bajo carga** | 2 / 4 / 6.5 / 8.5 min |
 | 13 | `python pruebas/13_carga_100k_real.py` | **100.000 peticiones REALES**, contadas una a una — no es una etiqueta ni una extrapolación, es el contador. Imprime avance con % y minutos restantes para poder dejarla sola. Sirve además para ver si el throughput se degrada en una sesión larga | **~45 min** |
 | k6 | `python pruebas_k6/correr.py --fase 100k\|500k\|1M` | **Carga con k6** (Go, dentro de la red Docker): el generador de Python topaba en ~105 rps y era ÉL el cuello de botella. Con k6: 166 rps y p95 de 284 ms contra 1.495 ms. Cada corrida escribe la fila completa de la tabla de registro de carga | según fase |
-| 13 | `python pruebas/13_resiliencia_en_vivo.py [--demo 1\|2\|3\|4]` | **4 demos cortas para proyectar en la sustentación.** Cada una dice en consola qué servicio compromete, en qué panel de Grafana se ve, e imprime los **logs reales del Gateway** que lo prueban: sonda activa, timeout+retry, bulkhead y respawn de worker. Medido: el circuito se cierra **solo en 16 s** | ~4 min |
+| 13 | `python pruebas/13_resiliencia_en_vivo.py [--demo N]` | **8 demos cortas para proyectar en la sustentación** (tabla abajo). Cada una dice en consola qué servicio compromete, en qué panel de Grafana se observa, e imprime los **logs reales** que lo prueban | ~1-2 min cada una |
 | 14 | `python pruebas/14_datos_demo.py [--tickets N]` | **Datos de demo.** Crea 3 tickets de soporte en PIURA y lleva el primero por el ciclo completo (diagnóstico con reserva de stock  cobro con garantía). Va por la API, no con INSERTs, así que respeta las reglas de negocio y publica sus eventos. Idempotente | ~15 s |
 | k6-caos | `python pruebas_k6/caos.py --fase 100k\|500k\|1M` | **Caos bajo carga REAL**: k6 empujando ~200 rps mientras se tumban servicios con **Toxiproxy** (se deshabilita su proxy). Mide contención (cero 500), ausencia de cascada, y cuánto tarda cada circuito en cerrarse **solo** por la sonda activa. La conectividad la restaura la prueba; el circuito se recupera sin intervención | según fase |
 | — | `python pruebas/generar_informe.py` | **Genera el informe completo** en `documentacion/informe_de_pruebas.md`: lee la última corrida de cada prueba y arma tabla de carga, caos, auto-recuperación y veredicto. Lo que no se haya corrido sale como *(sin corrida)*, no como cero | ~1 s |
@@ -446,6 +446,25 @@ de caos (hipótesis, métrica observada, evidencia) está en
 que empiece con "/" se lo pases a mano a un runner se lo va a convertir en
 una ruta de Windows — los scripts ya pasan las rutas sin la barra inicial
 y la reponen internamente, ya a salvo.
+
+
+### Qué demuestra cada demo
+
+`python pruebas/13_resiliencia_en_vivo.py --demo N`
+
+| N | Mecanismo | Qué se ve | Resultado medido |
+| :-- | :-- | :-- | :-- |
+| **1** | Sonda activa (circuit breaker) | El circuito abre, se restaura la conectividad y nadie lo toca | Se cierra **solo en 16 s** |
+| **2** | Timeout + retry con backoff | Se inyectan 9 s de latencia; el Gateway corta y reintenta | `intento 1/4, backoff 3,57 s` |
+| **3** | Bulkhead | 40 llamadas concurrentes contra un servicio lento | Las que no caben salen con 503 |
+| **4** | Auto-healing de proceso | Se mata un worker de uvicorn | 12/12 sondeos OK: el maestro lo respawnea |
+| **5** | Idempotencia | El mismo alta 3 veces con la misma clave | **1 sola fila** en la base de datos |
+| **6** | Buffering / backlog | Se para `ticket-service` y el técnico diagnostica igual | El ticket se cierra **solo en 4 s** al volver |
+| **7** | Queue depth y consumer lag | Se paran los consumidores y se sigue publicando | **538 mensajes** acumulados, drenan solos en 10 s |
+| **8** | Circuit breaker completo | Tráfico real contra un servicio caído | Múltiples 503, fail-fast y cierre automático |
+
+Sin `--demo` se ejecutan las ocho seguidas. Cada una restaura lo que tocó, así
+que se pueden lanzar en cualquier orden.
 
 ## Análisis estático con SonarQube
 
