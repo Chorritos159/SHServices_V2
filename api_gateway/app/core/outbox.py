@@ -50,12 +50,21 @@ def crear_tablas() -> None:
 
 
 def encolar(*, idempotency_key: str, servicio: str, metodo: str, path: str,
-            body: bytes, headers: dict, url_interna: str) -> dict:
+            body: bytes, headers: dict, url_interna: str,
+            recibido_en: datetime.datetime | None = None) -> dict:
     """Guarda una escritura no entregada. Devuelve el resumen para el 202.
 
     Idempotente por `idempotency_key`: si ese intento ya estaba encolado, no
     lo duplica y devuelve el registro existente (así el cliente puede reintentar
     el mismo envío sin miedo).
+
+    `recibido_en` es CUÁNDO LLEGÓ la petición al Gateway, no cuándo se encoló, y
+    es lo que fija el orden de la cola. La diferencia importa: si el destino
+    está caído, el Gateway reintenta 4 veces (3+5+8s) antes de encolar, y esos
+    fallos ABREN el circuito. La siguiente petición ya encuentra el circuito
+    abierto, falla al instante y se encola ~14s ANTES que la primera. Se vio con
+    dos técnicos tomando el mismo ticket: ganaba el que pulsó DESPUÉS. Usando el
+    instante de llegada, el orden es el real.
     """
     db = SessionLocal()
     try:
@@ -82,6 +91,8 @@ def encolar(*, idempotency_key: str, servicio: str, metodo: str, path: str,
             headers_json=json.dumps(headers_guardar),
             operacion=describir_operacion(servicio, metodo, path),
             estado=PENDIENTE,
+            creado_en=recibido_en or datetime.datetime.now(
+                datetime.timezone.utc).replace(tzinfo=None),
             proximo_reintento_en=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
         )
         db.add(registro)
@@ -180,6 +191,21 @@ async def drenar_una_vez(microservicios: dict, breakers: dict | None = None) -> 
     ahora = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     db = SessionLocal()
     try:
+        # Servicios con alguna escritura PENDIENTE que aun espera su backoff.
+        # Sus companeras de cola NO pueden adelantarse: si se dejaran pasar, la
+        # peticion que llego despues se entregaria antes, que es justo el fallo
+        # que esto corrige (dos tecnicos tomando el mismo ticket y ganando el
+        # segundo). El filtro de `proximo_reintento_en` sacaba a la bloqueada de
+        # la consulta y la siguiente pasaba a ser la cabeza.
+        esperando = {
+            fila.servicio
+            for fila in db.query(OutboxDB.servicio)
+            .filter(OutboxDB.estado == PENDIENTE)
+            .filter(OutboxDB.proximo_reintento_en != None)  # noqa: E711
+            .filter(OutboxDB.proximo_reintento_en > ahora)
+            .distinct()
+        }
+
         pendientes = (
             db.query(OutboxDB)
             .filter(OutboxDB.estado == PENDIENTE)
@@ -201,7 +227,7 @@ async def drenar_una_vez(microservicios: dict, breakers: dict | None = None) -> 
     entregados = 0
     # Servicios cuya cabeza de cola ya fallo en ESTE ciclo. Ver abajo por que
     # bloquea al resto de su servicio.
-    atascados: set[str] = set()
+    atascados: set[str] = set(esperando)
 
     for p in pendientes:
         # Si el circuito del servicio sigue abierto, no malgastamos el intento.

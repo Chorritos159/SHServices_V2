@@ -1,5 +1,6 @@
 import asyncio
 import os
+import datetime
 import random
 import time
 import uuid
@@ -375,6 +376,12 @@ async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: s
     cuelgue): 503 si el circuito está abierto o la dependencia cae, 504 si hay
     timeout. Actualiza las métricas Prometheus de resiliencia.
     """
+    # Instante en que la peticion LLEGO al Gateway. Es lo que fija el orden en
+    # el outbox si hay que encolarla: los reintentos de abajo pueden tardar
+    # ~16s, y sin esto quien llega despues (y encuentra el circuito ya abierto)
+    # se encola ANTES. Ver la nota en outbox.encolar.
+    recibido_en = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
     breaker = BREAKERS[service]
     timeout = TIMEOUTS.get(service, TIMEOUT_DEFAULT) * TIMEOUT_FACTOR
     # Solo GET/HEAD son seguros de reintentar ante timeout/5xx (idempotentes).
@@ -406,7 +413,7 @@ async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: s
                      "circuito": "OPEN", "trace_id": correlation_id},
             headers={"Retry-After": "5"},
         )
-        return _encolar_o_error(service, path, metodo, body, headers, error_503)
+        return _encolar_o_error(service, path, metodo, body, headers, error_503, recibido_en)
 
     intento = 0
     async with _DummyContext(global_client or httpx.AsyncClient()) as client:
@@ -472,7 +479,7 @@ async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: s
                 # Un timeout en una escritura es ambiguo (¿llegó a procesarse?).
                 # Encolar es seguro: el reintento lleva la MISMA Idempotency-Key,
                 # así que si ya se había procesado NO se duplica.
-                return _encolar_o_error(service, path, metodo, body, headers, error_504)
+                return _encolar_o_error(service, path, metodo, body, headers, error_504, recibido_en)
 
             # TODA la familia de fallos de transporte, no solo ConnectError:
             # ReadError, WriteError, RemoteProtocolError, ProxyError, PoolTimeout...
@@ -517,7 +524,7 @@ async def _proxy_resiliente(service: str, path: str, url_destino: str, metodo: s
                              "circuito": breaker.estado, "trace_id": correlation_id},
                     headers={"Retry-After": "5"},
                 )
-                return _encolar_o_error(service, path, metodo, body, headers, error_503)
+                return _encolar_o_error(service, path, metodo, body, headers, error_503, recibido_en)
 
 # Tareas de fondo (worker del outbox y sonda del breaker). Hay que GUARDAR la
 # referencia: asyncio solo mantiene una referencia débil a la tarea, así que sin
@@ -610,7 +617,8 @@ async def _cerrar_cliente_global():
 
 
 def _encolar_o_error(service: str, path: str, metodo: str, body: bytes,
-                     headers: dict, respuesta_error: JSONResponse) -> JSONResponse:
+                     headers: dict, respuesta_error: JSONResponse,
+                     recibido_en=None) -> JSONResponse:
     """Ante un fallo de INDISPONIBILIDAD (no de negocio): si es una escritura,
     la encola y responde 202 (se enviará sola); si no, devuelve el error tal cual.
     """
@@ -624,6 +632,10 @@ def _encolar_o_error(service: str, path: str, metodo: str, body: bytes,
         idempotency_key=clave, servicio=service, metodo=metodo,
         path=path, body=body, headers=headers,
         url_interna=f"{MICROSERVICIOS[service]}/api/v1/{path}",
+        # El orden de la cola lo fija CUANDO LLEGO la peticion, no cuando se
+        # encola: los reintentos previos pueden tardar ~16s y adelantar a
+        # quien llego despues (ver la nota en outbox.encolar).
+        recibido_en=recibido_en,
     )
     return JSONResponse(status_code=202, content=resumen)
 
